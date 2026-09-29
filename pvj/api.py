@@ -17,7 +17,7 @@ import threading
 import time
 import unicodedata
 
-from . import hardware, netcfg, osc as osc_mod, presets, themes as themes_mod
+from . import hardware, netcfg, osc as osc_mod, presets, streams as streams_mod, themes as themes_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
 from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -177,10 +177,21 @@ class Api:
 
     def status(self, body, device, client):
         temps = hardware.temperatures()
-        return {"player": self.player.status(), "mix": dict(self.mix, **self.settings.data["mix"]),
+        return {"player": self._public_player_status(), "mix": dict(self.mix, **self.settings.data["mix"]),
                 "system": {"board": self.board["kind"], "model": self.board["model"],
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
                 "device": device}
+
+    def _public_player_status(self):
+        """Player status with stream passwords hidden and the saved stream's name added."""
+        status = dict(self.player.status())
+        path = status.get("path")
+        if isinstance(path, str) and "://" in path:
+            for st in self.settings.data.get("streams", []):
+                if st["url"] == path:
+                    status["stream"] = st["name"]
+            status["path"] = streams_mod.redact(path)
+        return status
 
     def _statvfs_free(self):
         path = self.media_dir
@@ -388,6 +399,8 @@ class Api:
     def play(self, body, device, client):
         if "preset" in body:
             return self.play_preset(body, body["preset"])
+        if "stream" in body:
+            return self.play_stream(body)
         if "pad" in body:
             pad = body["pad"]
             if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in pad)):
@@ -425,6 +438,52 @@ class Api:
         else:
             start()
         return {"playing": name}
+
+    def _need_streams(self):
+        if not self.registry.enabled("inputs-srt"):
+            raise ApiError(409, "turn on the Streams module in System first")
+
+    def play_stream(self, body):
+        self._need_streams()
+        sid = body.get("stream")
+        match = [s for s in self.settings.data["streams"] if s["id"] == sid]
+        if not match:
+            raise ApiError(404, "no such stream")
+        self.fader.cancel()
+        self._player_call(self.player.play, [match[0]["url"]], False, None, False, self.spawn)
+        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        return {"playing": match[0]["name"]}
+
+    def get_streams(self, body, device, client):
+        self._need_streams()
+        return {"streams": [{"id": s["id"], "name": s["name"], "url": streams_mod.redact(s["url"]),
+                             "has_login": s["url"] != streams_mod.redact(s["url"])}
+                            for s in self.settings.data["streams"]],
+                "schemes": list(streams_mod.SCHEMES)}
+
+    def set_streams(self, body, device, client):
+        """Add or remove one stream. Saved addresses are never sent back to the panel, so an edit
+        cannot round-trip a hidden password."""
+        self._need_streams()
+        action = body.get("action")
+        with self.settings.lock:
+            items = list(self.settings.data["streams"])
+            try:
+                if action == "add":
+                    if len(items) >= streams_mod.MAX_STREAMS:
+                        raise bad("at most %d streams" % streams_mod.MAX_STREAMS)
+                    items.append(streams_mod.new_entry(body.get("name"), body.get("url")))
+                elif action == "remove":
+                    if not any(s["id"] == body.get("id") for s in items):
+                        raise ApiError(404, "no such stream")
+                    items = [s for s in items if s["id"] != body.get("id")]
+                else:
+                    raise bad("action must be add or remove")
+            except streams_mod.StreamError as e:
+                raise bad(str(e))
+            self.settings.data["streams"] = items
+            self.settings.save()
+        return self.get_streams({}, device, client)
 
     def control(self, body, device, client):
         action = body.get("action")
@@ -738,6 +797,8 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/streams"): ("view", self.get_streams),
+            ("POST", "/api/streams"): ("full", self.set_streams),
             ("GET", "/api/schedule"): ("view", self.get_schedule),
             ("POST", "/api/schedule"): ("full", self.set_schedule),
             ("GET", "/api/network"): ("full", self.get_network),

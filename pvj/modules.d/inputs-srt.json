@@ -1,19 +1,12 @@
 {
   "id": "inputs-srt",
-  "name": "SRT, RTSP, RTMP",
+  "name": "Streams: SRT, RTSP, RTMP",
   "version": "0.1.0",
   "type": "optional",
-  "channel": "stable",
-  "requires": [
-    "core"
-  ],
-  "boards": [
-    "pi3",
-    "pi4",
-    "pi5",
-    "x86"
-  ],
-  "status": "planned",
-  "default_enabled": true,
-  "description": "Open network streams via mpv and ffmpeg."
+  "channel": "beta",
+  "requires": ["core"],
+  "boards": ["pi3", "pi4", "pi5", "x86"],
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Save network stream addresses and play them like clips. Only srt, rtsp, rtsps, rtmp and rtmps addresses are accepted. Needs an mpv built with ffmpeg network support."
 }

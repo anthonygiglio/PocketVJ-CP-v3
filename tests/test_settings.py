@@ -83,6 +83,14 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(data["theme"]["name"], "light")
         self.assertEqual(self.read(self.path + ".bak-v2")["schema"], 2)
 
+    def test_real_migration_from_schema_3_adds_empty_streams(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 3, "schedule": {"enabled": True, "entries": []}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual((data["schema"], data["streams"]), (settings.SCHEMA, []))
+        self.assertTrue(data["schedule"]["enabled"])
+        self.assertEqual(self.read(self.path + ".bak-v3")["schema"], 3)
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

@@ -139,6 +139,19 @@ function startServer() {
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
     await page.click('#osctoggle');
     await page.waitForFunction(() => document.getElementById('oscline').textContent === 'Off');
+    // Streams: switch the module on, reject a bad address, save one with a login (hidden), remove it
+    await page.click('.item:has-text("Streams: SRT") >> button');
+    await page.waitForSelector('#streamempty');
+    await page.fill('#streamname', 'Cam');
+    await page.fill('#streamurl', 'file:///etc/passwd');
+    await page.click('#streamadd');
+    await page.waitForFunction(() => /must start with/.test(document.getElementById('msg').textContent));
+    await page.fill('#streamurl', 'rtsp://admin:hunter2@10.0.0.5/live');
+    await page.click('#streamadd');
+    await page.waitForSelector('.stream-entry:has-text("rtsp://***@10.0.0.5/live")');
+    assert(!(await page.textContent('body')).includes('hunter2'), 'stream password is never shown');
+    await page.click('.stream-entry >> button:has-text("Remove")');
+    await page.waitForSelector('#streamempty');
     // Schedule: switch the module on, add an entry, turn the schedule on and off, remove the entry
     await page.click('.item:has-text("Weekly schedule") >> button');
     await page.waitForSelector('#schedclock');
