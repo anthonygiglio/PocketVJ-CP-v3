@@ -27,8 +27,8 @@ function startServer() {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
     const problems = [];
-    // The 401 before pairing and the 403 for the wrong PIN are provoked on purpose.
-    const expected = /status of (401|403)/;
+    // The 401 before pairing, the 403 for the wrong PIN and the 400 for a refused upload are provoked on purpose.
+    const expected = /status of (400|401|403)/;
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type()) && !expected.test(m.text())) problems.push(m.text()); });
     page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
     const base = 'http://127.0.0.1:' + info.port;
@@ -61,6 +61,20 @@ function startServer() {
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Show');
     await page.click('#black');
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Blackout');
+
+    // Media: upload a file, see it listed, rename it, delete it
+    await page.click('nav >> text=Media');
+    await page.waitForSelector('#uploadbtn');
+    await page.setInputFiles('#filepick', { name: 'from-phone.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(300000, 7) });
+    await page.waitForSelector('.item:has-text("from-phone.mp4") >> text=Rename', { timeout: 8000 });
+    page.once('dialog', (d) => d.accept('renamed-on-phone.mp4'));
+    await page.click('.item:has-text("from-phone.mp4") >> text=Rename');
+    await page.waitForSelector('.item:has-text("renamed-on-phone.mp4")');
+    page.once('dialog', (d) => d.accept());
+    await page.click('.item:has-text("renamed-on-phone.mp4") >> text=Delete');
+    await page.waitForFunction(() => !/renamed-on-phone/.test(document.body.textContent));
+    await page.setInputFiles('#filepick', { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100, 1) });
+    await page.waitForFunction(() => /only video and image files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
 
     // Mix: drag a slider and check the throttle keeps request count sane
     await page.click('nav >> text=Mix');

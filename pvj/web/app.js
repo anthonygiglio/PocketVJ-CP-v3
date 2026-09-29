@@ -86,7 +86,7 @@
     ]).then(function (r) {
       if (r[0].ok) { S.status = r[0].data; S.device = r[0].data.device; }
       if (r[1].ok) S.banks = r[1].data.banks;
-      if (r[2].ok) S.media = r[2].data.files;
+      if (r[2].ok) { S.media = r[2].data.files; S.mediaInfo = r[2].data; }
       if (r[3].ok) S.modules = r[3].data.modules;
       if (r[4].ok) { S.theme = r[4].data.theme; S.themes = r[4].data.available; }
       if (r[5] && r[5].ok) S.devices = r[5].data.devices;
@@ -287,13 +287,72 @@
   }
 
   // ---- media ----------------------------------------------------------
+  function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
+  function refreshMedia() {
+    return api('GET', '/api/media').then(function (r) {
+      if (!r.ok) return;
+      S.media = r.data.files; S.mediaInfo = r.data;
+      if (!S.uploading) render();  // a redraw would wipe the progress bars of uploads still running
+    });
+  }
+  // Results are kept so the redraw after the last upload does not wipe an error message.
+  function note(text) { S.uploadNotes = (S.uploadNotes || []).concat(text).slice(-8); }
+  function uploadFile(file, bar, label) {
+    return new Promise(function (resolve) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/media/upload?name=' + encodeURIComponent(file.name));
+      xhr.setRequestHeader('X-PVJ-Request', '1');
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = function (e) { if (e.lengthComputable) bar.style.width = Math.round(100 * e.loaded / e.total) + '%'; };
+      xhr.onload = function () {
+        var reply = {};
+        try { reply = JSON.parse(xhr.responseText); } catch (e) { /* keep empty */ }
+        label.textContent = file.name + (xhr.status === 200 ? ': done' : ': ' + (reply.error || 'failed (' + xhr.status + ')'));
+        note(label.textContent);
+        if (xhr.status === 200) bar.style.width = '100%';
+        resolve(xhr.status === 200);
+      };
+      xhr.onerror = function () { label.textContent = file.name + ': connection lost'; note(label.textContent); resolve(false); };
+      xhr.send(file);
+    });
+  }
   function media() {
+    var info = S.mediaInfo || {};
+    var full = can('full');
+    var details = info.details || S.media.map(function (n) { return { name: n, size: 0 }; });
+    var uploads = h('div', { class: 'list', id: 'uploads' });
+    (S.uploadNotes || []).forEach(function (t) { uploads.appendChild(h('div', { class: 'item' }, h('div', { class: 'k', text: t }))); });
+    var picker = h('input', { type: 'file', id: 'filepick', multiple: true, hidden: true, 'aria-label': 'Choose video or image files',
+      accept: 'video/*,image/*,.mkv,.mov,.mp4,.avi,.webm,.m4v,.mpg,.mpeg,.ts,.wmv' });
+    picker.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(picker.files);
+      picker.value = '';
+      S.uploading = (S.uploading || 0) + files.length;
+      files.reduce(function (chain, file) {
+        var bar = h('div', {}); var label = h('div', { class: 'k', text: file.name + ' (' + megabytes(file.size) + ')' });
+        uploads.appendChild(h('div', { class: 'item' }, h('div', { class: 'grow' }, label, h('div', { class: 'progress' }, bar))));
+        return chain.then(function () { return uploadFile(file, bar, label); }).then(function () { S.uploading -= 1; });
+      }, Promise.resolve()).then(refreshMedia);
+    });
+    var items = details.map(function (d) {
+      return h('div', { class: 'item' },
+        h('span', {}, d.name, h('br'), h('span', { class: 'k', text: d.size ? megabytes(d.size) : '' })),
+        h('span', { class: 'row' },
+          h('button', { class: 'btn small', text: 'Play', disabled: !can('live'), onclick: function () { act('POST', '/api/play', { file: d.name }, function () { say('Playing ' + d.name); poll(); }); } }),
+          full ? h('button', { class: 'btn small', text: 'Rename', onclick: function () {
+            var to = window.prompt('New name', d.name);
+            if (to && to !== d.name) act('POST', '/api/media/rename', { name: d.name, new: to }, refreshMedia);
+          } }) : null,
+          full ? h('button', { class: 'btn small', text: 'Delete', onclick: function () {
+            if (window.confirm('Delete ' + d.name + '?')) act('POST', '/api/media/delete', { name: d.name }, refreshMedia);
+          } }) : null));
+    });
     return h('div', { class: 'screen' },
-      h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: function () { api('GET', '/api/media').then(function (r) { if (r.ok) { S.media = r.data.files; render(); } }); } })),
-      h('div', { class: 'card' }, h('div', { class: 'list' }, S.media.length ? S.media.map(function (f) {
-        return h('div', { class: 'item' }, h('span', { text: f }),
-          h('button', { class: 'btn small', text: 'Play', disabled: !can('live'), onclick: function () { act('POST', '/api/play', { file: f }, function () { say('Playing ' + f); poll(); }); } }));
-      }) : h('div', { class: 'k', text: 'No clips yet. Copy files into the media folder or plug in a USB drive.' }))),
+      h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: refreshMedia })),
+      full ? h('div', { class: 'card' },
+        h('div', { class: 'k', id: 'freeline', text: (info.free !== undefined ? megabytes(info.free) + ' free' : '') + (info.max_upload ? ' \u00b7 largest file ' + megabytes(info.max_upload) : '') }),
+        picker, h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { picker.click(); } }), uploads) : null,
+      h('div', { class: 'card' }, h('div', { class: 'list' }, items.length ? items : h('div', { class: 'k', text: 'No clips yet. Upload some, or plug in a USB drive.' }))),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }));
   }
 
