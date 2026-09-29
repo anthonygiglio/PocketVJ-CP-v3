@@ -264,12 +264,26 @@ class Player:
         self._set("video-pan-x", max(-3000, min(3000, float(x))) / 1000.0)
         self._set("video-pan-y", max(-3000, min(3000, float(y))) / 1000.0)
 
+    def loop(self, enabled):
+        """Loop the current clip (or the whole playlist when there are several)."""
+        count = self.ipc.request("get_property", "playlist-count") or 0
+        self._set("loop-file", "inf" if (enabled and count <= 1) else "no")
+        self._set("loop-playlist", "inf" if (enabled and count > 1) else "no")
+
+    def mute(self, muted):
+        self._set("mute", bool(muted))
+
+    def rotate(self, degrees):
+        if degrees not in (0, 90, 180, 270):
+            raise PlayerError("rotation must be 0, 90, 180 or 270")
+        self._set("video-rotate", int(degrees))
+
     def status(self):
         if not self.is_running():
             return {"running": False}
         out = {"running": True}
         for key, prop in (("path", "path"), ("position", "time-pos"), ("duration", "duration"),
-                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"),
+                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"), ("muted", "mute"),
                           ("playlist_pos", "playlist-pos"), ("playlist_count", "playlist-count")):
             try:
                 out[key] = self.ipc.request("get_property", prop)

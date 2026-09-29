@@ -62,6 +62,19 @@ class PlayerTest(unittest.TestCase):
         self.assertAlmostEqual(self.player.ipc.request("get_property", "video-pan-x"), 0.5)
         self.assertAlmostEqual(self.player.ipc.request("get_property", "video-pan-y"), -0.25)
 
+    def test_mute_rotate_loop(self):
+        self.player.play([SRC])
+        self.player.mute(True)
+        self.assertTrue(self.player.status()["muted"])
+        self.player.rotate(90)
+        self.assertEqual(self.player.ipc.request("get_property", "video-rotate"), 90)
+        with self.assertRaises(PlayerError):
+            self.player.rotate(45)
+        self.player.loop(False)
+        self.assertEqual(self.player.ipc.request("get_property", "loop-file"), False)
+        self.player.loop(True)
+        self.assertEqual(self.player.ipc.request("get_property", "loop-file"), "inf")
+
     def test_loop_flags(self):
         self.player.play([SRC], loop=True)
         self.assertEqual(self.player.ipc.request("get_property", "loop-file"), "inf")
