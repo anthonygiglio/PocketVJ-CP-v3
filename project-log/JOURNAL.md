@@ -4,6 +4,17 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (streams)
+
+Done:
+- Merged the weekly schedule (#13).
+- Added the Streams module (SRT, RTSP, RTMP): `pvj/streams.py`, `/api/streams`, `{"stream": id}` on `/api/play`, System > Streams card, settings schema 4, `pvj/STREAMS.md`, tests. See D16.
+- Never played a real stream. mpv is not installed on the dev Mac, so nothing here ran against mpv; CI runs the browser test with a headless mpv.
+
+Open:
+- First image build was still running when this was written.
+- Streams need a test with a real SRT/RTSP source on a Pi.
+
 ## 2026-09-29 (scheduler)
 
 Done:

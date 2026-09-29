@@ -197,7 +197,7 @@
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};
     var np = document.getElementById('np');
     if (!np) return;
-    np.textContent = pl.running && pl.path ? base(pl.path) : (pl.running ? 'Player idle' : 'Player not running');
+    np.textContent = pl.running && pl.path ? (pl.stream || base(pl.path)) : (pl.running ? 'Player idle' : 'Player not running');
     var bar = document.getElementById('bar');
     var frac = pl.duration > 0 && pl.position >= 0 ? Math.min(1, pl.position / pl.duration) : 0;
     bar.style.width = Math.round(frac * 100) + '%';
@@ -366,7 +366,7 @@
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
-    cards.push(modulesCard(full));
+    cards.push(modulesCard(full), streamsCard(full));
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -388,6 +388,49 @@
           onclick: function () { act('POST', '/api/modules/' + m.id, { enabled: !m.enabled }, function (d) { S.modules = d.modules; render(); }); } });
         return h('div', { class: 'item' }, h('span', {}, m.name, h('br'), h('span', { class: 'k', text: m.version + ' · ' + note })), b);
       })));
+  }
+  // ---- streams (SRT, RTSP, RTMP) --------------------------------------
+  var streamForm = { name: '', url: '' };  // survives redraws
+  function streamsCard(full) {
+    var body = h('div', { class: 'list', id: 'streambody' });
+    var card = h('div', { class: 'card', id: 'streamcard' }, h('h2', { text: 'Streams' }), body);
+    var mod = S.modules.filter(function (m) { return m.id === 'inputs-srt'; })[0];
+    if (!mod || !mod.enabled) {
+      body.appendChild(h('div', { class: 'k', id: 'streammsg', text: 'Off. Switch on "Streams: SRT, RTSP, RTMP" under Modules above (beta).' }));
+      return card;
+    }
+    function draw(d) {
+      body.textContent = '';
+      if (!d.streams.length) body.appendChild(h('div', { class: 'k', id: 'streamempty', text: 'No streams saved yet.' }));
+      d.streams.forEach(function (st) {
+        body.appendChild(h('div', { class: 'item stream-entry' },
+          h('span', {}, st.name, h('br'), h('span', { class: 'k mono', text: st.url })),
+          h('span', { class: 'row' },
+            h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + st.name, disabled: !can('live'),
+              onclick: function () { act('POST', '/api/play', { stream: st.id }, function () { say('Playing ' + st.name); poll(); }); } }),
+            full ? h('button', { class: 'btn small', text: 'Remove', 'aria-label': 'Remove ' + st.name, onclick: function () {
+              act('POST', '/api/streams', { action: 'remove', id: st.id }, draw);
+            } }) : null)));
+      });
+      if (!full) return;
+      var name = h('input', { class: 'text-input', id: 'streamname', 'aria-label': 'Stream name', placeholder: 'Name', maxlength: 40, value: streamForm.name });
+      var url = h('input', { class: 'text-input mono', id: 'streamurl', 'aria-label': 'Stream address', placeholder: 'srt://192.168.1.20:9000', value: streamForm.url, autocomplete: 'off' });
+      name.addEventListener('input', function () { streamForm.name = name.value; });
+      url.addEventListener('input', function () { streamForm.url = url.value; });
+      body.appendChild(h('div', { class: 'k', text: 'Add a stream: ' + d.schemes.join(', ') + '. A login inside the address is stored on the box and hidden here.' }));
+      body.appendChild(name); body.appendChild(url);
+      body.appendChild(h('button', { class: 'btn on small', id: 'streamadd', text: 'Save stream', onclick: function () {
+        act('POST', '/api/streams', { action: 'add', name: streamForm.name, url: streamForm.url }, function (data) {
+          streamForm.name = ''; streamForm.url = ''; say(''); draw(data);
+        });
+      } }));
+    }
+    api('GET', '/api/streams').then(function (r) {
+      if (!document.getElementById('streamcard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'streammsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
   }
   // ---- schedule -------------------------------------------------------
   var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

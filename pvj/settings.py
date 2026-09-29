@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 3
+SCHEMA = 4
 
 
 class SettingsError(Exception):
@@ -36,6 +36,7 @@ def default_settings():
         "mix": {"transition": "dip", "duration": 1.0},
         "osc": {"enabled": False, "port": 9876, "allow": []},
         "schedule": {"enabled": False, "entries": []},
+        "streams": [],
     }
 
 
@@ -50,7 +51,12 @@ def _v2_to_v3(data):
     data.setdefault("schedule", {"enabled": False, "entries": []})
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3}
+def _v3_to_v4(data):
+    """4: saved network streams (SRT, RTSP, RTMP). None yet."""
+    data.setdefault("streams", [])
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

@@ -49,3 +49,6 @@ Why: keeps history readable and CI as the gate. No history rewriting. Risky feat
 ## D15. The scheduler never replays missed events, and can only do four harmless things
 Why: a Pi has no battery clock, so its time jumps when the network sets it; replaying "missed" entries after a jump could start clips at the wrong moment on a live stage. The scheduler fires only for minutes it watched (short stalls of up to two minutes are caught up) and can only play, stop, blackout or show. Cost: a box that was off at 18:00 does not start the 18:00 entry when it boots at 18:05; use an autostart preset for that. Beta and off by default, like the network module.
 
+## D16. Streams accept only srt, rtsp, rtsps, rtmp and rtmps addresses, and play by saved id
+Why: mpv opens many URL kinds (`file://`, `edl://`, `lavf://`, `ytdl://`), some of which read local files or run helpers, so an open URL box would be a way around the media folder rules. Logins in addresses are hidden everywhere and never round-tripped to the panel. Cost: no http/HLS/UDP streams for now, and no free-form "play this address" over OSC or the API.
+
