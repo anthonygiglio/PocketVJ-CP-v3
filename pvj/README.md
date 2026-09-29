@@ -38,3 +38,12 @@ bin/pvj-selftest --play --json report.json       # on a real device
 ```
 
 Not yet done: the PHP panel and OSC do not call `pvj-player` yet, and the audio, overlay and mapper paths are still legacy.
+
+## Legacy start scripts
+
+`pvj-player start startlessonce05` runs a legacy preset by its old script name. One table in `pvj/presets.py` replaces ~290 scripts (`startless`, `startseamless`, `startlessonce`, `startlesseronce`, `startmaster`, `startmasterone`, `startmasterusb`, each with an optional two-digit index). `tests/test_presets.py` checks that table against every real script in `sync/`; it matches all but two upstream defects:
+
+- `startless` (no number) is a wrapper that loops every file; the preset does the same.
+- `startmaster95` plays `65*` upstream (copy-paste error); the preset plays `95*`.
+
+Not ported yet: slave, stream and wifi presets, network sync between boxes (master presets play locally and print a warning), the "play a slideshow after the video" option, and the audio output flag (`local`, `both`); Pi 5 has no headphone jack, so audio selection needs its own module.
