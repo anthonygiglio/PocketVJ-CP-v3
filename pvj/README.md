@@ -53,3 +53,15 @@ Not ported yet: slave, stream and wifi presets, network sync between boxes (mast
 `install/pvj-player.service` runs `pvj-player serve` under systemd as the account that owns the screen and sound card (`@PVJ_USER@`, `@PVJ_DIR@` are filled in by the installer, which is not written yet). It restarts the player if it dies, and puts the control socket in `/run/pvj`, group-writable for the `pvj` group. The web panel and OSC then run as their own users, join that group, and use `pvj-player play --no-spawn ...` (or the socket directly). A world-accessible runtime directory is refused.
 
 Not verified on a real device: the unit passes `systemd-analyze verify` here, but restart-on-crash, the group permissions and DRM access need a test on a Pi.
+
+## USB drives
+
+`pvj-usb` (run by `pvj-usb@<partition>.service`, started from `install/99-pvj-usb.rules`) mounts each USB partition under `/media/pvj/<label>` and points `/media/usb` at the most recent one, which is what the old `startmasterusb` presets expect. Pulling the drive stops the unit, which unmounts it.
+
+- Read-only by default, with `nosuid,nodev,noexec`; set `PVJ_USB_RW=1` in `/etc/pvj/pvj.env` to allow writing. A drive pulled mid-write is the usual way to corrupt one at a gig.
+- Filesystems: vfat, exfat, ext2/3/4, ntfs (kernel `ntfs3` driver). Anything else is refused.
+- Labels are cleaned to `a-z 0-9 . _ -`; two drives with the same label get `-2`, `-3`.
+- It never touches a disk that also holds the running system, so a mini PC booted from a USB SSD keeps its own disk safe. The old backend mounted `/dev/sda` blindly.
+- `/media/usb` is only replaced if it is already a link; a real folder there (legacy image) is left alone.
+
+Tested with a fake `blkid`/`mount` (label cleaning, options, collisions, refusal cases, unmount). Not tested: a real udev event, real filesystems, or the udev rule itself (`udevadm` was not available to verify its syntax).

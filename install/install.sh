@@ -74,6 +74,8 @@ REAL=$([ -z "$STAGE" ] && echo 1 || echo 0)
 
 ETC="$ROOT/etc/pvj"
 UNIT="$ROOT/etc/systemd/system/pvj-player.service"
+USB_UNIT="$ROOT/etc/systemd/system/pvj-usb@.service"
+USB_RULE="$ROOT/etc/udev/rules.d/99-pvj-usb.rules"
 BIN_LINKS="$ROOT/usr/local/bin"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/pvj/__init__.py")"
 [ -n "$VERSION" ] || die "cannot read version from pvj/__init__.py"
@@ -84,10 +86,11 @@ uninstall() {
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 		systemctl disable --now pvj-player.service 2>/dev/null || true
 	fi
-	run rm -f "$UNIT" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest"
+	run rm -f "$UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb"
 	run rm -rf "${ROOT}${PREFIX:?}"
 	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
+	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && command -v udevadm >/dev/null; then udevadm control --reload || true; fi
 	log "done. Kept ${ETC} and media unless --purge; users and group pvj are left in place."
 }
 
@@ -154,6 +157,7 @@ run chmod -R go-w "$ROOT$PREFIX"
 run mkdir -p "$BIN_LINKS"
 run ln -sfn "$PREFIX/current/bin/pvj-player" "$BIN_LINKS/pvj-player"
 run ln -sfn "$PREFIX/current/bin/pvj-selftest" "$BIN_LINKS/pvj-selftest"
+run ln -sfn "$PREFIX/current/bin/pvj-usb" "$BIN_LINKS/pvj-usb"
 
 # --- settings and media (never overwritten if they exist) -----------------
 run mkdir -p "$ETC"
@@ -163,6 +167,8 @@ if [ ! -e "$ETC/pvj.env" ]; then
 # Settings for the pvj-player service. Edit, then: sudo systemctl restart pvj-player
 PVJ_MEDIA_DIR=$MEDIA
 PVJ_USB_DIR=/media/usb
+# USB drives are mounted read-only under /media/pvj/<label>. Set to 1 to allow writing.
+PVJ_USB_RW=0
 ENV
 	fi
 else
@@ -180,6 +186,13 @@ run mkdir -p "$(dirname "$UNIT")"
 if [ "$DRY" = 0 ]; then
 	sed -e "s|@PVJ_USER@|$PVJ_USER|g" -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-player.service" > "$UNIT"
 fi
+# USB automount: udev starts pvj-usb@<partition>.service, which mounts by label.
+run mkdir -p "$(dirname "$USB_RULE")"
+if [ "$DRY" = 0 ]; then
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-usb@.service" > "$USB_UNIT"
+	cp "$SRC/install/99-pvj-usb.rules" "$USB_RULE"
+fi
+if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && command -v udevadm >/dev/null; then udevadm control --reload || true; fi
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
 	systemctl enable pvj-player.service
