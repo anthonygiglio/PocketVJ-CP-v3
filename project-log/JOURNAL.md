@@ -4,6 +4,16 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (later)
+
+Done:
+- Confirmed the local `docs/html/_images/01_Hdmi_connect.jpg` deletion was a side effect of #9 on a case-insensitive disk; restored it from git, tree clean. The file is still referenced by `docs/html/01_first_steps.html`.
+- Confirmed the `legacy-v3` tag is on GitHub at the right commit.
+
+Open:
+- Deleting the 11 merged remote branches was blocked by the permission classifier; the owner should delete them (all 11 PRs are merged).
+- Still nothing verified on real hardware; the image has never been built.
+
 ## 2026-09-29
 
 Done:
