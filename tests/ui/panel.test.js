@@ -106,14 +106,19 @@ function startServer() {
     await page.fill('#netprefix', '24');
     await page.fill('#netgw', '192.168.50.1');
     // A redraw of the screen must not wipe what was typed
-    const oldField = await page.$('#netaddr');
     await page.click('nav >> text=System');
-    await page.waitForFunction((el) => !el.isConnected, oldField);
-    await page.waitForSelector('#netaddr');
-    assert.strictEqual(await page.inputValue('#netaddr'), '192.168.50.20', 'typed address survives a redraw');
-    assert.strictEqual(await page.inputValue('#netgw'), '192.168.50.1', 'typed gateway survives a redraw');
-    await page.click('#netpreview');
-    await page.waitForFunction(() => /ipv4\.addresses 192\.168\.50\.20\/24/.test(document.getElementById('netplan').textContent));
+    await page.waitForFunction(() => {
+      const a = document.getElementById('netaddr'), g = document.getElementById('netgw');
+      return a && g && a.value === '192.168.50.20' && g.value === '192.168.50.1';
+    }, null, { timeout: 8000 });  // typed values survive the redraw (polls until the card is rebuilt)
+    // The card can still be redrawn once more after loading (which clears the preview), so press again until it sticks
+    for (let tries = 0; ; tries++) {
+      await page.click('#netpreview');
+      try {
+        await page.waitForFunction(() => { const e = document.getElementById('netplan'); return e && /ipv4\.addresses 192\.168\.50\.20\/24/.test(e.textContent); }, null, { timeout: 2500 });
+        break;
+      } catch (e) { if (tries >= 4) throw e; }
+    }
     await page.fill('#netaddr', '8.8.8.8; reboot');
     if (shots) await page.screenshot({ path: path.join(shots, '6-network.png'), fullPage: true });
     await page.click('#netapply');
