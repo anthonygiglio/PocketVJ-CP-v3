@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import hardware, osc as osc_mod, themes as themes_mod
+from . import hardware, netd as netd_mod, osc as osc_mod, themes as themes_mod
 from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
@@ -38,7 +38,7 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
-def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
+def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
     static = {"/": "index.html"}
     if os.path.isdir(web_dir):
         for name in os.listdir(web_dir):
@@ -279,6 +279,7 @@ def build(env=None, player=None):
     rundir = player.rundir
     api = Api(player, settings, auth, registry, themes, media, board,
               spawn=env.get("PVJ_DEV_SPAWN") == "1", on_pin=lambda pin: write_pin_file(rundir, pin))
+    api.net = netd_mod.NetdClient(os.path.join(rundir, "netd.sock"))
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     write_pin_file(rundir, auth.current_pin)

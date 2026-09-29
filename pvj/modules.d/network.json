@@ -1,0 +1,12 @@
+{
+  "id": "network",
+  "name": "Network settings (wired)",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": ["core"],
+  "boards": ["pi3", "pi4", "pi5", "x86"],
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Change the wired network from the panel: DHCP, fixed address, direct cable (link-local) or serve addresses. Every change reverts by itself unless confirmed. Needs NetworkManager."
+}

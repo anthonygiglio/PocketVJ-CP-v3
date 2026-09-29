@@ -99,6 +99,8 @@ Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the
 
 **OSC** is built, off by default, receive-only and limited to private networks; see [OSC.md](OSC.md) for the addresses and the safety rules.
 
+**Wired network settings** (System, Network; a beta module, off by default, needs NetworkManager): DHCP, fixed address, direct cable (link-local) or serving addresses, changed through a small root helper (`pvj-netd`) with a confirm-or-revert timer so a wrong setting cannot lock you out; see [NETWORK.md](NETWORK.md). Never tested against a real NetworkManager or a real device.
+
 **Known limits:** "Restart player now" asks the player to quit and relies on systemd to bring it back; if mpv is completely wedged and ignores that request, restart it from a terminal (`sudo systemctl restart pvj-player`), because the panel runs unprivileged by design. A hardware watchdog for that case is not built. The server caps simultaneous connections at 64 and closes any connection after 30 seconds, so a flood of slow clients cannot exhaust it, but it does not replace a private network.
 
 **Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), MIDI, DMX and Art-Net, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.

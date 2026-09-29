@@ -13,10 +13,11 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 
 .shell { display: flex; flex-direction: column; min-height: 100dvh; max-width: 1100px; margin: 0 auto; }
-.screen { flex: 1; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+.screen { flex: 1; padding: 16px 16px 96px; display: flex; flex-direction: column; gap: 12px; }
 .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .top h1 { margin: 0; font-size: 18px; }
 .pill { border: 1.5px solid var(--ln); border-radius: 20px; padding: 4px 10px; background: var(--cd); white-space: nowrap; }
+.card, .screen, .shell { min-width: 0; }
 .card { border: 1.5px solid var(--ln); background: var(--cd); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .card h2 { margin: 0; font-size: 15px; }
 .row { display: flex; gap: 8px; align-items: center; }
@@ -78,3 +79,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
   .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 }
 @media (prefers-reduced-motion: no-preference) { .progress div { transition: width .2s linear; } }
+
+/* Command previews and other long unbroken text must wrap, never widen the page. */
+pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.list .item > span, .list .item > div { min-width: 0; overflow-wrap: anywhere; }

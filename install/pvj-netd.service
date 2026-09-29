@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=NXLX PocketVJ network helper (root, NetworkManager only)
+After=NetworkManager.service
+Wants=NetworkManager.service
+# Nothing to do on a system without NetworkManager.
+ConditionPathExists=/usr/bin/nmcli
+StartLimitIntervalSec=0
+
+[Service]
+# The panel is unprivileged and cannot run nmcli. It asks this helper over a socket in /run/pvj
+# (group "pvj"); the helper re-validates every request and only runs fixed nmcli commands.
+User=root
+Group=pvj
+UMask=0007
+RuntimeDirectory=pvj
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
+# Saved state of an unconfirmed change: root only, survives a reboot (never in /run/pvj, which
+# every member of group pvj can write).
+StateDirectory=pvj-netd
+StateDirectoryMode=0700
+Environment=PVJ_RUNTIME_DIR=/run/pvj
+ExecStart=@PVJ_DIR@/bin/pvj-netd
+Restart=always
+RestartSec=2
+
+# Sandbox: it needs the system D-Bus socket and /run/pvj, nothing else.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/run/pvj /var/lib/pvj-netd
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

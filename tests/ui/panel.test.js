@@ -97,6 +97,43 @@ function startServer() {
     await page.waitForSelector('text=Modules');
     assert(await page.isVisible('text=NDI'), 'NDI module listed');
     assert(await page.isVisible('text=Not built yet'), 'planned modules are labelled');
+    // Network: switch the module on, preview, apply, watch the countdown, confirm
+    await page.click('.item:has-text("Network settings") >> button');
+    await page.waitForSelector('#netiface');
+    await page.waitForSelector('#netcard >> text=192.168.1.9/24', { timeout: 8000 });  // the address arrives after the card first draws
+    await page.click('#netmodes >> text=Fixed address');
+    await page.fill('#netaddr', '192.168.50.20');
+    await page.fill('#netprefix', '24');
+    await page.fill('#netgw', '192.168.50.1');
+    // A redraw of the screen must not wipe what was typed
+    await page.click('nav >> text=System');
+    await page.waitForFunction(() => {
+      const a = document.getElementById('netaddr'), g = document.getElementById('netgw');
+      return a && g && a.value === '192.168.50.20' && g.value === '192.168.50.1';
+    }, null, { timeout: 8000 });  // typed values survive the redraw (polls until the card is rebuilt)
+    // The card can still be redrawn once more after loading (which clears the preview), so press again until it sticks
+    for (let tries = 0; ; tries++) {
+      await page.click('#netpreview');
+      try {
+        await page.waitForFunction(() => { const e = document.getElementById('netplan'); return e && /ipv4\.addresses 192\.168\.50\.20\/24/.test(e.textContent); }, null, { timeout: 2500 });
+        break;
+      } catch (e) { if (tries >= 4) throw e; }
+    }
+    await page.fill('#netaddr', '8.8.8.8; reboot');
+    if (shots) await page.screenshot({ path: path.join(shots, '6-network.png'), fullPage: true });
+    await page.click('#netapply');
+    await page.waitForFunction(() => /address/i.test(document.getElementById('netresult').textContent) && document.getElementById('netresult').className.includes('err'));
+    await page.fill('#netaddr', '192.168.50.20');
+    await page.click('#netapply');
+    await page.waitForSelector('#netpending');
+    await page.waitForFunction(() => /Reverts in \d+ s/.test(document.getElementById('netleft').textContent));
+    await page.click('#netconfirm');
+    await page.waitForSelector('#netiface');
+    await page.click('#netmodes >> text=Direct cable');
+    await page.click('#netapply');
+    await page.waitForSelector('#netpending');
+    await page.click('#netrevert');
+    await page.waitForSelector('#netiface');
     await page.waitForSelector('#oscline:has-text("Off")');
     await page.click('#osctoggle');
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
@@ -131,7 +168,7 @@ function startServer() {
     console.log('panel browser test: OK');
   } catch (e) {
     failed = true;
-    console.error('FAILED:', e.message);
+    console.error('FAILED:', e.message, (e.stack || '').split('\n').filter(function (l) { return /panel.test.js/.test(l); }).slice(0, 2).join(' | '));
   } finally {
     await browser.close();
     server.kill();

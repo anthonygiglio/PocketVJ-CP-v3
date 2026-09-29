@@ -91,7 +91,8 @@ class Registry:
 
     def list(self):
         out = []
-        for m in self.manifests.values():
+        order = {"core": 0, "optional": 1, "legacy": 2}
+        for m in sorted(self.manifests.values(), key=lambda m: (order.get(m["type"], 9), m["name"].lower())):
             out.append({"id": m["id"], "name": m["name"], "version": m["version"], "type": m["type"],
                         "channel": m["channel"], "status": m["status"], "description": m.get("description", ""),
                         "supported": self._supported(m), "locked": m["type"] == "core",

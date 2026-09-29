@@ -44,7 +44,7 @@ class ImageStageTest(unittest.TestCase):
         with open(os.path.join(IMAGE, "stage-pvj", "00-install-pvj", "01-run.sh")) as f:
             text = f.read()
         self.assertIn("install.sh --offline --no-start", text)
-        self.assertIn("systemctl enable pvj-player.service pvj-web.service", text)
+        self.assertIn("systemctl enable pvj-player.service pvj-web.service pvj-netd.service", text)
 
     def test_workflow_copies_what_the_installer_needs(self):
         wf = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "image.yml")
