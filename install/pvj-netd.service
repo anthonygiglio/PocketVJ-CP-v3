@@ -3,6 +3,7 @@
 [Unit]
 Description=NXLX PocketVJ network helper (root, NetworkManager only)
 After=NetworkManager.service
+Wants=NetworkManager.service
 # Nothing to do on a system without NetworkManager.
 ConditionPathExists=/usr/bin/nmcli
 StartLimitIntervalSec=0
@@ -16,6 +17,10 @@ UMask=0007
 RuntimeDirectory=pvj
 RuntimeDirectoryMode=0770
 RuntimeDirectoryPreserve=yes
+# Saved state of an unconfirmed change: root only, survives a reboot (never in /run/pvj, which
+# every member of group pvj can write).
+StateDirectory=pvj-netd
+StateDirectoryMode=0700
 Environment=PVJ_RUNTIME_DIR=/run/pvj
 ExecStart=@PVJ_DIR@/bin/pvj-netd
 Restart=always
@@ -27,7 +32,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/run/pvj
+PrivateDevices=yes
+ReadWritePaths=/run/pvj /var/lib/pvj-netd
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes

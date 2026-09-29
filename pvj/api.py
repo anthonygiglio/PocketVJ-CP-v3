@@ -648,13 +648,27 @@ class Api:
                 reply = self.net.request({"cmd": "status"})
                 if reply.get("ok"):
                     out["pending"], out["helper"] = reply.get("pending"), True
+                    out["reverting"] = bool(reply.get("reverting"))
             except netcfg.NetError:
                 pass
         return out
 
+    def _networks_in_use(self):
+        import ipaddress
+        out = []
+        for entry in self._ip_json():
+            if entry.get("ifname") == "lo":
+                continue
+            for a in entry.get("addr_info", []):
+                try:
+                    out.append((entry.get("ifname"), ipaddress.ip_network("%s/%s" % (a["local"], a["prefixlen"]), strict=False)))
+                except (KeyError, ValueError):
+                    pass
+        return out
+
     def _checked_config(self, body):
         try:
-            return netcfg.validate(body, netcfg.list_interfaces(self._sysfs))
+            return netcfg.validate(body, netcfg.list_interfaces(self._sysfs), self._networks_in_use())
         except netcfg.NetError as e:
             raise bad(str(e))
 
@@ -668,7 +682,7 @@ class Api:
                     return {"config": reply["config"], "commands": reply["commands"]}
             except netcfg.NetError:
                 pass
-        return {"config": cfg, "commands": [" ".join(c) for c in netcfg.plan(cfg, False)]}
+        return {"config": cfg, "commands": netcfg.preview(netcfg.plan(cfg))}
 
     def apply_network(self, body, device, client):
         self._need_network_module()
@@ -677,11 +691,10 @@ class Api:
         return {"pending": reply.get("pending"), "config": cfg}
 
     def confirm_network(self, body, device, client):
-        self._need_network_module()
+        # not gated on the module: a pending change must always be confirmable or revertable
         return {"pending": self._netd({"cmd": "confirm"}).get("pending")}
 
     def revert_network(self, body, device, client):
-        self._need_network_module()
         return {"pending": self._netd({"cmd": "revert"}).get("pending")}
 
     # --- routing -------------------------------------------------------

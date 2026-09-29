@@ -38,7 +38,7 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
-def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
+def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
     static = {"/": "index.html"}
     if os.path.isdir(web_dir):
         for name in os.listdir(web_dir):

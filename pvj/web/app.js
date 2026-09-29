@@ -433,6 +433,7 @@
           h('span', { class: 'mono', text: (i.addresses || []).join(', ') || '-' })));
       });
       if (!d.helper) body.appendChild(h('div', { class: 'k', id: 'netmsg', text: 'The network helper (pvj-netd) is not running: changes cannot be applied. You can still preview them.' }));
+      if (d.reverting) { body.appendChild(h('div', { class: 'msg err', id: 'netreverting', role: 'alert', text: 'Restoring the previous network. If this page stops responding, reconnect to the box at its old address.' })); netTimer = setTimeout(refresh, 2000); }
       if (d.pending) return drawPending(d.pending);
       var wired = d.interfaces.filter(function (i) { return i.kind === 'wired'; });
       if (!wired.length) return body.appendChild(h('div', { class: 'k', text: 'No wired network port found.' }));

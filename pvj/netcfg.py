@@ -6,6 +6,10 @@ Nothing here runs a command. `plan()` turns a validated request into argument li
 `pvj/netd.py` executes them as root. Changing the network of the box you are controlling over that network
 can lock you out, so every change is *pending* until confirmed and reverts by itself when the timer runs out.
 
+A change never edits the confirmed profile in place. It is built as a separate *candidate* profile
+(`pvj-<iface>-try`, not autoconnect) and brought up; the old profile is untouched, so a power cut, a
+crash or a timeout always leaves the old network intact. Only Confirm swaps the candidate in.
+
 Modes (wired first, as on the approved Network wireframe):
   dhcp       take an address from a router
   static     a fixed address, optional gateway and DNS
@@ -16,11 +20,15 @@ Modes (wired first, as on the approved Network wireframe):
 import ipaddress
 import os
 import re
+import shlex
 
 MODES = ("dhcp", "static", "linklocal", "share")
 IFACE = re.compile(r"[a-z][a-z0-9_.-]{0,14}")
 DEFAULT_SHARE = ("10.42.0.1", 24)
 MIN_REVERT, MAX_REVERT, DEFAULT_REVERT = 20, 300, 60
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_ZERO_NET = ipaddress.ip_network("0.0.0.0/8")
+_RFC1918 = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
 
 
 class NetError(Exception):
@@ -29,6 +37,10 @@ class NetError(Exception):
 
 def profile_name(iface):
     return "pvj-" + iface
+
+
+def candidate_name(iface):
+    return "pvj-%s-try" % iface
 
 
 def list_interfaces(sysfs="/sys/class/net"):
@@ -73,8 +85,17 @@ def _ipv4(text, what):
     return addr
 
 
-def validate(request, interfaces):
-    """Return a clean config dict or raise NetError. `interfaces` is list_interfaces()."""
+def _reject_odd_unicast(addr, what):
+    if (addr.is_unspecified or addr.is_multicast or addr.is_loopback or addr.is_link_local or addr.is_reserved
+            or addr in _ZERO_NET):
+        raise NetError("%s %s cannot be used on a network" % (what, addr))
+
+
+def validate(request, interfaces, others=()):
+    """Return a clean config dict or raise NetError.
+
+    `interfaces` is list_interfaces(); `others` is [(iface, ip_network), ...] for the subnets already in use
+    on this box, so a new address cannot collide with another port's network."""
     if not isinstance(request, dict):
         raise NetError("request must be an object")
     iface = request.get("iface")
@@ -94,18 +115,20 @@ def validate(request, interfaces):
     cfg = {"iface": iface, "mode": mode, "revert_seconds": revert}
     if mode in ("static", "share"):
         default = DEFAULT_SHARE if mode == "share" else (None, None)
-        text = request.get("address", default[0])
-        addr = _ipv4(text, "address")
+        addr = _ipv4(request.get("address", default[0]), "address")
         prefix = request.get("prefix", default[1])
-        if isinstance(prefix, bool) or not isinstance(prefix, int) or not 8 <= prefix <= 30:
-            raise NetError("prefix must be a whole number from 8 to 30 (24 means 255.255.255.0)")
-        if addr.is_unspecified or addr.is_multicast or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-            raise NetError("address %s cannot be used on a network" % addr)
+        low = 16 if mode == "share" else 8  # a served pool bigger than a /16 would flood a whole network
+        if isinstance(prefix, bool) or not isinstance(prefix, int) or not low <= prefix <= 30:
+            raise NetError("prefix must be a whole number from %d to 30 (24 means 255.255.255.0)" % low)
+        _reject_odd_unicast(addr, "address")
         net = ipaddress.ip_network("%s/%d" % (addr, prefix), strict=False)
         if addr == net.network_address or addr == net.broadcast_address:
             raise NetError("address %s is the network or broadcast address of %s" % (addr, net))
-        if mode == "share" and not addr.is_private:
-            raise NetError("the box may only serve addresses from a private range (10.x, 172.16-31.x, 192.168.x)")
+        if mode == "share" and not any(addr in n for n in _RFC1918):
+            raise NetError("the box may only serve addresses from 10.x, 172.16-31.x or 192.168.x")
+        for other_iface, other_net in others:
+            if other_iface != iface and net.overlaps(other_net):
+                raise NetError("%s overlaps %s, which %s already uses; pick a different range" % (net, other_net, other_iface))
         cfg.update(address=str(addr), prefix=prefix)
         if mode == "static":
             gw = request.get("gateway")
@@ -120,8 +143,9 @@ def validate(request, interfaces):
             servers = []
             for d in dns:
                 da = _ipv4(d, "DNS server")
-                if da.is_unspecified or da.is_multicast or da.is_loopback or da.is_reserved:
-                    raise NetError("DNS server %s cannot be used" % da)
+                _reject_odd_unicast(da, "DNS server")
+                if str(da) in servers or da == addr:
+                    raise NetError("DNS server %s is listed twice or is this box's own address" % da)
                 servers.append(str(da))
             cfg["dns"] = servers
     return cfg
@@ -144,60 +168,55 @@ def settings_for(cfg, autoconnect="yes"):
     return s
 
 
-def plan(cfg, profile_exists, previous_active=None):
-    """The nmcli commands for a validated config, as argument lists."""
-    name = profile_name(cfg["iface"])
-    # autoconnect stays OFF until the change is confirmed: if the box reboots while a change is
-    # waiting, it comes back on the old network instead of on one nobody has confirmed.
-    if profile_exists:
-        cmds = [["nmcli", "connection", "modify", name] + settings_for(cfg, autoconnect="no")]
-    else:
-        cmds = [["nmcli", "connection", "add", "type", "ethernet", "ifname", cfg["iface"], "con-name", name]
-                + settings_for(cfg, autoconnect="no")]
-    cmds.append(["nmcli", "connection", "up", name])
+def plan(cfg):
+    """Commands that build the CANDIDATE profile and bring it up. The confirmed profile is not touched."""
+    name = candidate_name(cfg["iface"])
+    # autoconnect stays OFF until confirmed: a reboot now falls back to the old network.
+    return [["nmcli", "connection", "add", "type", "ethernet", "ifname", cfg["iface"], "con-name", name]
+            + settings_for(cfg, autoconnect="no"),
+            ["nmcli", "connection", "up", "id", name]]
+
+
+def confirm_plan(iface, old_exists):
+    """Swap the candidate in. Order matters: it first becomes the preferred autoconnect profile, and only
+    then is the old one removed, so at no moment is there no autoconnect profile."""
+    cand, final = candidate_name(iface), profile_name(iface)
+    cmds = [["nmcli", "connection", "modify", "id", cand, "connection.autoconnect", "yes",
+             "connection.autoconnect-priority", "101"]]
+    if old_exists:
+        cmds.append(["nmcli", "connection", "delete", "id", final])
+    cmds.append(["nmcli", "connection", "modify", "id", cand, "connection.id", final])
     return cmds
 
 
-def confirm_plan(iface):
-    """Make a confirmed change permanent: it now wins at boot."""
-    return [["nmcli", "connection", "modify", profile_name(iface), "connection.autoconnect", "yes",
-             "connection.autoconnect-priority", "100"]]
+def revert_plan(iface, candidate_exists, previous_uuid):
+    """Undo an unconfirmed change: drop the candidate and re-activate what was active before."""
+    cmds = []
+    if candidate_exists:
+        name = candidate_name(iface)
+        cmds += [["nmcli", "connection", "down", "id", name], ["nmcli", "connection", "delete", "id", name]]
+    if previous_uuid:
+        if not UUID.fullmatch(previous_uuid):
+            raise NetError("bad connection id in the saved state")
+        cmds.append(["nmcli", "connection", "up", "uuid", previous_uuid])
+    return cmds
 
 
-SNAPSHOT_FIELDS = ("ipv4.method", "ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv6.method",
-                   "connection.autoconnect", "connection.autoconnect-priority")
-
-
-def parse_show(text):
-    """`nmcli -t -f ... connection show NAME` prints KEY:VALUE lines; values may contain colons."""
-    out = {}
-    for line in text.splitlines():
-        if ":" in line:
-            k, v = line.split(":", 1)
-            out[k.strip()] = v.strip().replace("\\:", ":")
-    return out
-
-
-def revert_plan(iface, snapshot, previous_active):
-    """Commands that undo an apply. `snapshot` is None if our profile did not exist before."""
-    name = profile_name(iface)
-    if snapshot is None:
-        cmds = [["nmcli", "connection", "down", name], ["nmcli", "connection", "delete", name]]
-        if previous_active and previous_active != name:
-            cmds.append(["nmcli", "connection", "up", previous_active])
-        return cmds
-    args = []
-    for key in SNAPSHOT_FIELDS:
-        args += [key, snapshot.get(key, "")]
-    return [["nmcli", "connection", "modify", name] + args, ["nmcli", "connection", "up", name]]
+def preview(cmds):
+    """Human-readable commands: shell-quoted so empty and spaced arguments stay visible."""
+    return [shlex.join(c) for c in cmds]
 
 
 class PendingChange:
-    """A change waiting for confirmation. `tick(now)` says whether the deadline has passed."""
+    """A change waiting for confirmation."""
 
-    def __init__(self, cfg, snapshot, previous_active, started, seconds):
-        self.cfg, self.snapshot, self.previous_active = cfg, snapshot, previous_active
+    def __init__(self, cfg, previous_uuid, started, seconds):
+        self.cfg, self.previous_uuid, self.seconds = cfg, previous_uuid, seconds
         self.deadline = started + seconds
+
+    def restart(self, now):
+        """The countdown starts when the new network is up, not when the commands began."""
+        self.deadline = now + self.seconds
 
     def seconds_left(self, now):
         return max(0, int(self.deadline - now + 0.999))

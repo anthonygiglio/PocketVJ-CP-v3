@@ -55,6 +55,39 @@ class ValidateTest(unittest.TestCase):
             with self.assertRaises(NetError, msg=repr(sec)):
                 ok(revert_seconds=sec)
 
+    def test_review_findings_on_ranges(self):
+        for addr in ("0.1.2.3", "0.255.0.1"):
+            for mode in ("static", "share"):
+                with self.assertRaises(NetError, msg=addr + mode):
+                    ok(mode=mode, address=addr, prefix=24)
+        for addr in ("192.0.2.1", "198.18.0.1", "192.0.0.5", "100.64.0.1", "172.32.0.1", "11.0.0.1"):
+            with self.assertRaises(NetError, msg=addr):  # a served pool must be RFC 1918
+                ok(mode="share", address=addr, prefix=24)
+        for prefix in (8, 12, 15):
+            with self.assertRaises(NetError, msg=prefix):  # a pool bigger than a /16 would flood a network
+                ok(mode="share", address="10.0.0.1", prefix=prefix)
+        self.assertEqual(ok(mode="share", address="172.16.5.1", prefix=16)["prefix"], 16)
+        self.assertEqual(ok(mode="static", address="100.64.0.5", prefix=24)["address"], "100.64.0.5")  # CGNAT is fine as a fixed address
+
+    def test_dns_rules(self):
+        base = dict(mode="static", address="192.168.1.20", prefix=24)
+        for dns in (["169.254.169.254"], ["0.1.2.3"], ["1.1.1.1", "1.1.1.1"], ["192.168.1.20"], ["224.0.0.1"]):
+            with self.assertRaises(NetError, msg=repr(dns)):
+                ok(dns=dns, **base)
+        self.assertEqual(ok(dns=["1.1.1.1", "9.9.9.9"], **base)["dns"], ["1.1.1.1", "9.9.9.9"])
+
+    def test_a_new_range_may_not_overlap_another_ports_network(self):
+        import ipaddress
+        others = [("wlan0", ipaddress.ip_network("10.5.0.0/24")), ("eth0", ipaddress.ip_network("192.168.1.0/24"))]
+        req = {"iface": "eth0", "mode": "static", "address": "10.5.0.9", "prefix": 24}
+        with self.assertRaises(NetError) as cm:
+            netcfg.validate(req, IFACES, others)
+        self.assertIn("wlan0", str(cm.exception))
+        with self.assertRaises(NetError):
+            netcfg.validate({"iface": "eth0", "mode": "share", "address": "10.5.0.1", "prefix": 16}, IFACES, others)
+        # its own current network is fine to keep or change
+        self.assertEqual(netcfg.validate(dict(req, address="192.168.1.77"), IFACES, others)["address"], "192.168.1.77")
+
     def test_interface_and_mode_rules(self):
         for iface in ("wlan0", "eth9", "lo", "", None, "eth0; reboot", "../eth0", "ETH0", "eth0 ", "a" * 40):
             with self.assertRaises(NetError, msg=repr(iface)):
@@ -67,56 +100,55 @@ class ValidateTest(unittest.TestCase):
 
 
 class PlanTest(unittest.TestCase):
+    UUID = "0b3c2f57-7d0a-4a5e-9d6a-1f2e3d4c5b6a"
+
     def props(self, cmd):
-        i = cmd.index("con-name") + 2 if "con-name" in cmd else 4
-        rest = cmd[i:]
+        rest = cmd[cmd.index("con-name") + 2:]
         return dict(zip(rest[::2], rest[1::2]))
 
-    def test_new_static_profile_commands(self):
+    def test_candidate_profile_commands_leave_the_confirmed_profile_alone(self):
         cfg = ok(mode="static", address="192.168.50.20", prefix=24, gateway="192.168.50.1", dns=["1.1.1.1"])
-        cmds = netcfg.plan(cfg, profile_exists=False)
+        cmds = netcfg.plan(cfg)
         self.assertEqual(cmds[0][:9], ["nmcli", "connection", "add", "type", "ethernet", "ifname", "eth0",
-                                       "con-name", "pvj-eth0"])
+                                       "con-name", "pvj-eth0-try"])
         p = self.props(cmds[0])
         self.assertEqual((p["ipv4.method"], p["ipv4.addresses"], p["ipv4.gateway"], p["ipv4.dns"]),
                          ("manual", "192.168.50.20/24", "192.168.50.1", "1.1.1.1"))
-        self.assertEqual(p["connection.autoconnect-priority"], "100")
-        self.assertEqual(p["connection.autoconnect"], "no")  # not permanent until confirmed
-        self.assertEqual(cmds[1], ["nmcli", "connection", "up", "pvj-eth0"])
-        self.assertEqual(netcfg.confirm_plan("eth0"), [["nmcli", "connection", "modify", "pvj-eth0",
-                                                        "connection.autoconnect", "yes",
-                                                        "connection.autoconnect-priority", "100"]])
+        self.assertEqual(p["connection.autoconnect"], "no")  # a reboot now falls back to the old network
+        self.assertEqual(cmds[1], ["nmcli", "connection", "up", "id", "pvj-eth0-try"])
+        self.assertFalse(any("pvj-eth0" in a and not a.endswith("-try") for c in cmds for a in c if a.startswith("pvj-")))
 
-    def test_modify_existing_profile_and_each_mode(self):
+    def test_each_mode(self):
         expect = {"dhcp": "auto", "linklocal": "link-local", "share": "shared"}
         for mode, method in expect.items():
-            cmds = netcfg.plan(ok(mode=mode), profile_exists=True)
-            self.assertEqual(cmds[0][:4], ["nmcli", "connection", "modify", "pvj-eth0"])
-            self.assertEqual(self.props(cmds[0])["ipv4.method"], method)
+            self.assertEqual(self.props(netcfg.plan(ok(mode=mode))[0])["ipv4.method"], method)
 
     def test_no_shell_and_nothing_user_supplied_outside_validated_fields(self):
         cfg = ok(mode="static", address="192.168.50.20", prefix=24)
-        for cmd in netcfg.plan(cfg, False):
+        for cmd in netcfg.plan(cfg) + netcfg.confirm_plan("eth0", True) + netcfg.revert_plan("eth0", True, self.UUID):
             self.assertIsInstance(cmd, list)
             self.assertTrue(all(isinstance(a, str) and "\n" not in a and ";" not in a for a in cmd), cmd)
 
-    def test_revert_plans(self):
-        fresh = netcfg.revert_plan("eth0", None, "Wired connection 1")
-        self.assertEqual(fresh, [["nmcli", "connection", "down", "pvj-eth0"], ["nmcli", "connection", "delete", "pvj-eth0"],
-                                 ["nmcli", "connection", "up", "Wired connection 1"]])
-        snap = {"ipv4.method": "manual", "ipv4.addresses": "10.0.0.5/24", "ipv4.gateway": "", "ipv4.dns": "",
-                "ipv6.method": "auto", "connection.autoconnect": "yes", "connection.autoconnect-priority": "100"}
-        back = netcfg.revert_plan("eth0", snap, None)
-        self.assertEqual(back[0][:4], ["nmcli", "connection", "modify", "pvj-eth0"])
-        self.assertIn("10.0.0.5/24", back[0])
-        self.assertEqual(back[1], ["nmcli", "connection", "up", "pvj-eth0"])
+    def test_confirm_swaps_in_the_candidate_without_ever_leaving_no_autoconnect_profile(self):
+        first = netcfg.confirm_plan("eth0", old_exists=True)
+        self.assertEqual([c[3] if c[2] != "modify" else "modify" for c in first], ["modify", "id", "modify"])
+        self.assertEqual(first[0][3:6], ["id", "pvj-eth0-try", "connection.autoconnect"])
+        self.assertEqual(first[1], ["nmcli", "connection", "delete", "id", "pvj-eth0"])  # only after the candidate autoconnects
+        self.assertEqual(first[2][3:7], ["id", "pvj-eth0-try", "connection.id", "pvj-eth0"])
+        self.assertEqual(len(netcfg.confirm_plan("eth0", old_exists=False)), 2)
 
-    def test_parse_show_keeps_colons_in_values(self):
-        text = "ipv4.method:manual\nipv4.dns:1.1.1.1,8.8.8.8\nipv6.addresses:fe80\\:\\:1/64\n"
-        got = netcfg.parse_show(text)
-        self.assertEqual(got["ipv4.method"], "manual")
-        self.assertEqual(got["ipv4.dns"], "1.1.1.1,8.8.8.8")
-        self.assertEqual(got["ipv6.addresses"], "fe80::1/64")
+    def test_revert_drops_the_candidate_and_reactivates_the_previous_connection_by_uuid(self):
+        self.assertEqual(netcfg.revert_plan("eth0", True, self.UUID),
+                         [["nmcli", "connection", "down", "id", "pvj-eth0-try"],
+                          ["nmcli", "connection", "delete", "id", "pvj-eth0-try"],
+                          ["nmcli", "connection", "up", "uuid", self.UUID]])
+        self.assertEqual(netcfg.revert_plan("eth0", False, None), [])
+        for bad in ("--ask", "id", "Wired connection 1", "0b3c2f57", self.UUID + "x"):
+            with self.assertRaises(NetError, msg=bad):
+                netcfg.revert_plan("eth0", True, bad)
+
+    def test_preview_keeps_empty_and_spaced_arguments_visible(self):
+        self.assertEqual(netcfg.preview([["nmcli", "x", "", "a b"]]), ["nmcli x '' 'a b'"])
 
 
 class InterfaceListTest(unittest.TestCase):
@@ -153,12 +185,14 @@ class InterfaceListTest(unittest.TestCase):
 
 
 class PendingTest(unittest.TestCase):
-    def test_deadline(self):
-        p = netcfg.PendingChange({}, None, None, started=100.0, seconds=60)
+    def test_deadline_and_restart(self):
+        p = netcfg.PendingChange({}, None, started=100.0, seconds=60)
         self.assertEqual(p.seconds_left(100.0), 60)
         self.assertEqual(p.seconds_left(159.2), 1)
         self.assertFalse(p.expired(159.9))
         self.assertTrue(p.expired(160.0))
+        p.restart(200.0)  # the countdown restarts once the new network is up
+        self.assertEqual(p.seconds_left(200.0), 60)
 
 
 if __name__ == "__main__":

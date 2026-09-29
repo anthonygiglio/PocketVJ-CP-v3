@@ -9,8 +9,23 @@ pending until confirmed and is reverted automatically when the timer runs out, w
 when this daemon restarts, or when the box reboots (the profile is not autoconnect until confirmed).
 """
 
+"""pvj-netd: the small root helper that changes the wired network on behalf of the unprivileged panel.
+
+The panel (user pvj-web) cannot and must not run nmcli. It sends one JSON line over a Unix socket in
+/run/pvj (group pvj); this daemon re-validates everything with pvj.netcfg, runs only the fixed nmcli
+commands that come out of it (argument lists, never a shell), and keeps a safety net:
+
+* a change is built as a separate candidate profile; the confirmed profile is never edited in place
+* it is pending until confirmed, and is undone when the timer runs out, when a command fails, when this
+  daemon restarts, and when the box reboots (the candidate is not autoconnect until confirmed)
+* an undo that fails is retried until it works, and never reported as done before it is
+* the saved state lives in a root-only directory (never in /run/pvj, which group members can write)
+"""
+
+import ipaddress
 import json
 import os
+import re
 import socket
 import socketserver
 import struct
@@ -22,26 +37,32 @@ from . import netcfg
 from .netcfg import NetError
 
 MAX_LINE = 4096
-COMMAND_TIMEOUT = 30
+UP_TIMEOUT = 20          # `connection up` may wait for DHCP; the panel request must outlast the total below
+OTHER_TIMEOUT = 10
+MAX_REVERT_TRIES = 20
+REVERT_RETRY_SECONDS = 3
 
 
 class NetService:
-    def __init__(self, runner=subprocess.run, clock=time.monotonic, sysfs="/sys/class/net", state_file=None,
-                 wall=time.time):
-        self.runner, self.clock, self.sysfs, self.state_file, self.wall = runner, clock, sysfs, state_file, wall
+    def __init__(self, runner=subprocess.run, clock=time.monotonic, sysfs="/sys/class/net", state_dir=None,
+                 log=print):
+        self.runner, self.clock, self.sysfs, self.log = runner, clock, sysfs, log
+        self.state_file = os.path.join(state_dir, "net-pending.json") if state_dir else None
         self.pending = None
+        self._revert_job = None
         self.lock = threading.RLock()
 
     # --- running commands ------------------------------------------------
-    def _run(self, argv):
-        assert isinstance(argv, list) and argv[0] == "nmcli"
+    def _run(self, argv, timeout=None):
+        assert isinstance(argv, list) and argv[0] in ("nmcli", "ip")
+        if timeout is None:
+            timeout = UP_TIMEOUT if argv[:3] == ["nmcli", "connection", "up"] else OTHER_TIMEOUT
         try:
-            r = self.runner(argv, capture_output=True, text=True, timeout=COMMAND_TIMEOUT)
+            return self.runner(argv, capture_output=True, text=True, timeout=timeout)
         except FileNotFoundError:
-            raise NetError("NetworkManager (nmcli) is not installed on this system")
+            raise NetError("%s is not installed on this system" % argv[0])
         except subprocess.TimeoutExpired:
-            raise NetError("nmcli did not answer in %d seconds" % COMMAND_TIMEOUT)
-        return r
+            raise NetError("%s did not answer in %d seconds" % (argv[0], timeout))
 
     def _must(self, argv):
         r = self._run(argv)
@@ -49,124 +70,197 @@ class NetService:
             raise NetError((r.stderr or r.stdout or "nmcli failed").strip()[:300])
         return r.stdout
 
-    # --- state -------------------------------------------------------------
-    def _active_connection(self, iface):
-        r = self._run(["nmcli", "-t", "-f", "NAME,DEVICE", "connection", "show", "--active"])
+    # --- what NetworkManager and the kernel say ------------------------------
+    def _active_uuid(self, iface):
+        r = self._run(["nmcli", "-t", "-f", "UUID,DEVICE", "connection", "show", "--active"])
         if r.returncode != 0:
             return None
         for line in r.stdout.splitlines():
-            name, _, dev = line.rpartition(":")
-            if dev == iface:
-                return name.replace("\\:", ":")
+            uuid, _, dev = line.partition(":")
+            if dev == iface and netcfg.UUID.fullmatch(uuid):
+                return uuid
         return None
 
-    def _snapshot(self, iface):
-        name = netcfg.profile_name(iface)
-        r = self._run(["nmcli", "-t", "-f", ",".join(netcfg.SNAPSHOT_FIELDS), "connection", "show", name])
-        return netcfg.parse_show(r.stdout) if r.returncode == 0 else None
+    def _exists(self, name):
+        return self._run(["nmcli", "-t", "-f", "connection.id", "connection", "show", "id", name]).returncode == 0
 
+    def _others(self):
+        """(interface, network) for every address in use, so a new range cannot collide with one."""
+        try:
+            r = self._run(["ip", "-j", "-4", "addr", "show"])
+            data = json.loads(r.stdout) if r.returncode == 0 else []
+        except (NetError, ValueError):
+            return []
+        out = []
+        for entry in data:
+            name = entry.get("ifname")
+            if name == "lo":
+                continue
+            for a in entry.get("addr_info", []):
+                try:
+                    out.append((name, ipaddress.ip_network("%s/%s" % (a["local"], a["prefixlen"]), strict=False)))
+                except (KeyError, ValueError):
+                    pass
+        return out
+
+    def _validated(self, request):
+        return netcfg.validate(request, netcfg.list_interfaces(self.sysfs), self._others())
+
+    # --- public operations ---------------------------------------------------------
     def status(self):
         with self.lock:
             p = self.pending
-            return {"interfaces": netcfg.list_interfaces(self.sysfs),
+            return {"interfaces": netcfg.list_interfaces(self.sysfs), "reverting": self._revert_job is not None,
                     "pending": None if p is None else {"iface": p.cfg["iface"], "mode": p.cfg["mode"],
                                                        "seconds_left": p.seconds_left(self.clock())}}
 
     def plan(self, request):
-        cfg = netcfg.validate(request, netcfg.list_interfaces(self.sysfs))
-        exists = self._snapshot(cfg["iface"]) is not None
-        return {"config": cfg, "commands": [" ".join(c) for c in netcfg.plan(cfg, exists)]}
+        cfg = self._validated(request)
+        return {"config": cfg, "commands": netcfg.preview(netcfg.plan(cfg))}
 
     def apply(self, request):
         with self.lock:
-            if self.pending:
-                raise NetError("a change is already waiting for confirmation; confirm or revert it first")
-            cfg = netcfg.validate(request, netcfg.list_interfaces(self.sysfs))
-            active = self._active_connection(cfg["iface"])
-            snapshot = self._snapshot(cfg["iface"])
-            self.pending = netcfg.PendingChange(cfg, snapshot, active, self.clock(), cfg["revert_seconds"])
-            self._save_state()
+            if self.pending or self._revert_job:
+                raise NetError("a change is already waiting for confirmation (or being undone); wait or revert it first")
+            cfg = self._validated(request)
+            iface = cfg["iface"]
+            previous = self._active_uuid(iface)
+            self.pending = netcfg.PendingChange(cfg, previous, self.clock(), cfg["revert_seconds"])
+            self._save_state("pending")
             try:
-                for cmd in netcfg.plan(cfg, snapshot is not None):
+                if self._exists(netcfg.candidate_name(iface)):  # a leftover from an earlier crash
+                    self._run(["nmcli", "connection", "delete", "id", netcfg.candidate_name(iface)])
+                for cmd in netcfg.plan(cfg):
                     self._must(cmd)
             except NetError as e:
-                self._revert_locked()
-                raise NetError("could not apply (%s); the previous setup was restored" % e)
+                self._begin_revert()
+                undone = self._attempt_revert()
+                raise NetError("could not apply (%s); %s" % (e, "the previous setup was restored" if undone
+                                                             else "restoring the previous setup is still being retried"))
+            self.pending.restart(self.clock())  # the countdown starts now that the new network is up
             return self.status()
 
     def confirm(self):
         with self.lock:
             if not self.pending:
                 raise NetError("nothing is waiting for confirmation")
-            for cmd in netcfg.confirm_plan(self.pending.cfg["iface"]):
+            iface = self.pending.cfg["iface"]
+            old_exists = self._exists(netcfg.profile_name(iface))
+            for cmd in netcfg.confirm_plan(iface, old_exists):
                 self._must(cmd)
             self.pending = None
-            self._save_state()
+            self._save_state(None)
             return self.status()
 
     def revert(self):
         with self.lock:
             if not self.pending:
                 raise NetError("nothing to revert")
-            self._revert_locked()
+            self._begin_revert()
+            self._attempt_revert()
             return self.status()
 
-    def _revert_locked(self):
+    # --- undoing, with retries ----------------------------------------------------------
+    def _begin_revert(self):
         p, self.pending = self.pending, None
-        self._save_state()
-        if p is None:
-            return
-        for cmd in netcfg.revert_plan(p.cfg["iface"], p.snapshot, p.previous_active):
+        self._revert_job = {"iface": p.cfg["iface"], "uuid": p.previous_uuid, "tries": 0, "next": 0}
+        self._save_state("reverting")
+
+    def _attempt_revert(self):
+        """Run the undo. True only when every command really succeeded; otherwise it stays queued."""
+        job = self._revert_job
+        if job is None:
+            return True
+        ok = True
+        try:
+            cmds = netcfg.revert_plan(job["iface"], self._exists(netcfg.candidate_name(job["iface"])), job["uuid"])
+        except NetError as e:
+            self.log("pvj-netd: cannot plan the undo: %s" % e)
+            self._revert_job = None
+            self._save_state(None)
+            return False
+        for cmd in cmds:
             try:
-                self._run(cmd)  # keep going: bring back as much as possible
+                r = self._run(cmd)
             except NetError:
-                pass
+                ok = False
+                continue
+            if r.returncode != 0 and cmd[2] != "down":  # taking an already-down profile down may complain
+                ok = False
+        job["tries"] += 1
+        job["next"] = self.clock() + REVERT_RETRY_SECONDS
+        if ok:
+            self._revert_job = None
+            self._save_state(None)
+            return True
+        if job["tries"] >= MAX_REVERT_TRIES:
+            self.log("pvj-netd: GAVE UP undoing a network change after %d tries; state kept for a restart" % job["tries"])
+            self._revert_job = None  # the state file stays, so the next start tries again
+        return False
 
     def tick(self):
-        """Called about once a second. Returns True if it reverted an unconfirmed change."""
+        """About once a second. Returns True on the tick that finished undoing an unconfirmed change."""
         with self.lock:
-            if self.pending and self.pending.expired(self.clock()):
-                self._revert_locked()
-                return True
-            return False
+            if self._revert_job is None:
+                if self.pending and self.pending.expired(self.clock()):
+                    self._begin_revert()
+                else:
+                    return False
+            elif self.clock() < self._revert_job["next"]:
+                return False
+            return self._attempt_revert()
 
-    # --- surviving a restart ---------------------------------------------
-    def _save_state(self):
+    # --- surviving a restart or a reboot -----------------------------------------------
+    def _save_state(self, phase):
         if not self.state_file:
             return
-        if self.pending is None:
+        if phase is None:
             try:
                 os.unlink(self.state_file)
             except OSError:
                 pass
             return
-        p = self.pending
-        data = {"cfg": p.cfg, "snapshot": p.snapshot, "previous_active": p.previous_active}
+        job = self._revert_job
+        data = {"phase": phase, "iface": (job["iface"] if job else self.pending.cfg["iface"]),
+                "previous_uuid": (job["uuid"] if job else self.pending.previous_uuid)}
         tmp = self.state_file + ".tmp"
-        with open(tmp, "w") as f:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(data, f)
-        os.chmod(tmp, 0o600)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, self.state_file)
 
     def recover(self):
-        """At start-up: an unconfirmed change left by a crash is undone, because nobody confirmed it."""
+        """At start-up (including after a reboot): undo whatever was left unconfirmed. The saved state is
+        checked strictly first: only an interface name and a connection UUID are ever taken from it."""
         if not self.state_file or not os.path.exists(self.state_file):
             return False
         try:
             with open(self.state_file) as f:
                 d = json.load(f)
-            self.pending = netcfg.PendingChange(d["cfg"], d["snapshot"], d["previous_active"], self.clock(), 0)
+            iface, uuid = d["iface"], d["previous_uuid"]
+            if not isinstance(iface, str) or not netcfg.IFACE.fullmatch(iface):
+                raise ValueError("bad interface")
+            if uuid is not None and not (isinstance(uuid, str) and netcfg.UUID.fullmatch(uuid)):
+                raise ValueError("bad connection id")
         except (OSError, ValueError, KeyError, TypeError):
+            self.log("pvj-netd: ignoring an unreadable or invalid saved state")
             try:
                 os.unlink(self.state_file)
             except OSError:
                 pass
             return False
         with self.lock:
-            self._revert_locked()
+            self._revert_job = {"iface": iface, "uuid": uuid, "tries": 0, "next": 0}
+            self._attempt_revert()
         return True
 
-    # --- request dispatch --------------------------------------------------
+    # --- request dispatch --------------------------------------------------------------------
     def handle(self, message):
         try:
             if not isinstance(message, dict):
@@ -233,7 +327,7 @@ class _Handler(socketserver.StreamRequestHandler):
 class NetdClient:
     """Used by the panel: one request, one reply."""
 
-    def __init__(self, path, timeout=40):
+    def __init__(self, path, timeout=60):
         self.path, self.timeout = path, timeout
 
     def request(self, message):
@@ -255,6 +349,20 @@ class NetdClient:
             s.close()
 
 
+def safe_state_dir():
+    """A directory only root can touch, or None (then no restart safety net, said loudly)."""
+    path = os.environ.get("STATE_DIRECTORY") or "/var/lib/pvj-netd"
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        st = os.stat(path)
+        if st.st_uid == os.geteuid() and st.st_mode & 0o077 == 0 and not os.path.islink(path):
+            return path
+    except OSError:
+        pass
+    print("pvj-netd: WARNING: %s is not private; pending changes will not survive a restart" % path, flush=True)
+    return None
+
+
 def main(argv=None):
     import grp
     import pwd
@@ -266,9 +374,9 @@ def main(argv=None):
         allowed.add(pwd.getpwnam("pvj-web").pw_uid)
     except KeyError:
         pass
-    service = NetService(state_file=os.path.join(rundir, "net-pending.json"))
+    service = NetService(state_dir=safe_state_dir(), log=lambda m: print(m, flush=True))
     if service.recover():
-        print("pvj-netd: undid a network change that was never confirmed", flush=True)
+        print("pvj-netd: found an unconfirmed network change from before the restart and undid it", flush=True)
     server = NetServer(os.path.join(rundir, "netd.sock"), service, lambda uid: uid in allowed)
     try:
         os.chown(server.server_address, 0, grp.getgrnam("pvj").gr_gid)

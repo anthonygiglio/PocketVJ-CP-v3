@@ -725,7 +725,7 @@ class NetworkApiTest(ServerBase):
         st, plan, _ = self.call("POST", "/api/network/plan", self.STATIC, token=self.token)
         self.assertEqual(st, 200)
         self.assertTrue(any("192.168.50.20/24" in c for c in plan["commands"]))
-        self.assertNotIn("pvj-eth0", self.nm.profiles)  # a plan changes nothing
+        self.assertNotIn("pvj-eth0-try", self.nm.profiles)  # a plan changes nothing
         st, body, _ = self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
         self.assertEqual((st, body["pending"]["iface"]), (200, "eth0"))
         self.assertEqual(self.call("POST", "/api/network/apply", {"iface": "eth0", "mode": "dhcp"}, token=self.token)[0], 409)
@@ -759,9 +759,26 @@ class NetworkApiTest(ServerBase):
         self.assertEqual((st, body["helper"]), (200, False))
         self.assertEqual(self.call("POST", "/api/network/plan", self.STATIC, token=self.token)[0], 200)  # local preview
 
+    def test_a_pending_change_can_still_be_confirmed_or_reverted_after_the_module_is_switched_off(self):
+        self.enable()
+        self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
+        self.assertEqual(self.call("POST", "/api/modules/network", {"enabled": False}, token=self.token)[0], 200)
+        self.assertEqual(self.call("GET", "/api/network", token=self.token)[0], 409)  # new work is gated
+        self.assertEqual(self.call("POST", "/api/network/apply", self.STATIC, token=self.token)[0], 409)
+        self.assertEqual(self.call("POST", "/api/network/revert", {}, token=self.token)[0], 200)  # but undoing is not
+        self.assertEqual(self.nm.active, "Wired connection 1")
+
+    def test_a_range_used_by_another_port_is_a_400(self):
+        self.enable()
+        self.api._ip_json = lambda: [{"ifname": "wlan0", "addr_info": [{"family": "inet", "local": "10.5.0.2", "prefixlen": 24}]}]
+        st, body, _ = self.call("POST", "/api/network/apply", dict(self.STATIC, address="10.5.0.9", gateway="10.5.0.1"),
+                                token=self.token)
+        self.assertEqual(st, 400)
+        self.assertIn("wlan0", body["error"])
+
     def test_failed_apply_reports_the_restored_state(self):
         self.enable()
-        self.nm.fail_on = "connection up pvj-eth0"
+        self.nm.fail_on = "connection up id pvj-eth0-try"
         st, body, _ = self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
         self.assertEqual(st, 409)
         self.assertIn("previous setup was restored", body["error"])
