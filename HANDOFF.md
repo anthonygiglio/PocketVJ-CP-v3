@@ -2,7 +2,7 @@
      SPDX-License-Identifier: Apache-2.0 -->
 # Hand-off notes
 
-For a new person or a new claude session picking this up cold. Read this, then [README.md](README.md), [ROADMAP.md](ROADMAP.md) and [pvj/README.md](pvj/README.md).
+For a new person or a new claude session picking this up cold. Read this, then the [project log](project-log/README.md) (decisions, lessons, journal), [README.md](README.md), [ROADMAP.md](ROADMAP.md) and [pvj/README.md](pvj/README.md).
 
 ## What this is
 
