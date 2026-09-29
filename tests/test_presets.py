@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Checks the preset table against every real legacy script in sync/."""
 import glob
 import os

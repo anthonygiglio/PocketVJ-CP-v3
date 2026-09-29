@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """The control API: pure request handling, no sockets.
 
 `Api.handle(method, path, body, device, client)` returns (status, payload). The

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Versioned settings store with automatic migration.
 
 One JSON file holds pads, paired devices, module switches and the theme. It is

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Safe updates and rollback.
 
 A release is a signed tar.gz bundle. `apply` checks it (SHA-256, an OpenSSH

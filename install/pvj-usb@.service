@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 [Unit]
 Description=Mount USB drive %I for PocketVJ
 # Stops (and unmounts) when the device disappears.

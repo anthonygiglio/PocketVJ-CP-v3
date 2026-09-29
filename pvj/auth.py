@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Device pairing and access control.
 
 * A 4-digit PIN (shown on the box) pairs a phone or tablet and yields a token.

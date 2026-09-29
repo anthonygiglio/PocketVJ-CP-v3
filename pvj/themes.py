@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Themes are token files: seven colours in a small JSON file.
 
 Built-in themes live in pvj/themes.d; user themes are dropped into the add-ons

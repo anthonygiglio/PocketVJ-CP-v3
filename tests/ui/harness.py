@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Start the real panel with a headless mpv behind it, for browser tests.
 
 Prints one JSON line {"port": ..., "pin": ...} once it is listening.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 # NXLX PocketVJ installer. Idempotent: run it again to update or repair.
 #
 #   sudo install/install.sh [options]
@@ -47,7 +49,7 @@ while [ $# -gt 0 ]; do
 	--dry-run) DRY=1; shift ;;
 	--uninstall) UNINSTALL=1; shift ;;
 	--purge) PURGE=1; shift ;;
-	-h | --help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+	-h | --help) sed -n '4,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
 	*) die "unknown option $1 (try --help)" ;;
 	esac
 done

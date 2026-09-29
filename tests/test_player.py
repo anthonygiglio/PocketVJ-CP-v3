@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Runs the real mpv headless (null video and audio). Skipped if mpv is missing."""
 import os
 import shutil

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Module manifests and the enable/disable registry.
 
 Each optional feature is a module described by a small JSON manifest, so features

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 [Unit]
 Description=NXLX PocketVJ web panel and control API
 After=network.target pvj-player.service

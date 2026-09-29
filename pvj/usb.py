@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """USB drive automount by label, called from a udev-triggered systemd unit.
 
 Replaces mountusb.sh (which mounted sda1 and sda2 on the same folder) and the

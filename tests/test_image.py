@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Static checks of the pi-gen stage. It cannot be built here: see image/README.md."""
 import os
 import subprocess

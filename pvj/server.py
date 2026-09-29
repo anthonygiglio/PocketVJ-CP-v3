@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """HTTP front end for the control API and the web panel (standard library only).
 
 Security model, in one place:
