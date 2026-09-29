@@ -158,7 +158,7 @@ class Api:
 
     # --- handlers ------------------------------------------------------
     def hello(self, body, device, client):
-        return {"name": "NXLX PocketVJ", "paired": bool(device), "board": self.board["kind"]}
+        return {"name": "nxlx.mastercontrol", "paired": bool(device), "board": self.board["kind"]}
 
     def pair(self, body, device, client):
         try:

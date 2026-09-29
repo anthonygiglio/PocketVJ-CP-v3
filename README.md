@@ -1,6 +1,6 @@
-# NXLX PocketVJ
+# nxlx.mastercontrol
 
-A modernization of PocketVJ CP v3, a control panel for playing, mixing and mapping video on small computers. It is built for artists who run visuals at gigs: raves, concerts and installations.
+**nxlx.mastercontrol** is a project of NXLX.Systems. It began as a fork of PocketVJ CP v3 (the repository was formerly named `PocketVJ-CP-v3`, after the last version maintained upstream). It is a modernization of that control panel, a control panel for playing, mixing and mapping video on small computers. It is built for artists who run visuals at gigs: raves, concerts and installations.
 
 > **Status: work in progress.** The `master` branch still holds the legacy v3 code, which targets Raspberry Pi 3B+ on Raspbian Jessie. The state before the fork work began is tagged `legacy-v3`. Do not expose the legacy code to an untrusted network; see [SECURITY.md](SECURITY.md).
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 NXLX and contributors
 # SPDX-License-Identifier: Apache-2.0
 [Unit]
-Description=NXLX PocketVJ web panel and control API
+Description=nxlx.mastercontrol web panel and control API
 After=network.target pvj-player.service
 Wants=pvj-player.service
 StartLimitIntervalSec=0
