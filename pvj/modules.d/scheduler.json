@@ -1,0 +1,12 @@
+{
+  "id": "scheduler",
+  "name": "Weekly schedule",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": ["core"],
+  "boards": ["pi3", "pi4", "pi5", "x86"],
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Play a clip, stop, or black out or show the screen at set times on chosen days. Uses the box's clock, so set the time zone and check the clock first."
+}

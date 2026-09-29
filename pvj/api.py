@@ -121,6 +121,7 @@ class Api:
         self._media_lock = threading.Lock()   # rename, delete and publishing an upload never interleave
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
+        self.scheduler = None     # Scheduler or None
 
     # --- helpers -------------------------------------------------------
     def _apply_opacity(self, percent):
@@ -606,6 +607,27 @@ class Api:
         self.settings.save()
         return self.osc.status()
 
+    # --- schedule ------------------------------------------------------
+    def _need_scheduler(self):
+        if self.scheduler is None or not self.registry.enabled("scheduler"):
+            raise ApiError(409, "turn on the Scheduler module in System first")
+
+    def get_schedule(self, body, device, client):
+        self._need_scheduler()
+        return self.scheduler.status()
+
+    def set_schedule(self, body, device, client):
+        from . import scheduler as scheduler_mod
+        self._need_scheduler()
+        try:
+            clean = scheduler_mod.validate(body)
+        except scheduler_mod.ScheduleError as e:
+            raise bad(str(e))
+        with self.settings.lock:
+            self.settings.data["schedule"] = clean
+            self.settings.save()
+        return self.scheduler.status()
+
     # --- network (wired) -----------------------------------------------
     @staticmethod
     def _run_ip():
@@ -716,6 +738,8 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/schedule"): ("view", self.get_schedule),
+            ("POST", "/api/schedule"): ("full", self.set_schedule),
             ("GET", "/api/network"): ("full", self.get_network),
             ("POST", "/api/network/plan"): ("full", self.plan_network),
             ("POST", "/api/network/apply"): ("full", self.apply_network),

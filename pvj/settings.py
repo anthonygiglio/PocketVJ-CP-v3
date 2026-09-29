@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 2
+SCHEMA = 3
 
 
 class SettingsError(Exception):
@@ -35,6 +35,7 @@ def default_settings():
         "theme": {"name": "dark-stage", "accent": None},
         "mix": {"transition": "dip", "duration": 1.0},
         "osc": {"enabled": False, "port": 9876, "allow": []},
+        "schedule": {"enabled": False, "entries": []},
     }
 
 
@@ -44,7 +45,12 @@ def _v1_to_v2(data):
     data.setdefault("osc", {"enabled": False, "port": 9876, "allow": []})
 
 
-MIGRATIONS = {1: _v1_to_v2}
+def _v2_to_v3(data):
+    """3: weekly schedule. Off, and empty."""
+    data.setdefault("schedule", {"enabled": False, "entries": []})
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

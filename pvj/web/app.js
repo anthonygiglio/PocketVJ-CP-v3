@@ -367,7 +367,7 @@
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
     cards.push(modulesCard(full));
-    if (full) cards.push(networkCard(), oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
+    if (full) cards.push(scheduleCard(), networkCard(), oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
       if (!S.device) return;
@@ -388,6 +388,80 @@
           onclick: function () { act('POST', '/api/modules/' + m.id, { enabled: !m.enabled }, function (d) { S.modules = d.modules; render(); }); } });
         return h('div', { class: 'item' }, h('span', {}, m.name, h('br'), h('span', { class: 'k', text: m.version + ' · ' + note })), b);
       })));
+  }
+  // ---- schedule -------------------------------------------------------
+  var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  var schedForm = { time: '18:00', days: [0, 1, 2, 3, 4, 5, 6], action: 'play', file: '', label: '' };  // survives redraws
+  function scheduleCard() {
+    var body = h('div', { class: 'list', id: 'schedbody' });
+    var card = h('div', { class: 'card', id: 'schedcard' }, h('h2', { text: 'Schedule' }), body);
+    var mod = S.modules.filter(function (m) { return m.id === 'scheduler'; })[0];
+    if (!mod || !mod.enabled) {
+      body.appendChild(h('div', { class: 'k', id: 'schedmsg', text: 'Off. Switch on "Weekly schedule" under Modules above (beta).' }));
+      return card;
+    }
+    function save(cfg, done) {
+      api('POST', '/api/schedule', { enabled: cfg.enabled, entries: cfg.entries }).then(function (r) {
+        if (!r.ok) return say(r.data.error || 'Could not save the schedule', true);
+        say(''); draw(r.data); if (done) done();
+      });
+    }
+    function describe(e) {
+      var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'stop' ? 'Stop' : e.action === 'blackout' ? 'Blackout' : 'Show screen';
+      return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · ' + what;
+    }
+    function draw(d) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'schedclock', text: 'Box clock: ' + d.now + ' (' + d.timezone + '). Times use this clock; check it before a show.' }));
+      body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'schedtoggle', 'aria-pressed': d.enabled ? 'true' : 'false',
+        text: d.enabled ? 'Schedule is on. Turn off' : 'Turn schedule on',
+        onclick: function () { save({ enabled: !d.enabled, entries: d.entries }); } }));
+      if (!d.entries.length) body.appendChild(h('div', { class: 'k', id: 'schedempty', text: 'No entries yet.' }));
+      d.entries.forEach(function (e) {
+        var last = d.last[e.id];
+        body.appendChild(h('div', { class: 'item sched-entry' },
+          h('span', {}, (e.label ? e.label + ': ' : '') + describe(e),
+            last ? h('br') : null, last ? h('span', { class: 'k', text: 'Last run ' + last.at + (last.ok ? '' : ' failed: ' + last.message) }) : null),
+          h('button', { class: 'btn small', text: 'Remove', 'aria-label': 'Remove ' + describe(e), onclick: function () {
+            save({ enabled: d.enabled, entries: d.entries.filter(function (x) { return x.id !== e.id; }) });
+          } })));
+      });
+      var time = h('input', { class: 'text-input mono', id: 'schedtime', type: 'time', 'aria-label': 'Time', value: schedForm.time });
+      time.addEventListener('input', function () { schedForm.time = time.value; });
+      var days = h('div', { class: 'row wrap', id: 'scheddays' }, DAYS.map(function (name, i) {
+        var on = schedForm.days.indexOf(i) >= 0;
+        return h('button', { class: 'btn small' + (on ? ' on' : ''), text: name, 'aria-pressed': on ? 'true' : 'false', onclick: function () {
+          var at = schedForm.days.indexOf(i);
+          if (at >= 0) schedForm.days.splice(at, 1); else schedForm.days.push(i);
+          draw(d);
+        } });
+      }));
+      var action = h('select', { class: 'text-input', id: 'schedaction', 'aria-label': 'What to do' },
+        [['play', 'Play a clip'], ['stop', 'Stop the clip'], ['blackout', 'Blackout'], ['show', 'Show screen']].map(function (a) {
+          return h('option', { value: a[0], text: a[1], selected: a[0] === schedForm.action });
+        }));
+      var file = h('select', { class: 'text-input', id: 'schedfile', 'aria-label': 'Clip to play', hidden: schedForm.action !== 'play' },
+        S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === schedForm.file }); }));
+      if (!schedForm.file && S.media.length) schedForm.file = S.media[0];
+      action.addEventListener('change', function () { schedForm.action = action.value; file.hidden = action.value !== 'play'; });
+      file.addEventListener('change', function () { schedForm.file = file.value; });
+      var label = h('input', { class: 'text-input', id: 'schedlabel', 'aria-label': 'Label (optional)', placeholder: 'Label (optional)', maxlength: 40, value: schedForm.label });
+      label.addEventListener('input', function () { schedForm.label = label.value; });
+      body.appendChild(h('div', { class: 'k', text: 'Add an entry' }));
+      body.appendChild(time); body.appendChild(days); body.appendChild(action); body.appendChild(file); body.appendChild(label);
+      body.appendChild(h('button', { class: 'btn on small', id: 'schedadd', text: 'Add entry', onclick: function () {
+        if (!schedForm.days.length) return say('Choose at least one day.', true);
+        var entry = { time: schedForm.time, days: schedForm.days.slice(), action: schedForm.action, label: schedForm.label };
+        if (schedForm.action === 'play') { if (!schedForm.file) return say('Upload a clip first.', true); entry.file = schedForm.file; }
+        save({ enabled: d.enabled, entries: d.entries.concat(entry) });
+      } }));
+    }
+    api('GET', '/api/schedule').then(function (r) {
+      if (!document.getElementById('schedcard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'schedmsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
   }
   // ---- network (wired) ------------------------------------------------
   var netTimer = null;

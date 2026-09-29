@@ -139,6 +139,19 @@ function startServer() {
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
     await page.click('#osctoggle');
     await page.waitForFunction(() => document.getElementById('oscline').textContent === 'Off');
+    // Schedule: switch the module on, add an entry, turn the schedule on and off, remove the entry
+    await page.click('.item:has-text("Weekly schedule") >> button');
+    await page.waitForSelector('#schedclock');
+    await page.selectOption('#schedaction', 'stop');
+    await page.fill('#schedlabel', 'Close');
+    await page.click('#schedadd');
+    await page.waitForSelector('.sched-entry:has-text("Close: 18:00")');
+    await page.click('#schedtoggle');
+    await page.waitForFunction(() => document.getElementById('schedtoggle').getAttribute('aria-pressed') === 'true');
+    await page.click('#schedtoggle');
+    await page.waitForFunction(() => document.getElementById('schedtoggle').getAttribute('aria-pressed') === 'false');
+    await page.click('.sched-entry >> button:has-text("Remove")');
+    await page.waitForSelector('#schedempty');
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');

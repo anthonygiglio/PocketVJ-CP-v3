@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import hardware, netd as netd_mod, osc as osc_mod, themes as themes_mod
+from . import hardware, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
 from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
@@ -282,6 +282,7 @@ def build(env=None, player=None):
     api.net = netd_mod.NetdClient(os.path.join(rundir, "netd.sock"))
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
+    api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
     write_pin_file(rundir, auth.current_pin)
     try:
         api.osc.apply()
@@ -299,6 +300,7 @@ def main(argv=None):
         return 1
     host, port = env.get("PVJ_BIND", "0.0.0.0"), int(env.get("PVJ_PORT", "8080"))
     httpd = PvjServer((host, port), make_handler(api, auth))
+    api.scheduler.start()
     print("pvj-web: listening on %s:%d; pairing PIN %s (also in %s/pin)" % (host, port, auth.current_pin, rundir),
           flush=True)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
@@ -308,6 +310,7 @@ def main(argv=None):
         pass
     finally:
         httpd.server_close()
+        api.scheduler.stop()
         if api.osc:
             api.osc.stop()
     return 0

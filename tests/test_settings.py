@@ -74,6 +74,15 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(data["theme"]["name"], "light")  # existing values untouched
         self.assertEqual(self.read(self.path + ".bak-v1")["schema"], 1)
 
+    def test_real_migration_from_schema_2_adds_an_empty_schedule(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 2, "theme": {"name": "light", "accent": None}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual(data["schema"], settings.SCHEMA)
+        self.assertEqual(data["schedule"], {"enabled": False, "entries": []})
+        self.assertEqual(data["theme"]["name"], "light")
+        self.assertEqual(self.read(self.path + ".bak-v2")["schema"], 2)
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

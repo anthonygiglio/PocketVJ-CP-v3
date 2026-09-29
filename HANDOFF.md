@@ -22,13 +22,13 @@ The repository was renamed from `PocketVJ-CP-v3` to `nxlx.mastercontrol`.
 
 ## What exists
 
-Phases 0 to 4 and two feature screens are merged: security hotfix, platform layer, installer/services/image definition, the new core (API, panel, modules, themes, OSC receive, signed updates), the Library screen (upload, rename, delete) and the wired Network screen (beta, off by default). See ROADMAP.md for the phase list and the module manifests in `pvj/modules.d`.
+Phases 0 to 4 and two feature screens are merged: security hotfix, platform layer, installer/services/image definition, the new core (API, panel, modules, themes, OSC receive, signed updates), the Library screen (upload, rename, delete), the wired Network screen (beta, off by default) and the weekly schedule (beta, off by default; see `pvj/SCHEDULE.md`). See ROADMAP.md for the phase list and the module manifests in `pvj/modules.d`.
 
 ## What has NOT been done or verified
 
 - **Nothing has run on a real Pi, display, USB stick, TouchOSC or NetworkManager.** All testing was in a container with a real headless mpv and fakes. The Network feature in particular needs a test on a real device, with another way to reach the box.
 - The OS image has never been built. The workflow exists (`.github/workflows/image.yml`).
-- Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, the Inputs/NDI/SRT/Dante/ST 2110 screens, mapper, presenter, wall, scheduler, MIDI/DMX.
+- Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, the Inputs/NDI/SRT/Dante/ST 2110 screens, mapper, presenter, wall, MIDI/DMX.
 - The panel cannot restart a wedged mpv (it is unprivileged by design).
 - The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub (checked 2026-09-29).
 
