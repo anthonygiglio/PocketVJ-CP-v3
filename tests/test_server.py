@@ -439,6 +439,127 @@ class EndToEndTest(ServerBase):
         self.assertEqual(self.call("POST", "/api/player/restart", {}, token=token)[0], 200)
 
 
+class MediaTest(ServerBase):
+    OCT = {"Content-Type": "application/octet-stream"}
+
+    def upload(self, name, data, token, query="", **kw):
+        from urllib.parse import quote
+        return self.call("POST", "/api/media/upload?name=%s%s" % (quote(name), query), raw=data, token=token,
+                         headers=dict(self.OCT, **kw.pop("headers", {})), **kw)
+
+    def leftovers(self):
+        return [n for n in os.listdir(self.media) if n.startswith(".upload-")]
+
+    def test_listing_has_sizes_and_free_space(self):
+        token, _ = self.pair()
+        st, body, _ = self.call("GET", "/api/media", token=token)
+        self.assertEqual(st, 200)
+        self.assertEqual(body["files"], ["a.mp4", "b.mov", "link.mp4"])
+        self.assertEqual({d["name"] for d in body["details"]}, set(body["files"]))
+        self.assertGreater(body["free"], 0)
+        self.assertGreater(body["max_upload"], 0)
+
+    def test_upload_stores_the_exact_bytes_and_refuses_overwrite_unless_asked(self):
+        token, _ = self.pair()
+        data = os.urandom(3 * 1024 * 1024 + 17)  # more than one copy chunk
+        st, body, _ = self.upload("new clip.mp4", data, token)
+        self.assertEqual((st, body), (200, {"name": "new clip.mp4", "size": len(data)}))
+        with open(os.path.join(self.media, "new clip.mp4"), "rb") as f:
+            self.assertEqual(f.read(), data)
+        self.assertEqual(oct(os.stat(os.path.join(self.media, "new clip.mp4")).st_mode & 0o777), "0o664")
+        self.assertEqual(self.upload("new clip.mp4", b"other", token)[0], 409)
+        with open(os.path.join(self.media, "new clip.mp4"), "rb") as f:
+            self.assertEqual(f.read(), data)  # untouched by the refused upload
+        self.assertEqual(self.upload("new clip.mp4", b"replacement", token, query="&replace=1")[0], 200)
+        with open(os.path.join(self.media, "new clip.mp4"), "rb") as f:
+            self.assertEqual(f.read(), b"replacement")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_bad_names_types_and_missing_length_are_refused_before_anything_is_stored(self):
+        token, _ = self.pair()
+        for name in ("../evil.mp4", "..%2Fevil.mp4", ".hidden.mp4", "a/b.mp4", "a\\b.mp4", "clip.exe", "clip", "",
+                     "x" * 130 + ".mp4", "bad\x00.mp4", "clip.php.txt", ".upload-x.mp4"):
+            st, _, _ = self.upload(name, b"data", token)
+            self.assertEqual(st, 400, repr(name))
+        st, _, _ = self.call("POST", "/api/media/upload?name=x.mp4", raw=b"data", token=token,
+                             headers={"Content-Type": "application/json"})
+        self.assertEqual(st, 415)
+        st, _, _ = self.call("POST", "/api/media/upload?name=x.mp4", raw=b"", token=token, headers=self.OCT)
+        self.assertEqual(st, 411)  # empty body
+        self.assertEqual(sorted(os.listdir(self.media)), sorted([".hidden.mp4", "a.mp4", "b.mov", "link.mp4", "notes.txt"]))
+
+    def test_only_full_devices_with_the_header_may_upload(self):
+        full, _ = self.pair()
+        _, body, _ = self.call("POST", "/api/devices/invite", {"name": "tech", "role": "live"}, token=full)
+        live = body["token"]
+        self.assertEqual(self.upload("x.mp4", b"data", live)[0], 403)
+        self.assertEqual(self.upload("x.mp4", b"data", None)[0], 401)
+        self.assertEqual(self.upload("x.mp4", b"data", full, csrf=False)[0], 403)
+        self.assertEqual(self.upload("x.mp4", b"data", full, headers={"Origin": "http://evil.example"})[0], 403)
+        self.assertFalse(os.path.exists(os.path.join(self.media, "x.mp4")))
+
+    def test_size_limit_and_full_disk_are_refused_up_front(self):
+        import pvj.api as api_mod
+        token, _ = self.pair()
+        old = api_mod.MAX_UPLOAD_BYTES
+        api_mod.MAX_UPLOAD_BYTES = 10
+        self.addCleanup(setattr, api_mod, "MAX_UPLOAD_BYTES", old)
+        self.assertEqual(self.upload("big.mp4", b"x" * 11, token)[0], 413)
+        api_mod.MAX_UPLOAD_BYTES = old
+        self.api._free_space = lambda: 100 * 1024 * 1024  # less than the reserve
+        st, body, _ = self.upload("full.mp4", b"x" * 10, token)
+        self.assertEqual(st, 507)
+        self.assertFalse(os.path.exists(os.path.join(self.media, "full.mp4")))
+
+    def test_cut_short_upload_leaves_nothing_behind(self):
+        import socket
+        token, _ = self.pair()
+        c = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        c.sendall(("POST /api/media/upload?name=cut.mp4 HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+                   "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n"
+                   "Content-Length: 5000000\r\n\r\n" % token).encode() + b"x" * 1000)
+        time.sleep(0.3)
+        c.close()  # the phone lost its connection half way
+        time.sleep(0.5)
+        self.assertFalse(os.path.exists(os.path.join(self.media, "cut.mp4")))
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(self.upload("after.mp4", b"fine", token)[0], 200)  # the lock was released
+
+    def test_second_upload_is_refused_while_one_is_running(self):
+        import socket
+        token, _ = self.pair()
+        slow = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        self.addCleanup(slow.close)
+        slow.sendall(("POST /api/media/upload?name=slow.mp4 HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+                      "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n"
+                      "Content-Length: 2000\r\n\r\n" % token).encode() + b"x" * 100)
+        time.sleep(0.3)
+        st, body, _ = self.upload("second.mp4", b"data", token)
+        self.assertEqual((st, body["error"]), (409, "another upload is in progress"))
+        slow.sendall(b"x" * 1900)  # finish the first one
+        slow.settimeout(5)
+        self.assertIn(b"200 OK", slow.recv(4096))
+        self.assertTrue(os.path.exists(os.path.join(self.media, "slow.mp4")))
+
+    def test_delete_and_rename_are_validated(self):
+        token, _ = self.pair()
+        self.assertEqual(self.call("POST", "/api/media/rename", {"name": "a.mp4", "new": "renamed.mp4"}, token=token)[0], 200)
+        self.assertTrue(os.path.exists(os.path.join(self.media, "renamed.mp4")))
+        for body in ({"name": "renamed.mp4", "new": "b.mov"}, {"name": "renamed.mp4", "new": "../x.mp4"},
+                     {"name": "renamed.mp4", "new": "x.exe"}, {"name": "../a.mp4", "new": "y.mp4"},
+                     {"name": "link.mp4", "new": "z.mp4"}, {"name": "renamed.mp4"}, {"name": "gone.mp4", "new": "q.mp4"}):
+            st, _, _ = self.call("POST", "/api/media/rename", body, token=token)
+            self.assertIn(st, (400, 404, 409), body)
+        self.assertEqual(self.call("POST", "/api/media/delete", {"name": "renamed.mp4"}, token=token)[0], 200)
+        self.assertFalse(os.path.exists(os.path.join(self.media, "renamed.mp4")))
+        for name in ("../secret.mp4", "link.mp4", "notes.txt", "missing.mp4", 5, None):
+            st, _, _ = self.call("POST", "/api/media/delete", {"name": name}, token=token)
+            self.assertIn(st, (400, 404), repr(name))
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "secret.mp4")))  # the symlink target is safe
+        _, body, _ = self.call("POST", "/api/devices/invite", {"name": "tech", "role": "live"}, token=token)
+        self.assertEqual(self.call("POST", "/api/media/delete", {"name": "b.mov"}, token=body["token"])[0], 403)
+
+
 class HostileClientTest(ServerBase):
     """Slow and flooding clients must not exhaust the server."""
 

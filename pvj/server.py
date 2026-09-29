@@ -20,10 +20,10 @@ import threading
 import traceback
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from . import hardware, osc as osc_mod, themes as themes_mod
-from .api import Api
+from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
 from .player import Player
@@ -71,19 +71,23 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
 
         # --- plumbing ---------------------------------------------------
         def _send(self, status, body, content_type, extra=None):
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", CSP)
-            self.send_header("Cache-Control", "no-store")
-            for k, v in (extra or []):
-                self.send_header(k, v)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", CSP)
+                self.send_header("Cache-Control", "no-store")
+                for k, v in (extra or []):
+                    self.send_header(k, v)
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+            except OSError:
+                # The client went away (a phone that lost its connection): nothing to tell, nothing to log.
+                self.close_connection = True
 
         def _json(self, status, payload, extra=None):
             self._send(status, json.dumps(payload).encode(), "application/json", extra)
@@ -147,12 +151,45 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
                 body = f.read()
             self._send(200, body, TYPES.get(os.path.splitext(name)[1], "application/octet-stream"))
 
+        def _upload(self):
+            """Raw-body upload: POST /api/media/upload?name=clip.mp4[&replace=1]. Streams to disk."""
+            parts = urlsplit(self.path)
+            query = parse_qs(parts.query)
+            try:
+                device = auth.authenticate(self._token())
+                api.require(device, "full")
+                if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/octet-stream":
+                    raise ApiError(415, "send application/octet-stream")
+                try:
+                    length = int(self.headers.get("Content-Length", ""))
+                except ValueError:
+                    length = None
+                name = (query.get("name") or [""])[0]
+                replace = (query.get("replace") or ["0"])[0] == "1"
+                # Authenticated owner: the short connection lifetime would cut a big file off, so use
+                # an idle timeout instead (the connection cap still applies).
+                self._reaper.cancel()
+                self.connection.settimeout(30)
+                result = api.upload(name, length, self.rfile.read, replace)
+                self._json(200, result)
+            except ApiError as e:
+                self.close_connection = True  # an unread body must not be parsed as the next request
+                self._json(e.status, {"error": e.message})
+            except (OSError, ValueError):
+                self.close_connection = True
+            except Exception:
+                traceback.print_exc()
+                self.close_connection = True
+                self._json(500, {"error": "internal error"})
+
         def do_POST(self):
             path = urlsplit(self.path).path
             if not path.startswith("/api/"):
                 return self._json(404, {"error": "not found"})
             if not self._csrf_ok():
                 return self._json(403, {"error": "cross-site or missing request header"})
+            if path == "/api/media/upload":
+                return self._upload()
             body, err = self._body()
             if err:
                 return self._json(err[0], {"error": err[1]})

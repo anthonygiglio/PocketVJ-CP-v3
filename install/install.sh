@@ -190,6 +190,8 @@ PVJ_USB_RW=0
 # Web panel: port and address. The panel is for a private network; do not expose it to the internet.
 # PVJ_PORT=80
 # PVJ_BIND=0.0.0.0
+# Largest single upload from the panel, in MB.
+# PVJ_MAX_UPLOAD_MB=8192
 ENV
 	fi
 else

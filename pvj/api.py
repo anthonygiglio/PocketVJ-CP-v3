@@ -10,6 +10,7 @@ or a path unchecked.
 
 import os
 import re
+import tempfile
 import threading
 import time
 
@@ -41,6 +42,11 @@ def number(body, key, lo, hi, integer=False):
     if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not lo <= v <= hi:
         raise bad("%s must be a number from %s to %s" % (key, lo, hi))
     return int(v) if integer else float(v)
+
+
+MAX_UPLOAD_BYTES = int(os.environ.get("PVJ_MAX_UPLOAD_MB", "8192")) * 1024 * 1024
+FREE_SPACE_RESERVE = 200 * 1024 * 1024  # never fill the disk completely: the system needs room to work
+CHUNK = 1024 * 1024
 
 
 class Fader:
@@ -79,7 +85,7 @@ class Fader:
 
 class Api:
     def __init__(self, player, settings, auth, registry, themes, media_dir, board, addons_dir=None,
-                 spawn=False, on_pin=None, osc=None):
+                 spawn=False, on_pin=None, osc=None, free_space=None):
         self.player = player
         self.settings = settings
         self.auth = auth
@@ -91,6 +97,8 @@ class Api:
         self.spawn = spawn        # True only for development: start mpv ourselves
         self.on_pin = on_pin      # called with the new PIN so the box can show it
         self.osc = osc            # OscManager or None
+        self._free_space = free_space or self._statvfs_free
+        self._upload_lock = threading.Lock()  # one upload at a time: protects the SD card and the threads
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
 
@@ -153,8 +161,99 @@ class Api:
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
                 "device": device}
 
+    def _statvfs_free(self):
+        try:
+            st = os.statvfs(self.media_dir)
+        except OSError:
+            return 0
+        return st.f_bavail * st.f_frsize
+
     def media(self, body, device, client):
-        return {"files": self.media_list()}
+        details = []
+        for name in self.media_list():
+            try:
+                st = os.stat(os.path.join(self.media_dir, name))
+                details.append({"name": name, "size": st.st_size, "modified": int(st.st_mtime)})
+            except OSError:
+                pass
+        return {"files": [d["name"] for d in details], "details": details, "free": self._free_space(),
+                "max_upload": MAX_UPLOAD_BYTES}
+
+    def _safe_new_name(self, name):
+        if not isinstance(name, str) or not _NAME.match(name) or name in (".", "..") or name.startswith("."):
+            raise bad("invalid file name")
+        if not name.lower().endswith(MEDIA_EXTENSIONS):
+            raise bad("only video and image files: " + ", ".join(MEDIA_EXTENSIONS))
+        return name
+
+    def upload(self, name, length, read, replace=False):
+        """Store a file from a stream. `read(n)` returns up to n bytes ('' or b'' at the end)."""
+        name = self._safe_new_name(name)
+        if not isinstance(length, int) or length <= 0:
+            raise ApiError(411, "Content-Length required")
+        if length > MAX_UPLOAD_BYTES:
+            raise ApiError(413, "file is larger than the %d MB limit" % (MAX_UPLOAD_BYTES // (1024 * 1024)))
+        if length + FREE_SPACE_RESERVE > self._free_space():
+            raise ApiError(507, "not enough free space on the box")
+        if not self._upload_lock.acquire(blocking=False):
+            raise ApiError(409, "another upload is in progress")
+        tmp = None
+        try:
+            root = os.path.realpath(self.media_dir)
+            os.makedirs(root, exist_ok=True)
+            final = os.path.join(root, name)
+            if os.path.lexists(final) and not replace:
+                raise ApiError(409, "a file with that name already exists")
+            if os.path.islink(final):
+                raise ApiError(409, "refusing to replace a link")
+            fd, tmp = tempfile.mkstemp(prefix=".upload-", dir=root)  # hidden, so it never shows in the list
+            got = 0
+            with os.fdopen(fd, "wb") as out:
+                while got < length:
+                    chunk = read(min(CHUNK, length - got))
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    got += len(chunk)
+                out.flush()
+                os.fsync(out.fileno())
+            if got != length:
+                raise ApiError(400, "upload was cut short (%d of %d bytes)" % (got, length))
+            os.chmod(tmp, 0o664)
+            os.replace(tmp, final)
+            tmp = None
+            return {"name": name, "size": length}
+        except (TimeoutError, ConnectionError):
+            raise ApiError(400, "upload interrupted")
+        except OSError as e:
+            raise ApiError(500, "could not store the file: %s" % (e.strerror or e))
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            self._upload_lock.release()
+
+    def delete_media(self, body, device, client):
+        path = self.resolve_media(body.get("name"))
+        try:
+            os.unlink(path)
+        except OSError as e:
+            raise ApiError(500, "could not delete: %s" % e.strerror)
+        return {"deleted": body["name"]}
+
+    def rename_media(self, body, device, client):
+        src = self.resolve_media(body.get("name"))
+        new = self._safe_new_name(body.get("new"))
+        dst = os.path.join(os.path.realpath(self.media_dir), new)
+        if os.path.lexists(dst):
+            raise ApiError(409, "a file with that name already exists")
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            raise ApiError(500, "could not rename: %s" % e.strerror)
+        return {"name": new}
 
     def get_pads(self, body, device, client):
         return {"banks": self.settings.data["pads"]["banks"]}
@@ -431,6 +530,8 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("POST", "/api/media/delete"): ("full", self.delete_media),
+            ("POST", "/api/media/rename"): ("full", self.rename_media),
             ("POST", "/api/pads"): ("full", self.set_pad),
             ("POST", "/api/theme"): ("full", self.set_theme),
             ("GET", "/api/devices"): ("full", self.devices),
@@ -439,6 +540,13 @@ class Api:
             ("POST", "/api/pin/rotate"): ("full", self.rotate_pin),
             ("POST", "/api/player/restart"): ("full", self.stop_player),
         }
+
+    @staticmethod
+    def require(device, role):
+        if device is None:
+            raise ApiError(401, "pair this device first")
+        if not Auth.allows(device, role):
+            raise ApiError(403, "this device may not do that (%s access needed)" % role)
 
     def handle(self, method, path, body, device, client):
         try:
