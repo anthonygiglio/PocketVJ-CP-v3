@@ -4,7 +4,7 @@
 
 Play pads, fade and mix from a class-compliant USB MIDI pad controller, keyboard or fader box. Switch on **MIDI controller (USB)** under System > Modules, then pick the device under System > MIDI controller. Off until you turn it on. Full-access devices only.
 
-The box reads the raw ALSA device `/dev/snd/midiC<card>D<device>`: no MIDI libraries. Only paths of that form can be chosen, and the box opens only a real character device (no links). The service account must be in the `audio` group to read it. Unplug and replug is fine: the box keeps looking for the controller and reconnects. Receive only; nothing is written to the device.
+The box reads the raw ALSA device `/dev/snd/midiC<card>D<device>`: no MIDI libraries. Only paths of that form can be chosen, and the box opens only a real character device (no links). The web service (`pvj-web`) is in the `audio` group and its systemd unit allows read access to ALSA devices only (`DeviceAllow=char-alsa r`); a hand-made install needs the same. Unplug and replug is fine: the box keeps looking for the controller and reconnects. Receive only; nothing is written to the device.
 
 ## Mapping
 

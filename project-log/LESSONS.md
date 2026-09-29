@@ -22,4 +22,5 @@ Append new lessons at the bottom. Format: what happened, what we do now.
 - **`re.match` with a `$` anchor accepts a trailing newline.** A MIDI device path and a schedule time both passed with `\n` on the end. Use `re.fullmatch` for every validation of untrusted text; a test that appends `\n` to a good value catches it.
 - **A per-source rate limit means nothing for UDP from private addresses, because the source can be forged and the limiter clears its table when full.** Put a global packet cap and a cap on calls into the player next to it. Also: `apply()` methods that start threads or sockets need one lock, and turning a module off must stop what it started.
 - **Read the check list before merging, not only the merge command's exit.** A `while ... pending` wait loop ends on any result, including a failure. Count failures explicitly and stop if there is one.
+- **A sandboxed service can silently lose a device the code needs.** MIDI worked in tests and would have failed on the image because the unit hid `/dev`. When a module needs a device, network port or group, check the systemd unit, not only the Python.
 
