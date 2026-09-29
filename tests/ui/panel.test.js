@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 NXLX and contributors
+// SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 // SPDX-License-Identifier: Apache-2.0
 // Browser test: drives the real panel against tests/ui/harness.py.
 // Run: node tests/ui/panel.test.js   (needs playwright and a Chromium)

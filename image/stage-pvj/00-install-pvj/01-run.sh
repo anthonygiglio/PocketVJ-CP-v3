@@ -1,5 +1,5 @@
 #!/bin/bash -e
-# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 # Runs on the build host. files/pvj-src is filled in by the workflow with the
 # pvj/, bin/ and install/ folders of this repository.

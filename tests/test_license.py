@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 """Every file of the new code carries its licence; the licence text is verbatim."""
 import fnmatch
