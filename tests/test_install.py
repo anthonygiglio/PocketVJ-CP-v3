@@ -94,6 +94,32 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.read(self.p("opt/pvj/previous")).strip(), "/opt/pvj/releases/9.9.1")
         self.assertTrue(os.path.isdir(self.p("opt/pvj/releases/9.9.1")))
 
+    def test_same_version_reinstall_replaces_files_without_leftovers(self):
+        install(self.src, self.stage)
+        with open(os.path.join(self.src, "pvj", "marker.py"), "w") as f:
+            f.write("X = 1\n")
+        self.assertEqual(install(self.src, self.stage).returncode, 0)
+        rel = self.p("opt/pvj/releases")
+        self.assertEqual(os.listdir(rel), ["9.9.1"])  # no .old or .new left behind
+        self.assertTrue(os.path.isfile(os.path.join(rel, "9.9.1", "pvj", "marker.py")))
+        self.assertEqual(os.readlink(self.p("opt/pvj/current")), "/opt/pvj/releases/9.9.1")
+
+    def test_account_chosen_at_first_install_is_kept_when_user_is_omitted(self):
+        install(self.src, self.stage)  # helper passes --user gigbox
+        r = subprocess.run([os.path.join(self.src, "install", "install.sh"), "--stage", self.stage],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("User=gigbox", self.read(self.p("etc/systemd/system/pvj-player.service")))
+
+    def test_dotdot_in_paths_is_refused(self):
+        for bad in (["--prefix", "/opt/x/../../etc"], ["--prefix", "/opt/pvj/.."], ["--media", "/var/lib/../../etc"]):
+            self.assertNotEqual(install(self.src, self.stage, *bad).returncode, 0, bad)
+        self.assertEqual(os.listdir(self.stage), [])
+
+    def test_other_accounts_are_not_added_to_the_pvj_group_by_default(self):
+        text = self.read(os.path.join(self.src, "install", "install.sh"))
+        self.assertNotIn("WEB_USER=www-data", text)  # the legacy PHP user must never reach the PIN file
+
     def test_dry_run_changes_nothing(self):
         r = install(self.src, self.stage, "--dry-run")
         self.assertEqual(r.returncode, 0, r.stderr)

@@ -18,8 +18,10 @@ def version():
         return re.search(r'^__version__ = "([^"]+)"', f.read(), re.M).group(1)
 
 
-def build(*args):
-    return subprocess.run([SCRIPT, *args], cwd=REPO, capture_output=True, text=True)
+def build(*args, cwd=REPO):
+    # the script works on the checkout it lives in, so run the copy inside `cwd`
+    script = os.path.join(cwd, "tools", "make-release.sh")
+    return subprocess.run([script, *args], cwd=cwd, capture_output=True, text=True)
 
 
 class ReleaseTest(unittest.TestCase):
@@ -28,10 +30,10 @@ class ReleaseTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, os.path.join(REPO, "dist"), True)
 
     def test_bundle_is_valid_reproducible_and_installable_by_the_updater(self):
-        r = build(version())
+        r = build(version(), "--allow-dirty")
         self.assertEqual(r.returncode, 0, r.stderr)
         first = update.sha256_file(self.out)
-        build(version())
+        build(version(), "--allow-dirty")
         self.assertEqual(update.sha256_file(self.out), first, "same commit must give identical bytes")
         with open(self.out + ".sha256") as f:
             update.verify_sha256(self.out, f.read())
@@ -47,6 +49,20 @@ class ReleaseTest(unittest.TestCase):
         self.assertNotEqual(build("nonsense").returncode, 0)
         self.assertNotEqual(build().returncode, 0)
 
+    def test_dirty_tree_is_refused_and_a_clean_one_builds(self):
+        clone = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, clone, True)
+        subprocess.run(["git", "clone", "-q", "--local", REPO, clone], check=True)
+        with open(os.path.join(clone, "pvj", "README.md"), "a") as f:
+            f.write("\nuncommitted edit\n")
+        with open(os.path.join(clone, "pvj", "__init__.py")) as f:
+            ver = re.search(r'^__version__ = "([^"]+)"', f.read(), re.M).group(1)
+        r = build(ver, cwd=clone)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("uncommitted", r.stderr)
+        subprocess.run(["git", "checkout", "-q", "--", "pvj/README.md"], cwd=clone, check=True)
+        self.assertEqual(build(ver, cwd=clone).returncode, 0)
+
     @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen not installed")
     def test_signing_round_trip(self):
         d = tempfile.mkdtemp()
@@ -58,7 +74,7 @@ class ReleaseTest(unittest.TestCase):
         allowed = os.path.join(d, "allowed")
         with open(allowed, "w") as f:
             f.write('pvj-release namespaces="pvj-release" %s %s\n' % (fields[0], fields[1]))
-        r = build(version(), "--key", key)
+        r = build(version(), "--key", key, "--allow-dirty")
         self.assertEqual(r.returncode, 0, r.stderr)
         update.verify_signature(self.out, self.out + ".sig", allowed)
 

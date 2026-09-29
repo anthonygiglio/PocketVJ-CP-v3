@@ -9,7 +9,8 @@
 #   --prefix DIR     install location (default /opt/pvj)
 #   --user NAME      account that owns the screen and sound card (default: the
 #                    user who ran sudo, else a new system user "pvj-player")
-#   --web-user NAME  account of the web panel, added to group "pvj" (default www-data if it exists)
+#   --web-user NAME  optional: add another account (a separate web app) to group "pvj"; NOT needed for
+#                    the built-in panel, which has its own pvj-web account. Members can read the PIN.
 #   --media DIR      video folder (default /var/lib/pvj/video)
 #   --offline        never touch the network; fail if a dependency is missing
 #   --no-start       install and enable the service but do not start it
@@ -64,6 +65,7 @@ done
 case "$PREFIX" in /usr/* | /etc/* | /bin/* | /sbin/* | /lib/* | /boot/* | /var/lib/dpkg*) die "--prefix must not be inside a system directory" ;; esac
 for path in "$PREFIX" "$MEDIA"; do
 	[[ "$path" =~ ^[A-Za-z0-9/_.-]+$ ]] || die "paths may only use letters, digits, / _ . and -"
+	[[ "$path" =~ (^|/)\.\.(/|$) ]] && die "paths may not contain .. components"
 done
 
 if [ -n "$STAGE" ]; then
@@ -118,10 +120,12 @@ if [ ${#need[@]} -gt 0 ]; then
 fi
 
 # --- accounts -----------------------------------------------------------
+if [ -z "$PVJ_USER" ] && [ -f "$ETC/install.json" ]; then
+	PVJ_USER="$(sed -n 's/.*"user": "\([a-z_][a-z0-9_-]*\)".*/\1/p' "$ETC/install.json" | head -n 1)"
+fi
 if [ -z "$PVJ_USER" ]; then
 	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then PVJ_USER="$SUDO_USER"; else PVJ_USER=pvj-player; fi
 fi
-if [ -z "$WEB_USER" ] && [ "$REAL" = 1 ] && id www-data >/dev/null 2>&1; then WEB_USER=www-data; fi
 
 if [ "$REAL" = 1 ]; then
 	getent group pvj >/dev/null || run groupadd --system pvj
@@ -151,8 +155,11 @@ if [ "$DRY" = 0 ]; then
 fi
 previous=""
 [ -L "$ROOT$PREFIX/current" ] && previous="$(readlink "$ROOT$PREFIX/current")"
-run rm -rf "$RELEASE"
+# Same version installed again: move the old folder aside and swap in the new one, so the folder
+# "current" points at is never deleted first.
+if [ -e "$RELEASE" ]; then run mv "$RELEASE" "$RELEASE.old.$$"; fi
 run mv "$RELEASE.new" "$RELEASE"
+run rm -rf "$RELEASE.old.$$"
 # Atomic switch: rename a fresh symlink over "current".
 run ln -sfn "$PREFIX/releases/$VERSION" "$ROOT$PREFIX/current.tmp"
 run mv -T "$ROOT$PREFIX/current.tmp" "$ROOT$PREFIX/current"

@@ -18,6 +18,7 @@ import glob
 import hashlib
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -54,7 +55,8 @@ def sha256_file(path):
 
 
 def verify_sha256(path, expected):
-    expected = (expected or "").strip().split()[0].lower() if expected else ""
+    tokens = (expected or "").split()
+    expected = tokens[0].lower() if tokens else ""
     if not re.match(r"^[0-9a-f]{64}$", expected):
         raise UpdateError("no valid SHA-256 given")
     if sha256_file(path) != expected:
@@ -210,11 +212,24 @@ class Updater:
         return dst
 
     def restore_settings(self, backup):
+        """Put a backup back as settings.json with the SAME owner as before: the panel runs as its
+        own user and could not read a root-owned 0600 file, leaving the box without a panel."""
         current = self.settings_path()
+        owner = None
         if os.path.isfile(current):
+            st = os.stat(current)
+            owner = (st.st_uid, st.st_gid)
             shutil.move(current, "%s.rolled-back-%d" % (current, int(self.now())))
+        else:
+            try:
+                web = pwd.getpwnam("pvj-web")
+                owner = (web.pw_uid, web.pw_gid)
+            except KeyError:
+                pass
         shutil.copyfile(backup, current)
         os.chmod(current, 0o600)
+        if owner is not None and os.geteuid() == 0:
+            os.chown(current, *owner)
 
     def latest_backup(self, version):
         found = sorted(glob.glob(os.path.join(self.backup_dir(), "settings-%s-*.json" % version)), key=os.path.getmtime)
@@ -222,27 +237,35 @@ class Updater:
 
     # --- actions --------------------------------------------------------
     def check(self, bundle, sha256=None, allow_unsigned=False, force=False):
-        """Verify a bundle without installing it. Returns (info, extracted_dir)."""
+        """Verify a bundle without installing it. Returns (info, tree, scratch).
+
+        The bundle and its signature are first copied into a private folder and everything
+        (checksum, signature, unpacking) is done on that copy, so the file on a USB stick
+        cannot be swapped between the check and the use. The caller removes `scratch`."""
         if not os.path.isfile(bundle):
             raise UpdateError("%s not found" % bundle)
-        if os.path.getsize(bundle) > MAX_BUNDLE_BYTES:
+        size = os.path.getsize(bundle)
+        if size > MAX_BUNDLE_BYTES:
             raise UpdateError("bundle is too large")
         if sha256 is None and os.path.isfile(bundle + ".sha256"):
             with open(bundle + ".sha256") as f:
-                sha256 = f.read()
-        verify_sha256(bundle, sha256)
-        if allow_unsigned:
-            pass
-        else:
-            verify_signature(bundle, bundle + ".sig", self.allowed_signers(), self.run)
-        work = tempfile.mkdtemp(prefix=".update-", dir=self.real(self.prefix)) if os.path.isdir(self.real(self.prefix)) \
-            else tempfile.mkdtemp(prefix=".update-")
+                sha256 = f.read(4096)
+        parent = self.real(self.prefix)
+        scratch = tempfile.mkdtemp(prefix=".update-", dir=parent if os.path.isdir(parent) else None)  # mode 0700
         try:
-            free = shutil.disk_usage(work).free
-            if free < 3 * os.path.getsize(bundle):
+            if shutil.disk_usage(scratch).free < 4 * size:
                 raise UpdateError("not enough free disk space")
-            safe_extract(bundle, work)
-            info = inspect_bundle(work)
+            mine = os.path.join(scratch, "bundle.tar.gz")
+            shutil.copyfile(bundle, mine)
+            if os.path.isfile(bundle + ".sig"):
+                shutil.copyfile(bundle + ".sig", mine + ".sig")
+            verify_sha256(mine, sha256)
+            if not allow_unsigned:
+                verify_signature(mine, mine + ".sig", self.allowed_signers(), self.run)
+            tree = os.path.join(scratch, "tree")
+            os.mkdir(tree)
+            safe_extract(mine, tree)
+            info = inspect_bundle(tree)
             cur = self._link_version()
             if cur and not force:
                 if parse_version(info["version"]) <= parse_version(cur):
@@ -252,27 +275,56 @@ class Updater:
             if schema is not None and info["schema"] < schema and not force:
                 raise UpdateError("this bundle understands settings schema %d but yours is %d; refusing to downgrade"
                                   % (info["schema"], schema))
-            return info, work
+            return info, tree, scratch
         except BaseException:
-            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(scratch, ignore_errors=True)
             raise
 
+    def _previous_file(self):
+        return self.real(self.prefix + "/previous")
+
+    def _read_previous(self):
+        try:
+            with open(self._previous_file()) as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def _restore_previous(self, text):
+        if text is None:
+            try:
+                os.unlink(self._previous_file())
+            except OSError:
+                pass
+        else:
+            with open(self._previous_file(), "w") as f:
+                f.write(text)
+
     def apply(self, bundle, sha256=None, allow_unsigned=False, force=False, log=print):
-        info, work = self.check(bundle, sha256, allow_unsigned, force)
+        info, tree, scratch = self.check(bundle, sha256, allow_unsigned, force)
         old_version = self._link_version()
+        previous_before = self._read_previous()
         try:
             backup = self.backup_settings(old_version or "none")
             log("installing %s (was %s)" % (info["version"], old_version or "nothing"))
-            self._install(work, info)
-            self._restart()
-            if not self._health():
+            try:
+                self._install(tree, info)
+                self._restart()
+                healthy = self._health()
+            except BaseException:
+                if old_version:
+                    self._switch_to(old_version, backup)
+                self._restore_previous(previous_before)
+                raise
+            if not healthy:
                 log("the new version did not come up; rolling back")
                 self._switch_to(old_version, backup)
+                self._restore_previous(previous_before)  # a failed update must not disturb rollback history
                 raise UpdateError("update to %s failed its health check and was rolled back" % info["version"])
             log("update complete: %s" % info["version"])
             return info["version"]
         finally:
-            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(scratch, ignore_errors=True)
 
     def rollback(self, log=print):
         st = self.status()
@@ -320,9 +372,22 @@ class Updater:
         if os.path.isdir("/run/systemd/system") and self.root == "":
             self.run(["systemctl", "restart", "pvj-player.service", "pvj-web.service"], capture_output=True)
 
-    @staticmethod
-    def _http_health(timeout=30):
-        port = os.environ.get("PVJ_PORT", "80")
+    def configured_port(self):
+        """The panel's port as the service sees it: /etc/pvj/pvj.env, else our environment, else 80."""
+        try:
+            with open(self.real(self.etc_dir + "/pvj.env")) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("PVJ_PORT="):
+                        value = line.split("=", 1)[1].strip().strip("'\"")
+                        if value.isdigit():
+                            return value
+        except OSError:
+            pass
+        return os.environ.get("PVJ_PORT", "80")
+
+    def _http_health(self, timeout=30):
+        port = self.configured_port()
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -357,8 +422,8 @@ def main(argv=None):
         if args.cmd == "status":
             print(json.dumps(u.status(), indent=2))
         elif args.cmd == "check":
-            info, work = u.check(args.bundle, args.sha256, args.allow_unsigned, args.force)
-            shutil.rmtree(work, ignore_errors=True)
+            info, _tree, scratch = u.check(args.bundle, args.sha256, args.allow_unsigned, args.force)
+            shutil.rmtree(scratch, ignore_errors=True)
             print("ok: version %s, settings schema %d" % (info["version"], info["schema"]))
         elif args.cmd == "apply":
             u.apply(args.bundle, args.sha256, args.allow_unsigned, args.force)

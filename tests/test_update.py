@@ -270,6 +270,89 @@ class UpdaterTest(unittest.TestCase):
         with self.assertRaises(UpdateError):
             self.u.rollback(log=lambda *_: None)
 
+    def test_whitespace_only_checksum_file_is_a_clean_error(self):
+        bundle = make_bundle("1.0.0")
+        with open(bundle + ".sha256", "w") as f:
+            f.write("  \n\t\n")
+        with self.assertRaises(UpdateError):
+            self.u.apply(bundle, allow_unsigned=True, log=lambda *_: None)
+
+    def test_failed_update_leaves_rollback_history_alone(self):
+        self.apply("1.0.0")
+        self.apply("1.1.0")
+        self.assertEqual(self.u.status()["previous"], "1.0.0")
+        self.env.healthy = False
+        with self.assertRaises(UpdateError):
+            self.apply("1.2.0")
+        st = self.u.status()
+        self.assertEqual((st["current"], st["previous"]), ("1.1.0", "1.0.0"))
+        self.env.healthy = True
+        self.assertEqual(self.u.rollback(log=lambda *_: None), "1.0.0")  # still rolls back to the right place
+
+    def test_installer_crash_also_restores_previous_pointer(self):
+        self.apply("1.0.0")
+        self.apply("1.1.0")
+
+        def crash_after_switch(work, info):
+            self.env.install(work, info)  # really installs 1.2.0 and moves the pointers
+            raise UpdateError("service restart failed")
+        self.u._install = crash_after_switch
+        with self.assertRaises(UpdateError):
+            self.apply("1.2.0")
+        st = self.u.status()
+        self.assertEqual((st["current"], st["previous"]), ("1.1.0", "1.0.0"))
+
+    def test_bundle_swapped_after_verification_is_not_what_gets_installed(self):
+        good = make_bundle("1.0.0")
+        evil = make_bundle("6.6.6")
+        real_verify = update.verify_sha256
+
+        def verify_then_swap(path, expected):
+            real_verify(path, expected)
+            shutil.copyfile(evil, good)  # attacker replaces the file on the USB stick right after the check
+        update.verify_sha256 = verify_then_swap
+        self.addCleanup(setattr, update, "verify_sha256", real_verify)
+        self.assertEqual(self.u.apply(good, allow_unsigned=True, log=lambda *_: None), "1.0.0")
+        self.assertEqual(self.u.status()["current"], "1.0.0")
+
+    def test_health_check_uses_the_port_from_the_env_file(self):
+        import http.server
+        import threading
+
+        class Hello(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+        httpd = http.server.HTTPServer(("127.0.0.1", 0), Hello)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        port = httpd.server_address[1]
+        with open(os.path.join(self.env.root, "etc/pvj/pvj.env"), "w") as f:
+            f.write("# panel port\nPVJ_PORT=%d\n" % port)
+        real = Updater(root=self.env.root)
+        self.assertEqual(real.configured_port(), str(port))
+        self.assertTrue(real._http_health(timeout=3))
+        with open(os.path.join(self.env.root, "etc/pvj/pvj.env"), "w") as f:
+            f.write("PVJ_PORT=1\n")
+        self.assertFalse(real._http_health(timeout=1.2))
+
+    @unittest.skipUnless(os.geteuid() == 0, "needs root to set file owners")
+    def test_restored_settings_keep_the_panels_owner_and_stay_private(self):
+        self.apply("1.0.0")
+        self.env.write_settings(marker="v1")
+        self.apply("1.1.0")
+        path = os.path.join(self.env.root, "var/lib/pvj/settings.json")
+        os.chown(path, 23456, 34567)  # as if pvj-web owns it
+        self.u.rollback(log=lambda *_: None)
+        st = os.stat(path)
+        self.assertEqual((st.st_uid, st.st_gid, st.st_mode & 0o777), (23456, 34567, 0o600))
+
     def test_backups_are_pruned(self):
         self.env.write_settings()
         clock = iter(range(1000, 2000))

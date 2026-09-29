@@ -4,7 +4,7 @@
 # Build a release bundle for pvj-update: dist/pvj-<version>.tar.gz, its .sha256
 # and (with --key) an OpenSSH signature dist/pvj-<version>.tar.gz.sig.
 #
-#   tools/make-release.sh 4.0.1 [--key ~/.ssh/pvj-release]
+#   tools/make-release.sh 4.0.1 [--key ~/.ssh/pvj-release] [--allow-dirty]
 #
 # The version must match pvj/__init__.py. The archive is reproducible: the same
 # commit always gives the same bytes, so anyone can check a release.
@@ -13,10 +13,12 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 version="${1:-}"
 key=""
+dirty_ok=0
 [ $# -ge 1 ] && shift
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--key) key="${2:?--key needs a file}"; shift 2 ;;
+	--allow-dirty) dirty_ok=1; shift ;;
 	*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
@@ -24,6 +26,13 @@ done
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: $0 N.N.N [--key FILE]" >&2; exit 2; }
 declared="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' pvj/__init__.py)"
 [ "$declared" = "$version" ] || { echo "pvj/__init__.py says $declared, not $version; update it first" >&2; exit 1; }
+
+# The bundle is built from files in the working tree; refuse if they differ from the commit, so a
+# release always matches a commit anyone can check out.
+if [ "$dirty_ok" = 0 ] && ! git diff --quiet HEAD -- pvj bin install; then
+	echo "pvj/, bin/ or install/ have uncommitted changes; commit them (or pass --allow-dirty for a test build)" >&2
+	exit 1
+fi
 
 mkdir -p dist
 out="dist/pvj-$version.tar.gz"
