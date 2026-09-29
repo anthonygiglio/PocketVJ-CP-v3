@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 """pvj-netd: the small root helper that changes the wired network on behalf of the unprivileged panel.
 

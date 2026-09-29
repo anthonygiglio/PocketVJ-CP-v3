@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 # Print the current pairing PIN (kept in a RAM file that vanishes at reboot).
 f="${PVJ_RUNTIME_DIR:-/run/pvj}/pin"

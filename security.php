@@ -1,5 +1,5 @@
 <?php
-// SPDX-FileCopyrightText: 2026 NXLX and contributors
+// SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 // SPDX-License-Identifier: Apache-2.0
 // Shared request guards for the legacy control panel endpoints.
 // Kept compatible with PHP 5.6 (Raspbian Jessie) up to current PHP 8.

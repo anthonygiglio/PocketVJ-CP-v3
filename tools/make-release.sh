@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 # Build a release bundle for pvj-update: dist/pvj-<version>.tar.gz, its .sha256
 # and (with --key) an OpenSSH signature dist/pvj-<version>.tar.gz.sig.
