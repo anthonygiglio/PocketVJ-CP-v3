@@ -1,5 +1,29 @@
-## Roadmap
-**********
+## NXLX Roadmap
+
+Legacy v3 items are kept below the line for reference.
+
+| Phase | Scope |
+| --- | --- |
+| 0 | Fork housekeeping: README, legacy tag, Pages fix, CI |
+| 1 | Security hotfix on the old line (3.9.x): input casts and quoting, narrow sudoers, auth, POST plus tokens, pairing PIN |
+| 2 | Platform layer: `pvj-player` on mpv, hardware detection, display layer, Python 3, gpiozero, no hardcoded `/home/pi` |
+| 3 | Installer, systemd services, watchdog, USB automount, images built in CI, binaries out of git |
+| 4 | New core in Python 3: module manifests, versioned settings and migrations, themes, update and rollback |
+| 5 | Feature parity with the 12 legacy tabs |
+| 6 | Mapper spike and network inputs (see below) |
+| 7 | Themes, manual, migration tool, hardware test matrix, 4.0 |
+
+### Network input modules (all optional, each updatable on its own)
+
+| Module | Notes |
+| --- | --- |
+| NDI | First-class. Free proprietary runtime, fetched and kept current by the module updater. Main route for Resolume and MadMapper output. |
+| SRT, RTSP, RTMP | Fully open. Via ffmpeg or mpv. |
+| AES67 / Dante audio | Dante devices interoperate through AES67 mode. Native Dante on Linux needs the community Inferno project or a Dante hardware card; to be evaluated. |
+| SMPTE ST 2110 | Needs PTP time sync and a capable NIC, so x86 only. Candidates: Intel Media Transport Library, GStreamer. Not for Pi. |
+
+### Legacy v3 list (upstream, 2022)
+
  <br />
 
 - add rescue script similar to exhibition <br />

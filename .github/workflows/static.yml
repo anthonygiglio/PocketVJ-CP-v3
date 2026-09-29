@@ -1,5 +1,6 @@
-# Simple workflow for deploying static content to GitHub Pages
-name: Deploy static content to Pages
+# Publishes ONLY the built manual (docs/html) to GitHub Pages.
+# Never publish the repo root: it contains backend.php and internal notes.
+name: Deploy manual to Pages
 
 on:
   # Runs on pushes targeting the default branch
@@ -36,8 +37,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          # Manual only
+          path: 'docs/html'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

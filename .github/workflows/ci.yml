@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - name: php -l on every PHP file
+        run: |
+          fail=0
+          for f in $(git ls-files '*.php'); do php -l "$f" >/dev/null || fail=1; done
+          exit $fail
+
+  python-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile new Python 3 code (strict)
+        run: |
+          if [ -d pvj ]; then python3 -m compileall -q pvj; fi
+      - name: Compile legacy Python (advisory, Python 2 code still present)
+        continue-on-error: true
+        run: git ls-files '*.py' | grep -v '^pvj/' | xargs -r python3 -m py_compile
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck new scripts (strict)
+        run: |
+          files=$(git ls-files 'pvj/**/*.sh' 'install/**/*.sh' 2>/dev/null || true)
+          [ -z "$files" ] || shellcheck $files
+      - name: ShellCheck legacy scripts (advisory, errors only)
+        continue-on-error: true
+        run: git ls-files '*.sh' | grep -v -E '^(pvj|install)/' | xargs -r shellcheck --severity=error
+
+  links:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          fail: false
+          args: --no-progress --max-concurrency 4 --timeout 10 --max-retries 0 --exclude 'sinaimg\.cn' '*.md' 'docs/*.md'
