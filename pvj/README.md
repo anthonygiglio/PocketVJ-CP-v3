@@ -47,3 +47,9 @@ Not yet done: the PHP panel and OSC do not call `pvj-player` yet, and the audio,
 - `startmaster95` plays `65*` upstream (copy-paste error); the preset plays `95*`.
 
 Not ported yet: slave, stream and wifi presets, network sync between boxes (master presets play locally and print a warning), the "play a slideshow after the video" option, and the audio output flag (`local`, `both`); Pi 5 has no headphone jack, so audio selection needs its own module.
+
+## Running as a service
+
+`install/pvj-player.service` runs `pvj-player serve` under systemd as the account that owns the screen and sound card (`@PVJ_USER@`, `@PVJ_DIR@` are filled in by the installer, which is not written yet). It restarts the player if it dies, and puts the control socket in `/run/pvj`, group-writable for the `pvj` group. The web panel and OSC then run as their own users, join that group, and use `pvj-player play --no-spawn ...` (or the socket directly). A world-accessible runtime directory is refused.
+
+Not verified on a real device: the unit passes `systemd-analyze verify` here, but restart-on-crash, the group permissions and DRM access need a test on a Pi.

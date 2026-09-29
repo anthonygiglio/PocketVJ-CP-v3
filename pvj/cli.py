@@ -17,10 +17,14 @@ def build_parser():
     pl.add_argument("--once", action="store_true", help="do not loop")
     pl.add_argument("--audio-device", help="mpv audio device name, see: mpv --audio-device=help")
     pl.add_argument("--windowed", action="store_true")
+    pl.add_argument("--no-spawn", action="store_true", help="never start mpv; require the systemd service")
     st = sub.add_parser("start", help="run a legacy preset by its old script name, e.g. startlessonce05")
     st.add_argument("preset")
     st.add_argument("--media-dir")
     st.add_argument("--usb-dir")
+    st.add_argument("--no-spawn", action="store_true", help="never start mpv; require the systemd service")
+    sv = sub.add_parser("serve", help="run the player in the foreground for systemd")
+    sv.add_argument("--windowed", action="store_true")
     sub.add_parser("stop")
     pa = sub.add_parser("pause")
     pa.add_argument("state", nargs="?", choices=["on", "off"], help="omit to toggle")
@@ -47,7 +51,12 @@ def main(argv=None):
         if c == "play":
             extra = hardware.playback_profile(hardware.detect_board(), hardware.has_desktop())["mpv_args"]
             player.extra_args = extra + player.extra_args
-            player.play(args.paths, loop=not args.once, audio_device=args.audio_device, windowed=args.windowed)
+            player.play(args.paths, loop=not args.once, audio_device=args.audio_device, windowed=args.windowed,
+                        spawn=not args.no_spawn)
+        elif c == "serve":
+            extra = hardware.playback_profile(hardware.detect_board(), hardware.has_desktop())["mpv_args"]
+            player.extra_args = extra + player.extra_args
+            player.serve(windowed=args.windowed)
         elif c == "start":
             preset = presets.parse_legacy_name(args.preset)
             files = presets.resolve_files(preset, args.media_dir, args.usb_dir)
@@ -55,7 +64,7 @@ def main(argv=None):
                 print("pvj-player: network sync is not ported yet; playing locally only", file=sys.stderr)
             extra = hardware.playback_profile(hardware.detect_board(), hardware.has_desktop())["mpv_args"]
             player.extra_args = extra + player.extra_args
-            player.play(files, loop=preset["loop"])
+            player.play(files, loop=preset["loop"], spawn=not args.no_spawn)
         elif c == "stop":
             player.stop()
         elif c == "pause":

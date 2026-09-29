@@ -30,8 +30,14 @@ def runtime_dir():
         base = os.path.join(xdg, "pvj") if xdg else "/tmp/pvj-%d" % os.getuid()
     os.makedirs(base, mode=0o700, exist_ok=True)
     st = os.stat(base)
-    if st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) & 0o077:
-        raise PlayerError("unsafe runtime directory %s (must be private and owned by you)" % base)
+    mode = stat.S_IMODE(st.st_mode)
+    if mode & 0o007:
+        raise PlayerError("unsafe runtime directory %s (world accessible)" % base)
+    if st.st_uid != os.getuid():
+        # Shared service directory (e.g. /run/pvj, mode 0770): allowed only
+        # for members of its group.
+        if not (mode & 0o070 and st.st_gid in os.getgroups()):
+            raise PlayerError("unsafe runtime directory %s (not yours and not in its group)" % base)
     return base
 
 
@@ -112,9 +118,7 @@ class Player:
         except PlayerError:
             return False
 
-    def _spawn(self, audio_device=None, windowed=False):
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
+    def mpv_command(self, audio_device=None, windowed=False):
         args = [self.mpv_bin, "--idle=yes", "--input-ipc-server=" + self.socket_path,
                 "--no-terminal", "--really-quiet", "--osd-level=0", "--no-osc",
                 "--keep-open=no", "--force-window=yes"]
@@ -123,6 +127,23 @@ class Player:
         if audio_device:
             args.append("--audio-device=" + audio_device)
         args += self.extra_args
+        return args
+
+    def serve(self, audio_device=None, windowed=False):
+        """Run mpv in the foreground, replacing this process. For systemd: it
+        supervises mpv and restarts it, and the socket is the control channel."""
+        if os.path.exists(self.socket_path):
+            os.unlink(self.socket_path)
+        args = self.mpv_command(audio_device, windowed)
+        try:
+            os.execvp(args[0], args)
+        except FileNotFoundError:
+            raise PlayerError("mpv not found; install it (sudo apt install mpv)")
+
+    def _spawn(self, audio_device=None, windowed=False):
+        if os.path.exists(self.socket_path):
+            os.unlink(self.socket_path)
+        args = self.mpv_command(audio_device, windowed)
         try:
             proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, start_new_session=True)
@@ -141,11 +162,13 @@ class Player:
         proc.terminate()
         raise PlayerError("mpv did not become ready")
 
-    def play(self, paths, loop=True, audio_device=None, windowed=False):
+    def play(self, paths, loop=True, audio_device=None, windowed=False, spawn=True):
         files = expand_media(paths)
         if not files:
             raise PlayerError("no playable files found")
         if not self.is_running():
+            if not spawn:
+                raise PlayerError("player service is not running (systemctl start pvj-player)")
             self._spawn(audio_device, windowed)
         elif audio_device:
             self.ipc.request("set_property", "audio-device", audio_device)

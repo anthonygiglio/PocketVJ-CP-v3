@@ -136,3 +136,50 @@ class CliTest(unittest.TestCase):
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue(all(c["ok"] for c in json.loads(r.stdout)["checks"]))
+
+
+@unittest.skipUnless(shutil.which("mpv"), "mpv not installed")
+class ServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.chmod(self.dir, 0o770)
+        self.env = dict(os.environ, PVJ_RUNTIME_DIR=self.dir)
+        self.cli = [__import__("sys").executable,
+                    os.path.join(os.path.dirname(__file__), "..", "bin", "pvj-player"),
+                    "--mpv-arg=--vo=null", "--mpv-arg=--ao=null"]
+
+    def run_cli(self, *args):
+        import subprocess
+        return subprocess.run(self.cli + list(args), capture_output=True, text=True, env=self.env, timeout=30)
+
+    def test_no_spawn_requires_service(self):
+        r = self.run_cli("play", "--no-spawn", SRC)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("service is not running", r.stderr)
+
+    def test_serve_then_control_without_spawning(self):
+        import json
+        import subprocess
+        svc = subprocess.Popen(self.cli + ["serve"], env=self.env, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        self.addCleanup(svc.wait)
+        self.addCleanup(svc.kill)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not json.loads(self.run_cli("status").stdout)["running"]:
+            if svc.poll() is not None:
+                self.fail("service exited")
+            time.sleep(0.2)
+        r = self.run_cli("play", "--no-spawn", SRC)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.run_cli("status").stdout)["path"], SRC)
+        # the service is the process we started, not a child spawned by the CLI
+        self.assertIsNone(svc.poll())
+
+    def test_group_accessible_dir_ok_world_accessible_rejected(self):
+        from pvj import player
+        os.environ["PVJ_RUNTIME_DIR"] = self.dir
+        self.addCleanup(os.environ.pop, "PVJ_RUNTIME_DIR")
+        self.assertEqual(player.runtime_dir(), self.dir)
+        os.chmod(self.dir, 0o775)
+        with self.assertRaises(PlayerError):
+            player.runtime_dir()
