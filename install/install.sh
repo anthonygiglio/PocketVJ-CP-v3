@@ -86,7 +86,7 @@ uninstall() {
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 		systemctl disable --now pvj-player.service 2>/dev/null || true
 	fi
-	run rm -f "$UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb"
+	run rm -f "$UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs"
 	run rm -rf "${ROOT}${PREFIX:?}"
 	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
@@ -158,6 +158,7 @@ run mkdir -p "$BIN_LINKS"
 run ln -sfn "$PREFIX/current/bin/pvj-player" "$BIN_LINKS/pvj-player"
 run ln -sfn "$PREFIX/current/bin/pvj-selftest" "$BIN_LINKS/pvj-selftest"
 run ln -sfn "$PREFIX/current/bin/pvj-usb" "$BIN_LINKS/pvj-usb"
+run ln -sfn "$PREFIX/current/bin/pvj-rootfs" "$BIN_LINKS/pvj-rootfs"
 
 # --- settings and media (never overwritten if they exist) -----------------
 run mkdir -p "$ETC"

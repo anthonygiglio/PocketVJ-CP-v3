@@ -55,6 +55,7 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("@PVJ", usb_unit)
         self.assertIn("pvj-usb@%k.service", self.read(self.p("etc/udev/rules.d/99-pvj-usb.rules")))
         self.assertEqual(os.readlink(self.p("usr/local/bin/pvj-usb")), "/opt/pvj/current/bin/pvj-usb")
+        self.assertEqual(os.readlink(self.p("usr/local/bin/pvj-rootfs")), "/opt/pvj/current/bin/pvj-rootfs")
         self.assertEqual(json.loads(self.read(self.p("etc/pvj/install.json")))["version"], "9.9.1")
         self.assertTrue(os.path.isdir(self.p("var/lib/pvj/video")))
 
@@ -93,6 +94,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(install(self.src, self.stage, "--uninstall").returncode, 0)
         self.assertFalse(os.path.exists(self.p("opt/pvj")))
         self.assertFalse(os.path.lexists(self.p("usr/local/bin/pvj-player")))
+        self.assertFalse(os.path.lexists(self.p("usr/local/bin/pvj-rootfs")))
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-player.service")))
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-usb@.service")))
         self.assertFalse(os.path.exists(self.p("etc/udev/rules.d/99-pvj-usb.rules")))

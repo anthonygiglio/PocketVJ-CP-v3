@@ -65,3 +65,13 @@ Not verified on a real device: the unit passes `systemd-analyze verify` here, bu
 - `/media/usb` is only replaced if it is already a link; a real folder there (legacy image) is left alone.
 
 Tested with a fake `blkid`/`mount` (label cleaning, options, collisions, refusal cases, unmount). Not tested: a real udev event, real filesystems, or the udev rule itself (`udevadm` was not available to verify its syntax).
+
+## Read-only root (power-loss protection)
+
+`sudo pvj-rootfs enable` makes the system disk effectively read-only: everything written after boot lives in RAM and is gone at the next reboot, so pulling the plug cannot corrupt the SD card or SSD. `pvj-rootfs disable` turns it off, `pvj-rootfs status` reports the state. It uses the tools the system already has: `raspi-config` on Raspberry Pi OS, the `overlayroot` package elsewhere (`sudo apt install overlayroot`). It never reboots for you.
+
+- **Media must not live on the system disk.** Files added while the overlay is active are lost at reboot, so `enable` refuses if `PVJ_MEDIA_DIR` is on the same filesystem as `/` (override with `--force`). Use a second disk or a USB drive.
+- **Settings are read-only too.** Changes to `/etc/pvj` need `pvj-rootfs disable`, a reboot, the edit, then `enable` and another reboot.
+- USB drives already mount read-only by default, so they are unaffected.
+
+Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the `raspi-config` and `overlayroot` commands (especially `overlayroot-chroot` when disabling from inside an active overlay) and the reboot behaviour. Do that on a spare card first.
