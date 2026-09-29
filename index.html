@@ -1696,10 +1696,15 @@ elem2.addEventListener("input", range2Value);
    <!--Code below is for button actions -->
    
      <script type="text/javascript">
+      // Required by the server-side CSRF guard (security.php).
+      $.ajaxSetup({ headers: { "X-PVJ-Request": "1" } });
       $("a.action").on("click", function(event) { 
           event.preventDefault();
-          $.get( "backend.php" + $(this).attr('href'), function(data) {
+          var action = ($(this).attr('href') || '').replace(/^\?action=/, '');
+          $.post("backend.php", { action: action }, function(data) {
              $("#actions_output").html(data);
+          }).fail(function(xhr) {
+             $("#actions_output").text("Request failed (" + xhr.status + ")");
           });
       });
       </script>

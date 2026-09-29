@@ -11,6 +11,7 @@ If you Build it from scratch...
 
 - Add www-data to your sudoers list with:\
    `visudo` add this line at the end: `www-data ALL=(ALL) NOPASSWD: ALL`
+   > **Security:** this gives the web server root. The panel must only be reachable on a private network, and /var/www must be owned by root and not writable by www-data. A narrower sudoers list is not possible until the backend stops calling generic `cp`, `sed`, `rm` and `su` through sudo.
 - Allow php with: `sudo lighty-enable-mod fastcgi-php`
 
 ## Install dependencies

@@ -1,5 +1,15 @@
 # PocketVJ 3.x /  Control Panel 3.x.x
 
+## CP 3.9.0 (NXLX fork) security hotfix <br />
+
+- fixed remote root command injection in submit_opacity.php, submit_size.php, submit_Xposition.php and submit_speed.php: values are now validated as numbers within the slider range and passed as a single quoted argument<br />
+- fixed reflected XSS in submit_speed.php<br />
+- fixed time_change.php: only an exact YYYY-MM-DD HH:MM:SS cookie is accepted and it is quoted<br />
+- backend.php and the four submit_*.php endpoints now accept POST only, with a same-origin request header. This blocks cross-site requests and stops a browser reconnect from replaying an action such as reboot<br />
+- the panel's buttons now send POST; any external script that called backend.php?action=... with GET must switch to POST with the header X-PVJ-Request: 1<br />
+- the Disable password button now works (the button and backend disagreed on the spelling)<br />
+- still open: www-data has passwordless sudo (docs/build.md) and the password login is off by default. Run the panel only on a private network until the platform rewrite lands<br />
+
 ## CP 3.0.9 17.Februar 2022 <br />
 
 - added simplepainter<br />
