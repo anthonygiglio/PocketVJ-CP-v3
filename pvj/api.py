@@ -88,7 +88,7 @@ class Api:
         self.addons_dir = addons_dir
         self.spawn = spawn        # True only for development: start mpv ourselves
         self.on_pin = on_pin      # called with the new PIN so the box can show it
-        self.mix = {"opacity": 100, "blackout": False}
+        self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
 
     # --- helpers -------------------------------------------------------
@@ -145,7 +145,7 @@ class Api:
 
     def status(self, body, device, client):
         temps = hardware.temperatures()
-        return {"player": self.player.status(), "mix": dict(self.mix),
+        return {"player": self.player.status(), "mix": dict(self.mix, **self.settings.data["mix"]),
                 "system": {"board": self.board["kind"], "model": self.board["model"],
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
                 "device": device}
@@ -228,13 +228,16 @@ class Api:
                 self.fader.cancel()
                 self._player_call(p.opacity, round(self.mix["opacity"] * 2.55))
         elif action == "size":
-            self._player_call(p.size, number(body, "value", 1, 200))
+            self.mix["size"] = number(body, "value", 1, 200)
+            self._player_call(p.size, self.mix["size"])
         elif action == "position":
-            self._player_call(p.position, number(body, "value", -100, 100) * 10)
+            self.mix["position"] = number(body, "value", -100, 100)
+            self._player_call(p.position, self.mix["position"] * 10)
         elif action == "rotate":
             degrees = number(body, "value", 0, 270, integer=True)
             if degrees not in (0, 90, 180, 270):
                 raise bad("rotation must be 0, 90, 180 or 270")
+            self.mix["rotate"] = degrees
             self._player_call(p.rotate, degrees)
         elif action == "loop":
             if not isinstance(body.get("value"), bool):
@@ -245,7 +248,7 @@ class Api:
                 raise bad("value must be true or false")
             self._player_call(p.mute, body["value"])
         elif action == "reset":
-            self.mix["opacity"] = 100
+            self.mix.update(opacity=100, size=100, position=0, rotate=0)
             for fn, arg in ((p.opacity, 255), (p.size, 100), (p.position, 0), (p.speed, 1), (p.rotate, 0)):
                 self._player_call(fn, arg)
         else:

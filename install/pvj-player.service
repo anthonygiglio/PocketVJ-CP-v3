@@ -13,6 +13,7 @@ SupplementaryGroups=video render audio input
 # Control socket for the web panel and OSC: /run/pvj, group-writable by "pvj".
 RuntimeDirectory=pvj
 RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=yes
 UMask=0007
 EnvironmentFile=-/etc/pvj/pvj.env
 Environment=PVJ_RUNTIME_DIR=/run/pvj

@@ -75,6 +75,7 @@ REAL=$([ -z "$STAGE" ] && echo 1 || echo 0)
 ETC="$ROOT/etc/pvj"
 UNIT="$ROOT/etc/systemd/system/pvj-player.service"
 USB_UNIT="$ROOT/etc/systemd/system/pvj-usb@.service"
+WEB_UNIT="$ROOT/etc/systemd/system/pvj-web.service"
 USB_RULE="$ROOT/etc/udev/rules.d/99-pvj-usb.rules"
 BIN_LINKS="$ROOT/usr/local/bin"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/pvj/__init__.py")"
@@ -86,7 +87,7 @@ uninstall() {
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 		systemctl disable --now pvj-player.service 2>/dev/null || true
 	fi
-	run rm -f "$UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs"
+	run rm -f "$UNIT" "$WEB_UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs" "$BIN_LINKS/pvj-pin"
 	run rm -rf "${ROOT}${PREFIX:?}"
 	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
@@ -130,6 +131,11 @@ if [ "$REAL" = 1 ]; then
 		getent group "$g" >/dev/null && run usermod -aG "$g" "$PVJ_USER"
 	done
 	if [ -n "$WEB_USER" ]; then run usermod -aG pvj "$WEB_USER"; fi
+	# The web panel runs as its own account with no screen or sound access.
+	if ! id pvj-web >/dev/null 2>&1; then
+		log "creating system user pvj-web"
+		run useradd --system --no-create-home --shell /usr/sbin/nologin --gid pvj pvj-web
+	fi
 fi
 
 # --- program files: releases/<version>, "current" points at the active one --
@@ -159,6 +165,7 @@ run ln -sfn "$PREFIX/current/bin/pvj-player" "$BIN_LINKS/pvj-player"
 run ln -sfn "$PREFIX/current/bin/pvj-selftest" "$BIN_LINKS/pvj-selftest"
 run ln -sfn "$PREFIX/current/bin/pvj-usb" "$BIN_LINKS/pvj-usb"
 run ln -sfn "$PREFIX/current/bin/pvj-rootfs" "$BIN_LINKS/pvj-rootfs"
+run ln -sfn "$PREFIX/current/bin/pvj-pin" "$BIN_LINKS/pvj-pin"
 
 # --- settings and media (never overwritten if they exist) -----------------
 run mkdir -p "$ETC"
@@ -170,13 +177,20 @@ PVJ_MEDIA_DIR=$MEDIA
 PVJ_USB_DIR=/media/usb
 # USB drives are mounted read-only under /media/pvj/<label>. Set to 1 to allow writing.
 PVJ_USB_RW=0
+# Web panel: port and address. The panel is for a private network; do not expose it to the internet.
+# PVJ_PORT=80
+# PVJ_BIND=0.0.0.0
 ENV
 	fi
 else
 	log "keeping existing $ETC/pvj.env"
 fi
 run mkdir -p "$ROOT$MEDIA"
-if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then chown "$PVJ_USER":pvj "$MEDIA"; chmod 2775 "$MEDIA"; fi
+if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then
+	chown "$PVJ_USER":pvj "$MEDIA"; chmod 2775 "$MEDIA"
+	# settings.json lives in /var/lib/pvj and is written by the web panel (group pvj)
+	mkdir -p /var/lib/pvj; chgrp pvj /var/lib/pvj; chmod 2775 /var/lib/pvj
+fi
 if [ "$DRY" = 0 ]; then
 	printf '{"version": "%s", "prefix": "%s", "user": "%s", "installed": "%s"}\n' \
 		"$VERSION" "$PREFIX" "$PVJ_USER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ETC/install.json"
@@ -186,6 +200,7 @@ fi
 run mkdir -p "$(dirname "$UNIT")"
 if [ "$DRY" = 0 ]; then
 	sed -e "s|@PVJ_USER@|$PVJ_USER|g" -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-player.service" > "$UNIT"
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-web.service" > "$WEB_UNIT"
 fi
 # USB automount: udev starts pvj-usb@<partition>.service, which mounts by label.
 run mkdir -p "$(dirname "$USB_RULE")"
@@ -196,8 +211,8 @@ fi
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && command -v udevadm >/dev/null; then udevadm control --reload || true; fi
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
-	systemctl enable pvj-player.service
-	if [ "$START" = 1 ]; then systemctl restart pvj-player.service; fi
+	systemctl enable pvj-player.service pvj-web.service
+	if [ "$START" = 1 ]; then systemctl restart pvj-player.service pvj-web.service; fi
 fi
 
 log "installed. Check the device with: pvj-selftest --play"

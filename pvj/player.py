@@ -283,7 +283,7 @@ class Player:
             return {"running": False}
         out = {"running": True}
         for key, prop in (("path", "path"), ("position", "time-pos"), ("duration", "duration"),
-                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"), ("muted", "mute"),
+                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"), ("muted", "mute"), ("loop_file", "loop-file"), ("loop_playlist", "loop-playlist"),
                           ("playlist_pos", "playlist-pos"), ("playlist_count", "playlist-count")):
             try:
                 out[key] = self.ipc.request("get_property", prop)

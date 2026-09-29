@@ -75,3 +75,26 @@ Tested with a fake `blkid`/`mount` (label cleaning, options, collisions, refusal
 - USB drives already mount read-only by default, so they are unaffected.
 
 Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the `raspi-config` and `overlayroot` commands (especially `overlayroot-chroot` when disabling from inside an active overlay) and the reboot behaviour. Do that on a spare card first.
+
+## Web panel and control API (Phase 4, in progress)
+
+`bin/pvj-web` (service `install/pvj-web.service`) replaces the ~1900 line PHP backend with a small Python 3 server (standard library only) and a plain HTML, CSS and JavaScript panel with no framework and no CDN, so it works offline. Screens built so far, from the approved wireframes: Connect (pairing), Live (banks, pads, now playing, fade out, freeze, blackout), Mix (opacity, size, position, speed, transition, rotate, loop, mute, reset), Media, and System (vitals, modules, appearance, access).
+
+**Pairing.** The box makes a fresh 4-digit PIN at every start and keeps it in `/run/pvj/pin` (RAM, gone at reboot); read it with `sudo pvj-pin`. Entering it on a phone gives that phone a token (HttpOnly, SameSite=Strict cookie, or `Authorization: Bearer` for scripts). Paired devices survive restarts. Guest links give `view` (look only) or `live` (play and mix) access; only paired `full` devices can change pads, modules, theme and access. Guessing is throttled per client and globally.
+
+**What the server enforces.** State-changing calls are POST only, JSON, with the header `X-PVJ-Request: 1` and a matching `Origin`, so another website cannot drive the box, and a browser reconnect cannot replay a reboot. Every number is range-checked; media names are plain file names resolved inside the media folder (no paths, no dot files, symlinks that leave the folder are refused); nothing user-supplied reaches a shell. The panel is served with a Content-Security-Policy that forbids inline script, external resources and framing. The service runs as its own `pvj-web` user, sandboxed by systemd, and reaches the player only through its socket.
+
+| Path | Access | Purpose |
+| --- | --- | --- |
+| `GET /api/hello`, `POST /api/pair`, `POST /api/session` | none | discovery, PIN pairing, guest link |
+| `GET /api/status`, `/api/media`, `/api/pads`, `/api/modules`, `/api/theme` | view | read state |
+| `POST /api/play`, `/api/control`, `/api/blackout`, `/api/fadeout`, `/api/mix` | live | play and mix |
+| `POST /api/pads`, `/api/theme`, `/api/modules/<id>`, `/api/devices/invite`, `/api/devices/revoke`, `/api/pin/rotate`, `/api/player/restart`, `GET /api/devices` | full | configure |
+
+**Settings** are one JSON file (`/var/lib/pvj/settings.json`, mode 0600), written atomically with a backup and automatic recovery if a power cut tears the file. A schema change backs the old file up (`settings.json.bak-v<old>`) and migrates it; a file from a newer version is never rewritten, so rolling the program back cannot destroy settings.
+
+**Modules** are JSON manifests in `pvj/modules.d`: core modules are locked on, optional ones switch on and off, board support and dependencies are enforced, and modules that are not built yet (mapper, NDI, SRT/RTSP/RTMP, AES67/Dante, ST 2110, presenter, wall, control, projector) are listed as "Not built yet" and cannot be switched on. **Themes** are token files (`pvj/themes.d`, plus your own in `<state>/addons/themes`, which updates never touch); colours are validated as `#rrggbb` and text on an accent is chosen for contrast automatically.
+
+**Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), OSC and MIDI, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.
+
+**Tested:** unit tests for settings, auth, modules and themes; HTTP tests for authentication, CSRF, roles, path confinement and validation; an end-to-end test through HTTP into a real headless mpv; and a real-browser test (Playwright) that pairs, assigns and plays a pad, drags a slider, switches theme, opens a guest link and fails on any CSP violation. Not tested on a real Pi, on real touch hardware, or with a real display.

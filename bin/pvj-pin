@@ -1,0 +1,4 @@
+#!/bin/sh
+# Print the current pairing PIN (kept in a RAM file that vanishes at reboot).
+f="${PVJ_RUNTIME_DIR:-/run/pvj}/pin"
+if [ -r "$f" ]; then cat "$f"; else echo "pvj-pin: cannot read $f (run with sudo, and check that pvj-web is running)" >&2; exit 1; fi
