@@ -1,0 +1,17 @@
+{
+  "id": "core",
+  "name": "Player engine and web panel",
+  "version": "0.1.0",
+  "type": "core",
+  "channel": "stable",
+  "requires": [],
+  "boards": [
+    "pi3",
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "ready",
+  "default_enabled": true,
+  "description": "The player service, control API and web panel."
+}

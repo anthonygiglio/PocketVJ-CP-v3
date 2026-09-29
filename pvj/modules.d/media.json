@@ -1,0 +1,17 @@
+{
+  "id": "media",
+  "name": "Media library",
+  "version": "0.1.0",
+  "type": "core",
+  "channel": "stable",
+  "requires": [],
+  "boards": [
+    "pi3",
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Upload, list and organise clips and pads."
+}

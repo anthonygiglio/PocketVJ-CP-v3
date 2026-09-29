@@ -1,0 +1,19 @@
+{
+  "id": "wall",
+  "name": "Video wall and sync",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi3",
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Multi-box synchronised playback."
+}

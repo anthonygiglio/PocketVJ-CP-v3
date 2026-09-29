@@ -1,0 +1,13 @@
+{
+  "id": "dark-stage",
+  "name": "Dark stage",
+  "tokens": {
+    "bg": "#121214",
+    "cd": "#1c1c20",
+    "fg": "#f2f1ec",
+    "ln": "#4a4a54",
+    "mu": "#a9a8a3",
+    "ac": "#f59e0b",
+    "on": "#1a1300"
+  }
+}

@@ -1,0 +1,23 @@
+version = 1
+SPDX-PackageName = "NXLX PocketVJ"
+
+# Files that cannot carry a comment header, and documentation, written for this fork.
+[[annotations]]
+path = [
+  "pvj/modules.d/**",
+  "pvj/themes.d/**",
+  "pvj/*.md",
+  "install/README.md",
+  "image/README.md",
+  "image/config",
+  "image/stage-pvj/EXPORT_IMAGE",
+  "image/stage-pvj/00-install-pvj/00-packages-nr",
+  "image/stage-pvj/00-install-pvj/files/.gitkeep",
+  "LICENSES/Apache-2.0.txt",
+  "NOTICE.md",
+  "SECURITY.md",
+  "THIRD_PARTY_LICENSES.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 NXLX and contributors"
+SPDX-License-Identifier = "Apache-2.0"

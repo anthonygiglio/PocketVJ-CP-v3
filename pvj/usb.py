@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """USB drive automount by label, called from a udev-triggered systemd unit.
 
 Replaces mountusb.sh (which mounted sda1 and sda2 on the same folder) and the
@@ -36,6 +38,21 @@ def sanitize_label(label, fallback):
 
 def parent_disk(devnode):
     return re.sub(r"[0-9]+$", "", devnode)
+
+
+def backing_disks(paths=SYSTEM_MOUNTS, sysfs="/sys/dev/block", stat=os.stat):
+    """Disks that hold the running system, found from device numbers, so a root shown as
+    /dev/root (or an overlay) in /proc/mounts cannot hide the system disk."""
+    disks = set()
+    for path in paths:
+        try:
+            dev = stat(path).st_dev
+        except OSError:
+            continue
+        name = os.path.basename(os.path.realpath("%s/%d:%d" % (sysfs, os.major(dev), os.minor(dev))))
+        if re.match(r"^sd[a-z]+[0-9]*$", name):
+            disks.add(parent_disk("/dev/" + name))
+    return disks
 
 
 def read_mounts(path="/proc/mounts"):
@@ -88,7 +105,7 @@ def _free_mountpoint(base, name, mounted_points):
     return candidate
 
 
-def mount(devnode, env=None, runner=subprocess.run, proc_mounts="/proc/mounts", log=print):
+def mount(devnode, env=None, runner=subprocess.run, proc_mounts="/proc/mounts", log=print, system_disks=None):
     env = os.environ if env is None else env
     if not DEVNODE.match(devnode or ""):
         raise UsbError("refusing %r (not a USB disk device node)" % devnode)
@@ -101,6 +118,8 @@ def mount(devnode, env=None, runner=subprocess.run, proc_mounts="/proc/mounts", 
         log("%s is already mounted" % devnode)
         return None
     disk = parent_disk(devnode)
+    if disk in (backing_disks() if system_disks is None else system_disks):
+        raise UsbError("refusing %s: %s holds the running system" % (devnode, disk))
     for dev, point in mounts:
         if parent_disk(dev) == disk and point in SYSTEM_MOUNTS:
             raise UsbError("refusing %s: %s holds the running system (%s)" % (devnode, disk, point))

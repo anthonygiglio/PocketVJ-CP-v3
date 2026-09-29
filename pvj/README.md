@@ -75,3 +75,50 @@ Tested with a fake `blkid`/`mount` (label cleaning, options, collisions, refusal
 - USB drives already mount read-only by default, so they are unaffected.
 
 Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the `raspi-config` and `overlayroot` commands (especially `overlayroot-chroot` when disabling from inside an active overlay) and the reboot behaviour. Do that on a spare card first.
+
+## Web panel and control API (Phase 4, in progress)
+
+`bin/pvj-web` (service `install/pvj-web.service`) replaces the ~1900 line PHP backend with a small Python 3 server (standard library only) and a plain HTML, CSS and JavaScript panel with no framework and no CDN, so it works offline. Screens built so far, from the approved wireframes: Connect (pairing), Live (banks, pads, now playing, fade out, freeze, blackout), Mix (opacity, size, position, speed, transition, rotate, loop, mute, reset), Media, and System (vitals, modules, appearance, access).
+
+**Pairing.** The box makes a fresh 4-digit PIN at every start and keeps it in `/run/pvj/pin` (RAM, gone at reboot); read it with `sudo pvj-pin`. Entering it on a phone gives that phone a token (HttpOnly, SameSite=Strict cookie, or `Authorization: Bearer` for scripts). Paired devices survive restarts. Guest links give `view` (look only) or `live` (play and mix) access; only paired `full` devices can change pads, modules, theme and access. Guessing is throttled per client and globally (attempts are counted exactly, even under a flood). The global limit means someone on your network can block *new* pairing for a few minutes by guessing badly; paired devices are never affected, and a paired full-access device clears the lockout with "New PIN" in System.
+
+**What the server enforces.** State-changing calls are POST only, JSON, with the header `X-PVJ-Request: 1` and a matching `Origin`, so another website cannot drive the box, and a browser reconnect cannot replay a reboot. Every number is range-checked; media names are plain file names resolved inside the media folder (no paths, no dot files, symlinks that leave the folder are refused); nothing user-supplied reaches a shell. The panel is served with a Content-Security-Policy that forbids inline script, external resources and framing. The service runs as its own `pvj-web` user, sandboxed by systemd, and reaches the player only through its socket.
+
+| Path | Access | Purpose |
+| --- | --- | --- |
+| `GET /api/hello`, `POST /api/pair`, `POST /api/session` | none | discovery, PIN pairing, guest link |
+| `GET /api/status`, `/api/media`, `/api/pads`, `/api/modules`, `/api/theme` | view | read state |
+| `POST /api/play`, `/api/control`, `/api/blackout`, `/api/fadeout`, `/api/mix` | live | play and mix |
+| `POST /api/pads`, `/api/theme`, `/api/modules/<id>`, `/api/devices/invite`, `/api/devices/revoke`, `/api/pin/rotate`, `/api/player/restart`, `GET /api/devices` | full | configure |
+
+**Settings** are one JSON file (`/var/lib/pvj/settings.json`, mode 0600), written atomically with a backup and automatic recovery if a power cut tears the file. A schema change backs the old file up (`settings.json.bak-v<old>`) and migrates it; a file from a newer version is never rewritten, so rolling the program back cannot destroy settings.
+
+**Modules** are JSON manifests in `pvj/modules.d`: core modules are locked on, optional ones switch on and off, board support and dependencies are enforced, and modules that are not built yet (mapper, NDI, SRT/RTSP/RTMP, AES67/Dante, ST 2110, presenter, wall, control, projector) are listed as "Not built yet" and cannot be switched on. **Themes** are token files (`pvj/themes.d`, plus your own in `<state>/addons/themes`, which updates never touch); colours are validated as `#rrggbb` and text on an accent is chosen for contrast automatically.
+
+**OSC** is built, off by default, receive-only and limited to private networks; see [OSC.md](OSC.md) for the addresses and the safety rules.
+
+**Known limits:** "Restart player now" asks the player to quit and relies on systemd to bring it back; if mpv is completely wedged and ignores that request, restart it from a terminal (`sudo systemctl restart pvj-player`), because the panel runs unprivileged by design. A hardware watchdog for that case is not built. The server caps simultaneous connections at 64 and closes any connection after 30 seconds, so a flood of slow clients cannot exhaust it, but it does not replace a private network.
+
+**Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), MIDI, DMX and Art-Net, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.
+
+**Tested:** unit tests for settings, auth, modules and themes; HTTP tests for authentication, CSRF, roles, path confinement and validation; an end-to-end test through HTTP into a real headless mpv; and a real-browser test (Playwright) that pairs, assigns and plays a pad, drags a slider, switches theme, opens a guest link and fails on any CSP violation. Not tested on a real Pi, on real touch hardware, or with a real display.
+
+## Updates and rollback
+
+Releases are signed bundles, installed by `sudo pvj-update`. Nothing is fetched from the internet by default; an update works from a USB stick at a venue with no network.
+
+**One-time setup (your signing key).**
+
+1. On your own computer: `ssh-keygen -t ed25519 -f ~/.ssh/pvj-release -C nxlx-release`. Keep the private key safe and offline.
+2. On each box add one line to `/etc/pvj/allowed_signers` (the installer creates the file empty; until a key is listed every update is refused):
+   `pvj-release namespaces="pvj-release" ssh-ed25519 AAAA...your public key...`
+
+**Making a release.** Set the version in `pvj/__init__.py`, commit, then `tools/make-release.sh 4.0.1 --key ~/.ssh/pvj-release`. It writes `dist/pvj-4.0.1.tar.gz`, `.sha256` and `.sig`. The archive is reproducible (same commit, same bytes) and contains only `pvj/`, `bin/` and `install/`, never the legacy code.
+
+**Installing.** Put the three files in a `pvj-update/` folder on a USB stick, plug it in and run `sudo pvj-update usb`; or `sudo pvj-update apply pvj-4.0.1.tar.gz`. `pvj-update check FILE` verifies without installing; `pvj-update status` shows the current and previous release.
+
+**What it checks before touching anything:** SHA-256, the OpenSSH Ed25519 signature against your key, safe unpacking (no absolute or `..` paths, no links or device files, no setuid bits, size limits), enough disk space, a newer version, and that the settings format is not being downgraded (`--force` overrides the last two). It then backs up `settings.json`, installs into a new folder under `/opt/pvj/releases`, switches `/opt/pvj/current` atomically, restarts the services and waits for the panel to answer. **If it does not answer, the previous release and your settings are put back automatically.**
+
+**Rolling back by hand:** `sudo pvj-update rollback`. Settings migrations only go forward, so rollback restores the backup taken before the update; anything changed since is set aside as `settings.json.rolled-back-<time>`, not deleted. The last five backups are kept.
+
+**Not built yet:** a button in the panel (the panel runs unprivileged and cannot install), fetching updates over the network, and the Stable/Beta/Nightly channels, which need a hosted release feed. Tested here with the real installer in stage mode and real OpenSSH signatures; not tested with a real `systemctl` restart, on a Pi, or with a real USB stick.

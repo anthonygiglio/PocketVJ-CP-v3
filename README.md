@@ -22,4 +22,6 @@ A modernization of PocketVJ CP v3, a control panel for playing, mixing and mappi
 
 ## Licence and credits
 
+New code in this fork is licensed under the Apache License 2.0; the legacy code keeps its original licence. See [NOTICE.md](NOTICE.md) for exactly which is which.
+
 This is a fork of [PocketVJ CP v3](https://github.com/magdesign/PocketVJ-CP-v3) by Marc-André Gasser (magdesign) and contributors. The original [LICENSE.md](LICENSE.md) and [AUTHORS.md](AUTHORS.md) are kept unchanged. See [NOTICE.md](NOTICE.md).

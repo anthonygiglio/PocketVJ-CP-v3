@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Runs install/install.sh in --stage mode (no users, apt or systemctl)."""
 import json
 import os
@@ -48,6 +50,14 @@ class InstallTest(unittest.TestCase):
         self.assertIn("User=gigbox", unit)
         self.assertIn("ExecStart=/opt/pvj/current/bin/pvj-player serve", unit)
         self.assertNotIn("@PVJ", unit)
+        web = self.read(self.p("etc/systemd/system/pvj-web.service"))
+        self.assertIn("ExecStart=/opt/pvj/current/bin/pvj-web", web)
+        self.assertIn("User=pvj-web", web)
+        self.assertIn("NoNewPrivileges=yes", web)
+        self.assertNotIn("@PVJ", web)
+        self.assertEqual(os.readlink(self.p("usr/local/bin/pvj-pin")), "/opt/pvj/current/bin/pvj-pin")
+        self.assertEqual(os.readlink(self.p("usr/local/bin/pvj-update")), "/opt/pvj/current/bin/pvj-update")
+        self.assertIn("pvj-release", self.read(self.p("etc/pvj/allowed_signers")))
         self.assertIn("PVJ_MEDIA_DIR=/var/lib/pvj/video", self.read(self.p("etc/pvj/pvj.env")))
         self.assertIn("PVJ_USB_RW=0", self.read(self.p("etc/pvj/pvj.env")))
         usb_unit = self.read(self.p("etc/systemd/system/pvj-usb@.service"))
@@ -84,6 +94,32 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.read(self.p("opt/pvj/previous")).strip(), "/opt/pvj/releases/9.9.1")
         self.assertTrue(os.path.isdir(self.p("opt/pvj/releases/9.9.1")))
 
+    def test_same_version_reinstall_replaces_files_without_leftovers(self):
+        install(self.src, self.stage)
+        with open(os.path.join(self.src, "pvj", "marker.py"), "w") as f:
+            f.write("X = 1\n")
+        self.assertEqual(install(self.src, self.stage).returncode, 0)
+        rel = self.p("opt/pvj/releases")
+        self.assertEqual(os.listdir(rel), ["9.9.1"])  # no .old or .new left behind
+        self.assertTrue(os.path.isfile(os.path.join(rel, "9.9.1", "pvj", "marker.py")))
+        self.assertEqual(os.readlink(self.p("opt/pvj/current")), "/opt/pvj/releases/9.9.1")
+
+    def test_account_chosen_at_first_install_is_kept_when_user_is_omitted(self):
+        install(self.src, self.stage)  # helper passes --user gigbox
+        r = subprocess.run([os.path.join(self.src, "install", "install.sh"), "--stage", self.stage],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("User=gigbox", self.read(self.p("etc/systemd/system/pvj-player.service")))
+
+    def test_dotdot_in_paths_is_refused(self):
+        for bad in (["--prefix", "/opt/x/../../etc"], ["--prefix", "/opt/pvj/.."], ["--media", "/var/lib/../../etc"]):
+            self.assertNotEqual(install(self.src, self.stage, *bad).returncode, 0, bad)
+        self.assertEqual(os.listdir(self.stage), [])
+
+    def test_other_accounts_are_not_added_to_the_pvj_group_by_default(self):
+        text = self.read(os.path.join(self.src, "install", "install.sh"))
+        self.assertNotIn("WEB_USER=www-data", text)  # the legacy PHP user must never reach the PIN file
+
     def test_dry_run_changes_nothing(self):
         r = install(self.src, self.stage, "--dry-run")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -95,7 +131,9 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.p("opt/pvj")))
         self.assertFalse(os.path.lexists(self.p("usr/local/bin/pvj-player")))
         self.assertFalse(os.path.lexists(self.p("usr/local/bin/pvj-rootfs")))
+        self.assertFalse(os.path.lexists(self.p("usr/local/bin/pvj-update")))
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-player.service")))
+        self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-web.service")))
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-usb@.service")))
         self.assertFalse(os.path.exists(self.p("etc/udev/rules.d/99-pvj-usb.rules")))
         self.assertTrue(os.path.exists(self.p("etc/pvj/pvj.env")))

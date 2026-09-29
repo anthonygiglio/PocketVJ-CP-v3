@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 import os
 import subprocess
 import tempfile
@@ -39,7 +41,8 @@ class UsbTest(unittest.TestCase):
             f.write(text)
 
     def mount(self, dev, runner, env=None):
-        return usb.mount(dev, env=env or self.env, runner=runner, proc_mounts=self.mounts, log=self.logs.append)
+        return usb.mount(dev, env=env or self.env, runner=runner, proc_mounts=self.mounts, log=self.logs.append,
+                         system_disks=set())
 
     def test_sanitize_label(self):
         s = usb.sanitize_label
@@ -85,6 +88,26 @@ class UsbTest(unittest.TestCase):
         for dev in ("/dev/sda1; reboot", "/dev/../etc/passwd", "sda1", "/dev/nvme0n1p1", "", None):
             with self.assertRaises(usb.UsbError, msg=repr(dev)):
                 self.mount(dev, FakeRunner())
+
+    def test_backing_disks_found_from_device_numbers_even_when_root_is_dev_root(self):
+        import types
+        sysfs = os.path.join(self.tmp, "sysblock")
+        os.makedirs(os.path.join(self.tmp, "devices", "block", "sda", "sda2"))
+        os.makedirs(sysfs)
+        os.symlink(os.path.join(self.tmp, "devices", "block", "sda", "sda2"), os.path.join(sysfs, "8:2"))
+        fake = lambda path: types.SimpleNamespace(st_dev=os.makedev(8, 2)) if path == "/" else (_ for _ in ()).throw(OSError())
+        self.assertEqual(usb.backing_disks(("/", "/boot"), sysfs, fake), {"/dev/sda"})
+        # tmpfs/overlay device numbers that are not a sd disk are ignored
+        fake_overlay = lambda path: types.SimpleNamespace(st_dev=os.makedev(0, 23))
+        self.assertEqual(usb.backing_disks(("/",), sysfs, fake_overlay), set())
+
+    def test_refuses_the_system_disk_even_if_proc_mounts_hides_it(self):
+        self.set_mounts("/dev/root / ext4 rw 0 0\n")  # no parent disk visible
+        r = FakeRunner({"/dev/sda1": "TYPE=vfat\nLABEL=EFI\n"})
+        with self.assertRaises(usb.UsbError):
+            usb.mount("/dev/sda1", env=self.env, runner=r, proc_mounts=self.mounts, log=self.logs.append,
+                      system_disks={"/dev/sda"})
+        self.assertEqual(r.calls, [])
 
     def test_refuses_disk_holding_running_system(self):
         # USB-booted x86 box: root lives on sda2, so sda1 (same disk) must be left alone

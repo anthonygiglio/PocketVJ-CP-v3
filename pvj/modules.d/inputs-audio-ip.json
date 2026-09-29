@@ -1,0 +1,18 @@
+{
+  "id": "inputs-audio-ip",
+  "name": "AES67 and Dante audio",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Dante devices interoperate through AES67 mode; native Dante needs the community Inferno project or hardware."
+}

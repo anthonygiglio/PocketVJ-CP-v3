@@ -1,0 +1,16 @@
+{
+  "id": "inputs-st2110",
+  "name": "SMPTE ST 2110",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": false,
+  "description": "Needs PTP time sync and a capable network card, so x86 only."
+}

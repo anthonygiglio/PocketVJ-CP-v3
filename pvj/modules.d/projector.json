@@ -1,0 +1,19 @@
+{
+  "id": "projector",
+  "name": "Projector control",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi3",
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Power and input control over PJLink and serial."
+}

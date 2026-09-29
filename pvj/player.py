@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """pvj-player core: one mpv process controlled over its JSON IPC socket.
 
 This replaces omxplayer plus D-Bus. A single long-lived mpv is started idle and
@@ -249,6 +251,13 @@ class Player:
     def volume(self, percent):
         self._set("volume", min(130.0, max(0.0, float(percent))))
 
+    def clear(self):
+        """Stop the current clip but keep the player service and window alive."""
+        self.ipc.request("stop")
+
+    def volume_step(self, delta):
+        self.ipc.request("add", "volume", float(delta))
+
     def opacity(self, value):
         """0..255 like the old panel. mpv cannot blend against other layers, so
         this fades to black (correct for a black stage background)."""
@@ -264,12 +273,26 @@ class Player:
         self._set("video-pan-x", max(-3000, min(3000, float(x))) / 1000.0)
         self._set("video-pan-y", max(-3000, min(3000, float(y))) / 1000.0)
 
+    def loop(self, enabled):
+        """Loop the current clip (or the whole playlist when there are several)."""
+        count = self.ipc.request("get_property", "playlist-count") or 0
+        self._set("loop-file", "inf" if (enabled and count <= 1) else "no")
+        self._set("loop-playlist", "inf" if (enabled and count > 1) else "no")
+
+    def mute(self, muted):
+        self._set("mute", bool(muted))
+
+    def rotate(self, degrees):
+        if degrees not in (0, 90, 180, 270):
+            raise PlayerError("rotation must be 0, 90, 180 or 270")
+        self._set("video-rotate", int(degrees))
+
     def status(self):
         if not self.is_running():
             return {"running": False}
         out = {"running": True}
         for key, prop in (("path", "path"), ("position", "time-pos"), ("duration", "duration"),
-                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"),
+                          ("paused", "pause"), ("speed", "speed"), ("volume", "volume"), ("muted", "mute"), ("loop_file", "loop-file"), ("loop_playlist", "loop-playlist"),
                           ("playlist_pos", "playlist-pos"), ("playlist_count", "playlist-count")):
             try:
                 out[key] = self.ipc.request("get_property", prop)

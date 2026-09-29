@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Replaces the ~290 near-identical legacy start scripts with one parser.
 
 `startlessonce05`, `startmaster12`, `startseamless03` and friends differ only

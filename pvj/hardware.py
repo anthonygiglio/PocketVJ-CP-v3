@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 """Hardware and OS detection, read from /proc and /sys only.
 
 Every function takes an optional `root` so tests can point it at a fake tree.

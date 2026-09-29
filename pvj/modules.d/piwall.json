@@ -1,0 +1,14 @@
+{
+  "id": "piwall",
+  "name": "PiWall (legacy, Pi 3 only)",
+  "version": "0.1.0",
+  "type": "legacy",
+  "channel": "stable",
+  "requires": [],
+  "boards": [
+    "pi3"
+  ],
+  "status": "planned",
+  "default_enabled": false,
+  "description": "Kept for old Pi 3 installs."
+}

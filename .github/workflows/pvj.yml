@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 NXLX and contributors
+# SPDX-License-Identifier: Apache-2.0
 name: pvj platform layer
 
 on:
@@ -28,4 +30,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck the installer and image scripts (strict)
-        run: shellcheck install/install.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh
+        run: shellcheck install/install.sh tools/make-release.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh
+
+  panel-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install mpv and a browser
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
+          mkdir /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Drive the real panel in a browser (CSP violations fail the test)
+        run: NODE_PATH=/tmp/pw/node_modules node tests/ui/panel.test.js
