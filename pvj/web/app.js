@@ -295,6 +295,8 @@
       if (!S.uploading) render();  // a redraw would wipe the progress bars of uploads still running
     });
   }
+  // Results are kept so the redraw after the last upload does not wipe an error message.
+  function note(text) { S.uploadNotes = (S.uploadNotes || []).concat(text).slice(-8); }
   function uploadFile(file, bar, label) {
     return new Promise(function (resolve) {
       var xhr = new XMLHttpRequest();
@@ -306,10 +308,11 @@
         var reply = {};
         try { reply = JSON.parse(xhr.responseText); } catch (e) { /* keep empty */ }
         label.textContent = file.name + (xhr.status === 200 ? ': done' : ': ' + (reply.error || 'failed (' + xhr.status + ')'));
+        note(label.textContent);
         if (xhr.status === 200) bar.style.width = '100%';
         resolve(xhr.status === 200);
       };
-      xhr.onerror = function () { label.textContent = file.name + ': connection lost'; resolve(false); };
+      xhr.onerror = function () { label.textContent = file.name + ': connection lost'; note(label.textContent); resolve(false); };
       xhr.send(file);
     });
   }
@@ -318,6 +321,7 @@
     var full = can('full');
     var details = info.details || S.media.map(function (n) { return { name: n, size: 0 }; });
     var uploads = h('div', { class: 'list', id: 'uploads' });
+    (S.uploadNotes || []).forEach(function (t) { uploads.appendChild(h('div', { class: 'item' }, h('div', { class: 'k', text: t }))); });
     var picker = h('input', { type: 'file', id: 'filepick', multiple: true, hidden: true, 'aria-label': 'Choose video or image files',
       accept: 'video/*,image/*,.mkv,.mov,.mp4,.avi,.webm,.m4v,.mpg,.mpeg,.ts,.wmv' });
     picker.addEventListener('change', function () {
