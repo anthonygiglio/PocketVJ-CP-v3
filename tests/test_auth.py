@@ -70,6 +70,37 @@ class AuthTest(unittest.TestCase):
             self.auth.pair(self.pin, "x", "10.9.9.9")
         self.assertIsNotNone(cm.exception.retry_after)
 
+    def test_concurrent_wrong_pins_cannot_beat_the_limit(self):
+        import threading
+        guesses = []
+        real = self.auth._check_pin
+        self.auth._check_pin = lambda pin: (guesses.append(pin), real(pin))[1]
+        wrong = "0000" if self.pin != "0000" else "1111"
+
+        def attempt():
+            try:
+                self.auth.pair(wrong, "x", "10.0.0.66")
+            except AuthError:
+                pass
+        threads = [threading.Thread(target=attempt) for _ in range(60)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        self.assertEqual(len(guesses), auth.PER_CLIENT_FAILS)  # the rest were refused without being checked
+
+    def test_paired_owner_can_clear_a_lockout_by_rotating_the_pin(self):
+        token, _ = self.auth.pair(self.pin, "owner", "10.0.0.1")
+        wrong = "0000" if self.pin != "0000" else "1111"
+        for i in range(auth.GLOBAL_FAILS):
+            with self.assertRaises(AuthError):
+                self.auth.pair(wrong, "x", "10.1.1.%d" % i)
+        with self.assertRaises(AuthError):
+            self.auth.pair(self.pin, "guest", "10.9.9.9")  # locked out for everyone
+        new = self.auth.rotate_pin()
+        self.assertTrue(self.auth.pair(new, "guest", "10.9.9.9")[0])
+        self.assertTrue(self.auth.authenticate(token))  # already-paired devices were never affected
+
     def test_roles_and_invites(self):
         token, _ = self.auth.invite("guest link", "view")
         dev = self.auth.authenticate(token)

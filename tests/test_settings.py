@@ -123,6 +123,36 @@ class SettingsTest(unittest.TestCase):
         s3.save()
         self.assertEqual(self.read(self.path + ".bak"), good_bak)
 
+    def test_concurrent_saves_never_let_an_older_snapshot_win(self):
+        import threading
+        import time as _time
+        s = Settings(self.path)
+        s.load()
+        real = Settings._write_text
+        first = threading.Event()
+
+        def slow(path, text):
+            if not first.is_set() and path == self.path:  # only the first main-file write is slow
+                first.set()
+                _time.sleep(0.3)
+            return real(path, text)
+        Settings._write_text = staticmethod(slow)
+        self.addCleanup(setattr, Settings, "_write_text", staticmethod(real))
+
+        def edit(key, value):
+            with s.lock:
+                s.data[key] = value
+                s.save()
+        a = threading.Thread(target=edit, args=("theme_a", 1))
+        b = threading.Thread(target=edit, args=("theme_b", 2))
+        a.start()
+        first.wait(2)
+        b.start()
+        a.join()
+        b.join()
+        on_disk = self.read()
+        self.assertEqual((on_disk.get("theme_a"), on_disk.get("theme_b")), (1, 2))
+
     def test_failed_migration_leaves_original_untouched(self):
         def boom(d):
             raise RuntimeError("bug")

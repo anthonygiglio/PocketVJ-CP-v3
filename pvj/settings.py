@@ -15,6 +15,7 @@ import copy
 import json
 import os
 import tempfile
+import threading
 
 SCHEMA = 2
 
@@ -73,6 +74,10 @@ class Settings:
         self._migrations = migrations
         self._current = current
         self.data = None
+        # Web threads mutate and save concurrently. Holding this around a mutation AND its
+        # save keeps the snapshot and the write in order, so an older snapshot can never
+        # land on disk after a newer one.
+        self.lock = threading.RLock()
 
     def load(self):
         if not os.path.exists(self.path) and not os.path.exists(self.path + ".bak"):
@@ -114,15 +119,16 @@ class Settings:
     def save(self):
         if self.data is None:
             raise SettingsError("nothing loaded")
-        if os.path.exists(self.path):
-            try:
-                with open(self.path) as f:
-                    previous = f.read()
-                json.loads(previous)  # never overwrite a good backup with a corrupt file
-                self._write_text(self.path + ".bak", previous)
-            except (OSError, ValueError):
-                pass
-        self._write(self.path, self.data)
+        with self.lock:
+            if os.path.exists(self.path):
+                try:
+                    with open(self.path) as f:
+                        previous = f.read()
+                    json.loads(previous)  # never overwrite a good backup with a corrupt file
+                    self._write_text(self.path + ".bak", previous)
+                except (OSError, ValueError):
+                    pass
+            self._write(self.path, self.data)
 
     def _write(self, path, data):
         self._write_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")

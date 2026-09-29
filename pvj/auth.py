@@ -12,6 +12,7 @@
 import hashlib
 import hmac
 import secrets
+import threading
 import time
 
 ROLES = {"view": 1, "live": 2, "full": 3}
@@ -48,6 +49,7 @@ class Auth:
         self._global_fails = []
         self._locked_until = {}  # client or "*" -> time
         self.last_seen = {}
+        self._pair_lock = threading.Lock()  # one PIN attempt at a time, so the counters are exact
         if rotate_on_start or not settings.data["auth"].get("pin_hash"):
             self._new_pin()
 
@@ -55,8 +57,9 @@ class Auth:
     def _new_pin(self, pin=None):
         pin = pin or generate_pin()
         salt = secrets.token_bytes(16)
-        self.settings.data["auth"] = {"pin_hash": _scrypt(pin, salt).hex(), "pin_salt": salt.hex()}
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["auth"] = {"pin_hash": _scrypt(pin, salt).hex(), "pin_salt": salt.hex()}
+            self.settings.save()
         self.current_pin = pin  # only known in memory until shown; not stored in clear
         return pin
 
@@ -66,7 +69,12 @@ class Auth:
         return self._new_pin(pin)
 
     def rotate_pin(self):
-        return self._new_pin()
+        """New PIN. A paired owner uses this to get past a lockout someone else provoked."""
+        with self.settings.lock, self._pair_lock:
+            self._fails.clear()
+            self._global_fails = []
+            self._locked_until.clear()
+            return self._new_pin()
 
     def _check_pin(self, pin):
         auth = self.settings.data["auth"]
@@ -97,14 +105,15 @@ class Auth:
 
     # --- pairing and tokens --------------------------------------------
     def pair(self, pin, name, client="?"):
-        wait = self._locked(client)
-        if wait:
-            raise AuthError("too many attempts", retry_after=int(wait) + 1)
-        if not self._check_pin(pin):
-            self._record_fail(client)
-            raise AuthError("wrong PIN")
-        self._fails.pop(client, None)
-        return self._add_device(name, "full")
+        with self._pair_lock:
+            wait = self._locked(client)
+            if wait:
+                raise AuthError("too many attempts", retry_after=int(wait) + 1)
+            if not self._check_pin(pin):
+                self._record_fail(client)
+                raise AuthError("wrong PIN")
+            self._fails.pop(client, None)
+            return self._add_device(name, "full")
 
     def invite(self, name, role):
         if role not in ("view", "live"):
@@ -115,8 +124,9 @@ class Auth:
         token = secrets.token_urlsafe(24)
         device = {"id": secrets.token_hex(4), "name": str(name or "device")[:40], "role": role,
                   "token_hash": _token_hash(token), "created": int(self._now())}
-        self.settings.data["devices"].append(device)
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["devices"].append(device)
+            self.settings.save()
         return token, self._public(device)
 
     def authenticate(self, token):
@@ -124,7 +134,7 @@ class Auth:
             return None
         h = _token_hash(token)
         found = None
-        for d in self.settings.data["devices"]:
+        for d in list(self.settings.data["devices"]):
             if hmac.compare_digest(d["token_hash"], h):
                 found = d
         if found:
@@ -133,16 +143,18 @@ class Auth:
         return None
 
     def revoke(self, device_id):
-        before = len(self.settings.data["devices"])
-        self.settings.data["devices"] = [d for d in self.settings.data["devices"] if d["id"] != device_id]
-        changed = len(self.settings.data["devices"]) != before
-        if changed:
-            self.settings.save()
-        return changed
+        with self.settings.lock:
+            before = len(self.settings.data["devices"])
+            self.settings.data["devices"] = [d for d in self.settings.data["devices"] if d["id"] != device_id]
+            changed = len(self.settings.data["devices"]) != before
+            if changed:
+                self.settings.save()
+            return changed
 
     def revoke_all(self):
-        self.settings.data["devices"] = []
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["devices"] = []
+            self.settings.save()
 
     def list_devices(self):
         return [dict(self._public(d), last_seen=self.last_seen.get(d["id"])) for d in self.settings.data["devices"]]

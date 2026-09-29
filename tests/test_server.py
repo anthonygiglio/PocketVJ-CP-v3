@@ -152,6 +152,30 @@ class ServerTest(ServerBase):
                                    headers={"Content-Type": "text/plain"})[0], 415)
         self.assertEqual(self.call("PUT", "/api/control", token=token)[0], 405)
 
+    def test_origin_check_handles_ipv6_hosts_and_garbage_ports(self):
+        token, _ = self.pair()
+        ok = {"Host": "[::1]:8080", "Origin": "http://[::1]:8080"}
+        self.assertEqual(self.call("POST", "/api/control", {"action": "pause"}, token=token, headers=ok)[0], 200)
+        for origin in ("http://127.0.0.1:99999", "http://[::1", "null", "http://", "http://evil.example:80"):
+            st, _, _ = self.call("POST", "/api/control", {"action": "pause"}, token=token, headers={"Origin": origin})
+            self.assertEqual(st, 403, origin)
+
+    def test_absurdly_nested_json_is_a_clean_400(self):
+        token, _ = self.pair()
+        st, body, _ = self.call("POST", "/api/control", token=token, raw=b"[" * 60000)
+        self.assertEqual(st, 400)
+        self.assertEqual(self.call("GET", "/api/status", token=token)[0], 200)
+
+    def test_reset_keeps_the_screen_dark_during_blackout_and_cut_play_stops_old_fades(self):
+        token, _ = self.pair()
+        self.call("POST", "/api/blackout", {"on": True}, token=token)
+        self.call("POST", "/api/control", {"action": "reset"}, token=token)
+        self.assertEqual([c for c in self.player.calls if c[0] == "opacity"][-1], ("opacity", 0))
+        self.call("POST", "/api/blackout", {"on": False}, token=token)
+        before = self.api.fader._token
+        self.call("POST", "/api/play", {"file": "a.mp4"}, token=token)
+        self.assertGreater(self.api.fader._token, before)
+
     def test_get_never_changes_state(self):
         token, _ = self.pair()
         self.call("GET", "/api/control?action=stop", token=token)
@@ -413,3 +437,39 @@ class EndToEndTest(ServerBase):
         self.call("POST", "/api/blackout", {"on": False}, token=token)
         self.assertEqual(self.api.player.ipc.request("get_property", "brightness"), 0)
         self.assertEqual(self.call("POST", "/api/player/restart", {}, token=token)[0], 200)
+
+
+class HostileClientTest(ServerBase):
+    """Slow and flooding clients must not exhaust the server."""
+
+    def setUp(self):
+        super().setUp()
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.httpd = server.PvjServer(("127.0.0.1", 0), server.make_handler(self.api, self.auth, self.web,
+                                                                             max_lifetime=1.0), max_connections=3)
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
+        self.socks = []
+        self.addCleanup(lambda: [x.close() for x in self.socks])
+
+    def idle(self):
+        import socket
+        c = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        c.sendall(b"GET /api/hello HTTP/1.1\r\nX-Slow: ")  # never finishes the header
+        self.socks.append(c)
+        return c
+
+    def test_connection_cap_gives_503_and_slow_clients_are_cut_off(self):
+        for _ in range(3):
+            self.idle()
+        time.sleep(0.2)
+        st, _, _ = self.call("GET", "/api/hello")
+        self.assertEqual(st, 503)  # cap reached: refused straight away, no thread spent
+        time.sleep(1.6)  # the lifetime timer closes the trickling connections
+        for c in self.socks:
+            c.settimeout(2)
+            self.assertEqual(c.recv(1024), b"")
+        self.assertEqual(self.call("GET", "/api/hello")[0], 200)  # capacity is back

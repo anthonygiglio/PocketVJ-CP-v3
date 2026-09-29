@@ -14,7 +14,9 @@ Security model, in one place:
 import json
 import os
 import signal
+import socket
 import sys
+import threading
 import traceback
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,7 +38,7 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
-def make_handler(api, auth, web_dir=WEB_DIR):
+def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
     static = {"/": "index.html"}
     if os.path.isdir(web_dir):
         for name in os.listdir(web_dir):
@@ -45,7 +47,24 @@ def make_handler(api, auth, web_dir=WEB_DIR):
     class Handler(BaseHTTPRequestHandler):
         server_version = "pvj"
         sys_version = ""
-        timeout = 15
+        timeout = 10  # per read; the lifetime timer below bounds the whole connection
+
+        def setup(self):
+            super().setup()
+            # A client that trickles one byte every few seconds would keep a thread for ever.
+            self._reaper = threading.Timer(max_lifetime, self._kill)
+            self._reaper.daemon = True
+            self._reaper.start()
+
+        def _kill(self):
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        def finish(self):
+            self._reaper.cancel()
+            super().finish()
 
         def log_message(self, fmt, *args):
             sys.stderr.write("%s %s\n" % (self.client_address[0], fmt % args))
@@ -85,9 +104,12 @@ def make_handler(api, auth, web_dir=WEB_DIR):
                 return False
             origin = self.headers.get("Origin")
             if origin:
-                parts = urlsplit(origin)
-                got = (parts.hostname or "") + (":%d" % parts.port if parts.port else "")
-                if got.lower() != (self.headers.get("Host") or "").lower():
+                try:
+                    # netloc keeps IPv6 brackets and the port exactly as the browser wrote them
+                    got = urlsplit(origin).netloc.lower()
+                except ValueError:
+                    return False
+                if not got or got != (self.headers.get("Host") or "").lower():
                     return False
             return True
 
@@ -102,7 +124,7 @@ def make_handler(api, auth, web_dir=WEB_DIR):
                 return None, (415, "send application/json")
             try:
                 data = json.loads(self.rfile.read(length) or b"{}")
-            except ValueError:
+            except (ValueError, RecursionError):  # RecursionError: absurdly nested JSON
                 return None, (400, "invalid JSON")
             if not isinstance(data, dict):
                 return None, (400, "JSON object expected")
@@ -160,6 +182,33 @@ def make_handler(api, auth, web_dir=WEB_DIR):
     return Handler
 
 
+class PvjServer(ThreadingHTTPServer):
+    """Threaded server with a hard cap on simultaneous connections, so a flood of idle
+    sockets cannot exhaust threads; extra connections get a plain 503 straight away."""
+
+    daemon_threads = True
+
+    def __init__(self, address, handler, max_connections=64):
+        super().__init__(address, handler)
+        self._slots = threading.BoundedSemaphore(max_connections)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            try:
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 def write_pin_file(rundir, pin):
     """Show-the-PIN channel: a tmpfs file the display or an admin can read. Cleared on reboot."""
     path = os.path.join(rundir, "pin")
@@ -200,8 +249,7 @@ def main(argv=None):
         print("pvj-web: %s" % e, file=sys.stderr)
         return 1
     host, port = env.get("PVJ_BIND", "0.0.0.0"), int(env.get("PVJ_PORT", "8080"))
-    httpd = ThreadingHTTPServer((host, port), make_handler(api, auth))
-    httpd.daemon_threads = True
+    httpd = PvjServer((host, port), make_handler(api, auth))
     print("pvj-web: listening on %s:%d; pairing PIN %s (also in %s/pin)" % (host, port, auth.current_pin, rundir),
           flush=True)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))

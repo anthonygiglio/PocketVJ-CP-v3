@@ -169,8 +169,9 @@ class Api:
             if not isinstance(file, str) or not _NAME.match(file) or file.startswith(".") \
                     or not file.lower().endswith(MEDIA_EXTENSIONS):
                 raise bad("invalid file name")
-        self.settings.data["pads"]["banks"][bank]["pads"][index] = {"label": label, "file": file}
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["pads"]["banks"][bank]["pads"][index] = {"label": label, "file": file}
+            self.settings.save()
         return {"banks": self.settings.data["pads"]["banks"]}
 
     def play_preset(self, body, name):
@@ -210,6 +211,7 @@ class Api:
             raise bad("loop must be true or false")
         transition = self.settings.data["mix"]
         playing = self._player_call(self.player.status).get("running")
+        self.fader.cancel()  # a fade still running from an earlier action must not darken the new clip
 
         dip = transition["transition"] == "dip" and not self.mix["blackout"]
 
@@ -274,7 +276,10 @@ class Api:
             self._player_call(p.volume_step, number(body, "value", -50, 50))
         elif action == "reset":
             self.mix.update(opacity=100, size=100, position=0, rotate=0)
-            for fn, arg in ((p.opacity, 255), (p.size, 100), (p.position, 0), (p.speed, 1), (p.rotate, 0)):
+            self.fader.cancel()
+            # During a blackout the screen must stay dark: reset changes the stored mix, not the picture.
+            shown = 0 if self.mix["blackout"] else 255
+            for fn, arg in ((p.opacity, shown), (p.size, 100), (p.position, 0), (p.speed, 1), (p.rotate, 0)):
                 self._player_call(fn, arg)
         else:
             raise bad("unknown action")
@@ -301,8 +306,9 @@ class Api:
             raise bad("transition must be cut or dip (crossfade is not built yet)")
         if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 0.1 <= duration <= 10:
             raise bad("duration must be 0.1 to 10 seconds")
-        self.settings.data["mix"] = {"transition": mode, "duration": float(duration)}
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["mix"] = {"transition": mode, "duration": float(duration)}
+            self.settings.save()
         return self.settings.data["mix"]
 
     def stop_player(self, body, device, client):
@@ -335,8 +341,9 @@ class Api:
             themes_mod.css(self.themes[name], accent)
         except ThemeError as e:
             raise bad(str(e))
-        self.settings.data["theme"] = {"name": name, "accent": accent}
-        self.settings.save()
+        with self.settings.lock:
+            self.settings.data["theme"] = {"name": name, "accent": accent}
+            self.settings.save()
         return {"theme": self.settings.data["theme"]}
 
     def theme_css(self):
@@ -390,11 +397,13 @@ class Api:
                 new["allow"] = osc_mod.validate_allow(body["allow"])
             except osc_mod.OscError as e:
                 raise bad(str(e))
-        self.settings.data["osc"] = new
+        with self.settings.lock:
+            self.settings.data["osc"] = new
         try:
             self.osc.apply()
         except osc_mod.OscError as e:
-            self.settings.data["osc"] = cfg  # keep the last working configuration
+            with self.settings.lock:
+                self.settings.data["osc"] = cfg  # keep the last working configuration
             try:
                 self.osc.apply()
             except osc_mod.OscError:

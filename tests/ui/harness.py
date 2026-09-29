@@ -29,8 +29,7 @@ os.makedirs(rundir, mode=0o700)
 os.environ.update(PVJ_STATE_DIR=tmp, PVJ_MEDIA_DIR=media, PVJ_DEV_SPAWN="1")
 player = Player(extra_args=["--vo=null", "--ao=null"], rundir=rundir)
 api, auth, _ = server.build(os.environ, player=player)
-httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(api, auth))
-httpd.daemon_threads = True
+httpd = server.PvjServer(("127.0.0.1", 0), server.make_handler(api, auth))
 print(json.dumps({"port": httpd.server_address[1], "pin": auth.current_pin}), flush=True)
 try:
     httpd.serve_forever()
