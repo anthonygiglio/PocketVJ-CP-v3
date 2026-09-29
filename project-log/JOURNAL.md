@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (CI notes)
+
+- I merged #16 (docs only) while its `panel-ui` check had failed, after commenting "checks green" without reading the result. The failure was the network form step (`panel.test.js` line 110, "typed values survive the redraw", 8 s timeout). The same code on master passed `panel-ui` on the next run, so it is a flake, not reproduced and not root-caused (Playwright is not installed on the dev Mac). Rule from now: read the check list for failures before merging, every time.
+- "Deploy manual to Pages" has failed on every master push (`Get Pages site failed ... Pages enabled?`): Pages is not enabled for the repository, or not set to build from GitHub Actions. That is a repository setting for the owner; nothing in the code is wrong.
+- A second image build was dispatched from master `2546726` (includes schedule, streams, DMX, MIDI) for the first hardware test. Still never booted.
+
 ## 2026-09-29 (first image build)
 
 Done:
