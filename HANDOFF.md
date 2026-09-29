@@ -30,7 +30,7 @@ Phases 0 to 4 and two feature screens are merged: security hotfix, platform laye
 - The OS image has never been built. The workflow exists (`.github/workflows/image.yml`).
 - Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, the Inputs/NDI/SRT/Dante/ST 2110 screens, mapper, presenter, wall, scheduler, MIDI/DMX.
 - The panel cannot restart a wedged mpv (it is unprivileged by design).
-- The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) may not be on GitHub yet. Recreate with `git tag legacy-v3 ed74df411b88b1a16dd80eecf52c3c9cf6d7768b && git push origin legacy-v3` from a normal clone.
+- The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub (checked 2026-09-29).
 
 ## Testing
 
