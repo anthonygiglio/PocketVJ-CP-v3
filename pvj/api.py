@@ -8,14 +8,16 @@ calls this. Every input is validated here; nothing user-supplied reaches a shell
 or a path unchecked.
 """
 
+import json
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import time
 import unicodedata
 
-from . import hardware, osc as osc_mod, presets, themes as themes_mod
+from . import hardware, netcfg, osc as osc_mod, presets, themes as themes_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
 from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -99,7 +101,7 @@ class Fader:
 
 class Api:
     def __init__(self, player, settings, auth, registry, themes, media_dir, board, addons_dir=None,
-                 spawn=False, on_pin=None, osc=None, free_space=None):
+                 spawn=False, on_pin=None, osc=None, free_space=None, net=None, ip_json=None, net_sysfs="/sys/class/net"):
         self.player = player
         self.settings = settings
         self.auth = auth
@@ -112,6 +114,9 @@ class Api:
         self.on_pin = on_pin      # called with the new PIN so the box can show it
         self.osc = osc            # OscManager or None
         self._free_space = free_space or self._statvfs_free
+        self.net = net            # NetdClient or None
+        self._sysfs = net_sysfs
+        self._ip_json = ip_json or self._run_ip
         self._upload_lock = threading.Lock()  # one upload at a time: protects the SD card and the threads
         self._media_lock = threading.Lock()   # rename, delete and publishing an upload never interleave
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
@@ -601,6 +606,84 @@ class Api:
         self.settings.save()
         return self.osc.status()
 
+    # --- network (wired) -----------------------------------------------
+    @staticmethod
+    def _run_ip():
+        try:
+            r = subprocess.run(["ip", "-j", "-4", "addr", "show"], capture_output=True, text=True, timeout=5)
+            return json.loads(r.stdout) if r.returncode == 0 else []
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return []
+
+    def _need_network_module(self):
+        if not self.registry.enabled("network"):
+            raise ApiError(409, "turn on the Network module in System first")
+
+    def _netd(self, message):
+        if self.net is None:
+            raise ApiError(503, "network settings are not available on this system")
+        try:
+            reply = self.net.request(message)
+        except netcfg.NetError as e:
+            raise ApiError(503, str(e))
+        if not reply.get("ok"):
+            raise ApiError(409, reply.get("error", "the network helper refused"))
+        return reply
+
+    def _local_status(self):
+        addrs = {}
+        for entry in self._ip_json():
+            addrs[entry.get("ifname")] = ["%s/%s" % (a.get("local"), a.get("prefixlen")) for a in entry.get("addr_info", [])
+                                          if a.get("family") == "inet"]
+        interfaces = netcfg.list_interfaces(self._sysfs)
+        for i in interfaces:
+            i["addresses"] = addrs.get(i["name"], [])
+        return interfaces
+
+    def get_network(self, body, device, client):
+        self._need_network_module()
+        out = {"interfaces": self._local_status(), "pending": None, "helper": False, "modes": list(netcfg.MODES)}
+        if self.net is not None:
+            try:
+                reply = self.net.request({"cmd": "status"})
+                if reply.get("ok"):
+                    out["pending"], out["helper"] = reply.get("pending"), True
+            except netcfg.NetError:
+                pass
+        return out
+
+    def _checked_config(self, body):
+        try:
+            return netcfg.validate(body, netcfg.list_interfaces(self._sysfs))
+        except netcfg.NetError as e:
+            raise bad(str(e))
+
+    def plan_network(self, body, device, client):
+        self._need_network_module()
+        cfg = self._checked_config(body)
+        if self.net is not None:
+            try:
+                reply = self.net.request({"cmd": "plan", "config": cfg})
+                if reply.get("ok"):
+                    return {"config": reply["config"], "commands": reply["commands"]}
+            except netcfg.NetError:
+                pass
+        return {"config": cfg, "commands": [" ".join(c) for c in netcfg.plan(cfg, False)]}
+
+    def apply_network(self, body, device, client):
+        self._need_network_module()
+        cfg = self._checked_config(body)  # the helper validates again; refusing early gives a clear 400
+        reply = self._netd({"cmd": "apply", "config": cfg})
+        return {"pending": reply.get("pending"), "config": cfg}
+
+    def confirm_network(self, body, device, client):
+        self._need_network_module()
+        return {"pending": self._netd({"cmd": "confirm"}).get("pending")}
+
+    def revert_network(self, body, device, client):
+        self._need_network_module()
+        return {"pending": self._netd({"cmd": "revert"}).get("pending")}
+
     # --- routing -------------------------------------------------------
     def routes(self):
         # (method, path) -> (minimum role or None, handler)
@@ -620,6 +703,11 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/network"): ("full", self.get_network),
+            ("POST", "/api/network/plan"): ("full", self.plan_network),
+            ("POST", "/api/network/apply"): ("full", self.apply_network),
+            ("POST", "/api/network/confirm"): ("full", self.confirm_network),
+            ("POST", "/api/network/revert"): ("full", self.revert_network),
             ("POST", "/api/media/delete"): ("full", self.delete_media),
             ("POST", "/api/media/rename"): ("full", self.rename_media),
             ("POST", "/api/pads"): ("full", self.set_pad),

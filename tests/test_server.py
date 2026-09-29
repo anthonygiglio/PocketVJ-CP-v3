@@ -673,6 +673,101 @@ class MediaHardeningTest(MediaBase):
         self.assertEqual((st, body["pads_using"]), (200, 1))
 
 
+class NetworkApiTest(ServerBase):
+    def setUp(self):
+        super().setUp()
+        from tests.test_netd import FakeNm, make_sysfs
+        from pvj.netd import NetService
+        self.nm = FakeNm()
+        self.sysfs = make_sysfs()
+        self.svc = NetService(runner=self.nm, sysfs=self.sysfs)
+
+        class Direct:
+            def request(_, message):
+                return self.svc.handle(message)
+        self.api.net = Direct()
+        self.api._sysfs = self.sysfs
+        self.api._ip_json = lambda: [{"ifname": "eth0", "addr_info": [{"family": "inet", "local": "192.168.1.9", "prefixlen": 24}]}]
+        # the module is beta and off by default: make one test switch it on the way a user would
+        self.token, _ = self.pair()
+
+    def enable(self):
+        manifests = self.api.registry.manifests
+        self.assertEqual(self.call("POST", "/api/modules/network", {"enabled": True}, token=self.token)[0], 200, manifests["network"])
+
+    STATIC = {"iface": "eth0", "mode": "static", "address": "192.168.50.20", "prefix": 24, "gateway": "192.168.50.1"}
+
+    def test_off_by_default_and_full_access_only(self):
+        st, body, _ = self.call("GET", "/api/network", token=self.token)
+        self.assertEqual(st, 409)
+        self.assertIn("Network module", body["error"])
+        self.assertEqual(self.call("POST", "/api/network/apply", self.STATIC, token=self.token)[0], 409)
+        self.enable()
+        _, inv, _ = self.call("POST", "/api/devices/invite", {"name": "tech", "role": "live"}, token=self.token)
+        for method, path in (("GET", "/api/network"), ("POST", "/api/network/apply"), ("POST", "/api/network/confirm"),
+                             ("POST", "/api/network/revert"), ("POST", "/api/network/plan")):
+            body = self.STATIC if method == "POST" else None
+            self.assertEqual(self.call(method, path, body, token=inv["token"])[0], 403, path)
+        self.assertEqual(self.call("GET", "/api/network")[0], 401)
+
+    def test_status_lists_wired_first_with_addresses(self):
+        self.enable()
+        st, body, _ = self.call("GET", "/api/network", token=self.token)
+        self.assertEqual(st, 200)
+        self.assertEqual([i["name"] for i in body["interfaces"]], ["eth0", "wlan0"])
+        self.assertEqual(body["interfaces"][0]["addresses"], ["192.168.1.9/24"])
+        self.assertTrue(body["helper"])
+        self.assertEqual(body["modes"], ["dhcp", "static", "linklocal", "share"])
+        self.assertIsNone(body["pending"])
+
+    def test_plan_apply_confirm_and_revert_through_the_panel(self):
+        self.enable()
+        st, plan, _ = self.call("POST", "/api/network/plan", self.STATIC, token=self.token)
+        self.assertEqual(st, 200)
+        self.assertTrue(any("192.168.50.20/24" in c for c in plan["commands"]))
+        self.assertNotIn("pvj-eth0", self.nm.profiles)  # a plan changes nothing
+        st, body, _ = self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
+        self.assertEqual((st, body["pending"]["iface"]), (200, "eth0"))
+        self.assertEqual(self.call("POST", "/api/network/apply", {"iface": "eth0", "mode": "dhcp"}, token=self.token)[0], 409)
+        self.assertEqual(self.call("POST", "/api/network/revert", {}, token=self.token)[0], 200)
+        self.assertEqual(self.nm.active, "Wired connection 1")
+        self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
+        st, body, _ = self.call("POST", "/api/network/confirm", {}, token=self.token)
+        self.assertEqual((st, body["pending"]), (200, None))
+        self.assertEqual(self.nm.profiles["pvj-eth0"]["connection.autoconnect"], "yes")
+        self.assertEqual(self.call("POST", "/api/network/confirm", {}, token=self.token)[0], 409)  # nothing pending
+
+    def test_bad_requests_are_400_before_the_helper_sees_them(self):
+        self.enable()
+        bad = [dict(self.STATIC, address="8.8.8.8; reboot"), dict(self.STATIC, prefix=99), {"iface": "wlan0", "mode": "dhcp"},
+               {"iface": "eth0", "mode": "bridge"}, dict(self.STATIC, gateway="10.0.0.1"), {"iface": "../eth0", "mode": "dhcp"}]
+        for body in bad:
+            self.assertEqual(self.call("POST", "/api/network/apply", body, token=self.token)[0], 400, body)
+        self.assertEqual(self.nm.calls, [])
+
+    def test_helper_down_is_a_clean_503_and_status_still_works(self):
+        self.enable()
+        from pvj.netcfg import NetError
+
+        class Down:
+            def request(_, message):
+                raise NetError("the network helper (pvj-netd) is not running")
+        self.api.net = Down()
+        st, body, _ = self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
+        self.assertEqual((st, body["error"]), (503, "the network helper (pvj-netd) is not running"))
+        st, body, _ = self.call("GET", "/api/network", token=self.token)
+        self.assertEqual((st, body["helper"]), (200, False))
+        self.assertEqual(self.call("POST", "/api/network/plan", self.STATIC, token=self.token)[0], 200)  # local preview
+
+    def test_failed_apply_reports_the_restored_state(self):
+        self.enable()
+        self.nm.fail_on = "connection up pvj-eth0"
+        st, body, _ = self.call("POST", "/api/network/apply", self.STATIC, token=self.token)
+        self.assertEqual(st, 409)
+        self.assertIn("previous setup was restored", body["error"])
+        self.assertEqual(self.nm.active, "Wired connection 1")
+
+
 class HostileClientTest(ServerBase):
     """Slow and flooding clients must not exhaust the server."""
 

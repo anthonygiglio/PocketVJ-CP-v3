@@ -363,7 +363,7 @@
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
     cards.push(modulesCard(full));
-    if (full) cards.push(oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
+    if (full) cards.push(networkCard(), oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
       if (!S.device) return;
@@ -384,6 +384,126 @@
           onclick: function () { act('POST', '/api/modules/' + m.id, { enabled: !m.enabled }, function (d) { S.modules = d.modules; render(); }); } });
         return h('div', { class: 'item' }, h('span', {}, m.name, h('br'), h('span', { class: 'k', text: m.version + ' · ' + note })), b);
       })));
+  }
+  // ---- network (wired) ------------------------------------------------
+  var netTimer = null;
+  var NET_MODES = [
+    ['dhcp', 'Automatic (DHCP)', 'Take an address from a router.'],
+    ['static', 'Fixed address', 'You choose the address. Use a range your other gear is on.'],
+    ['linklocal', 'Direct cable', 'Laptop plugged straight into the box; no router. The box uses a 169.254.x.x address.'],
+    ['share', 'Serve addresses', 'The box hands out addresses to whatever is plugged in.']
+  ];
+  function networkCard() {
+    var body = h('div', { class: 'list', id: 'netbody' });
+    var card = h('div', { class: 'card', id: 'netcard' }, h('h2', { text: 'Network (wired)' }), body);
+    var mode = 'dhcp';
+    var out = { iface: null, address: null, prefix: null, gateway: null, dns: null, secs: null, preview: null, msg: null };
+    var mod = S.modules.filter(function (m) { return m.id === 'network'; })[0];
+    if (!mod || !mod.enabled) {
+      body.appendChild(h('div', { class: 'k', id: 'netmsg', text: 'Off. Switch on "Network settings (wired)" under Modules above (beta). Needs NetworkManager.' }));
+      return card;
+    }
+
+    function refresh() {
+      clearTimeout(netTimer);
+      api('GET', '/api/network').then(function (r) {
+        if (!document.getElementById('netcard')) return;
+        if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'netmsg', text: r.data.error || 'Not available' })); return; }
+        draw(r.data);
+      });
+    }
+    function value(el) { return el ? el.value.trim() : ''; }
+    function config() {
+      var c = { iface: value(out.iface), mode: mode, revert_seconds: parseInt(value(out.secs) || '60', 10) };
+      if (mode === 'static' || mode === 'share') {
+        if (value(out.address)) c.address = value(out.address);
+        if (value(out.prefix)) c.prefix = parseInt(value(out.prefix), 10);
+      }
+      if (mode === 'static') {
+        if (value(out.gateway)) c.gateway = value(out.gateway);
+        c.dns = value(out.dns).split(/[ ,]+/).filter(Boolean);
+      }
+      return c;
+    }
+    function draw(d) {
+      body.textContent = '';
+      d.interfaces.forEach(function (i) {
+        body.appendChild(h('div', { class: 'item' },
+          h('span', {}, i.name, h('br'), h('span', { class: 'k', text: (i.kind === 'wired' ? 'wired' : 'wi-fi') + ' \u00b7 ' + (i.carrier ? 'connected' : 'no link') + (i.speed_mbps ? ' \u00b7 ' + i.speed_mbps + ' Mbit/s' : '') })),
+          h('span', { class: 'mono', text: (i.addresses || []).join(', ') || '-' })));
+      });
+      if (!d.helper) body.appendChild(h('div', { class: 'k', id: 'netmsg', text: 'The network helper (pvj-netd) is not running: changes cannot be applied. You can still preview them.' }));
+      if (d.pending) return drawPending(d.pending);
+      var wired = d.interfaces.filter(function (i) { return i.kind === 'wired'; });
+      if (!wired.length) return body.appendChild(h('div', { class: 'k', text: 'No wired network port found.' }));
+      out.iface = h('select', { class: 'text-input', id: 'netiface', 'aria-label': 'Network port' }, wired.map(function (i) { return h('option', { value: i.name, text: i.name }); }));
+      var modes = h('div', { class: 'row wrap', id: 'netmodes' });
+      var help = h('div', { class: 'k', id: 'nethelp' });
+      var fields = h('div', { class: 'list', id: 'netfields' });
+      function drawFields() {
+        fields.textContent = '';
+        NET_MODES.forEach(function (m) { if (m[0] === mode) help.textContent = m[2]; });
+        if (mode === 'static' || mode === 'share') {
+          out.address = h('input', { class: 'text-input mono', id: 'netaddr', 'aria-label': 'Address', placeholder: mode === 'share' ? '10.42.0.1' : '192.168.1.50', inputmode: 'decimal' });
+          out.prefix = h('input', { class: 'text-input mono', id: 'netprefix', 'aria-label': 'Prefix length', placeholder: '24 (means 255.255.255.0)', inputmode: 'numeric' });
+          fields.appendChild(out.address); fields.appendChild(out.prefix);
+        }
+        if (mode === 'static') {
+          out.gateway = h('input', { class: 'text-input mono', id: 'netgw', 'aria-label': 'Gateway (optional)', placeholder: 'Gateway (optional)', inputmode: 'decimal' });
+          out.dns = h('input', { class: 'text-input mono', id: 'netdns', 'aria-label': 'DNS servers (optional)', placeholder: 'DNS servers (optional)' });
+          fields.appendChild(out.gateway); fields.appendChild(out.dns);
+        }
+      }
+      function drawModes() {
+        modes.textContent = '';
+        NET_MODES.forEach(function (m) {
+          modes.appendChild(h('button', { class: 'btn small' + (m[0] === mode ? ' on' : ''), text: m[1], 'aria-pressed': m[0] === mode ? 'true' : 'false',
+            onclick: function () { mode = m[0]; drawModes(); drawFields(); } }));
+        });
+      }
+      out.secs = h('select', { class: 'text-input', id: 'netsecs', 'aria-label': 'Revert automatically after' },
+        [30, 60, 120, 300].map(function (n) { return h('option', { value: n, text: 'Revert by itself after ' + n + ' s unless confirmed', selected: n === 60 }); }));
+      out.preview = h('pre', { class: 'mono', id: 'netplan', hidden: true });
+      out.msg = h('div', { class: 'msg', id: 'netresult', role: 'status' });
+      drawModes(); drawFields();
+      body.appendChild(out.iface); body.appendChild(modes); body.appendChild(help); body.appendChild(fields); body.appendChild(out.secs);
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn small', id: 'netpreview', text: 'Preview commands', onclick: function () {
+          api('POST', '/api/network/plan', config()).then(function (r) {
+            out.preview.hidden = !r.ok; out.msg.className = 'msg' + (r.ok ? '' : ' err');
+            out.msg.textContent = r.ok ? '' : (r.data.error || 'Invalid');
+            if (r.ok) out.preview.textContent = r.data.commands.join('\n');
+          });
+        } }),
+        h('button', { class: 'btn on small', id: 'netapply', text: 'Apply', onclick: function () {
+          var c = config();
+          api('POST', '/api/network/apply', c).then(function (r) {
+            if (!r.ok) { out.msg.className = 'msg err'; out.msg.textContent = r.data.error || 'Could not apply'; return; }
+            var where = (c.mode === 'static' || c.mode === 'share') ? ' If this page stops responding, open http://' + (c.address || '10.42.0.1') + ' and press Confirm before the timer runs out.'
+              : ' If this page stops responding, find the box at its new address and press Confirm before the timer runs out.';
+            S.netNote = 'Applied.' + where;
+            refresh();
+          });
+        } })));
+      body.appendChild(out.preview); body.appendChild(out.msg);
+      body.appendChild(h('div', { class: 'k', text: 'A change can cut this connection. It goes back by itself unless you confirm it, and also if the box restarts before you do.' }));
+    }
+    function drawPending(p) {
+      body.appendChild(h('div', { class: 'card', id: 'netpending', role: 'alert' },
+        h('div', { text: 'Waiting for your confirmation: ' + p.iface + ' \u2192 ' + p.mode }),
+        h('div', { class: 'k', id: 'netleft', text: 'Reverts in ' + p.seconds_left + ' s' }),
+        h('div', { class: 'k', text: S.netNote || '' }),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn on', id: 'netconfirm', text: 'Confirm: keep this network', onclick: function () {
+            api('POST', '/api/network/confirm', {}).then(function (r) { S.netNote = r.ok ? '' : (r.data.error || ''); refresh(); });
+          } }),
+          h('button', { class: 'btn', id: 'netrevert', text: 'Revert now', onclick: function () {
+            api('POST', '/api/network/revert', {}).then(function () { S.netNote = ''; refresh(); });
+          } }))));
+      netTimer = setTimeout(refresh, 1000);
+    }
+    refresh();
+    return card;
   }
   function oscCard() {
     var line = h('div', { class: 'k', id: 'oscline', text: 'Loading...' });
@@ -458,6 +578,7 @@
 
   // ---- shell ----------------------------------------------------------
   function render() {
+    clearTimeout(netTimer);
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
     var screens = { live: live, mix: mix, media: media, system: system };

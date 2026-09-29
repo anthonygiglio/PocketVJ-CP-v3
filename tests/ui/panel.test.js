@@ -97,6 +97,31 @@ function startServer() {
     await page.waitForSelector('text=Modules');
     assert(await page.isVisible('text=NDI'), 'NDI module listed');
     assert(await page.isVisible('text=Not built yet'), 'planned modules are labelled');
+    // Network: switch the module on, preview, apply, watch the countdown, confirm
+    await page.click('.item:has-text("Network settings") >> button');
+    await page.waitForSelector('#netiface');
+    assert(await page.isVisible('#netcard >> text=192.168.1.9/24'), 'current address shown');
+    await page.click('#netmodes >> text=Fixed address');
+    await page.fill('#netaddr', '192.168.50.20');
+    await page.fill('#netprefix', '24');
+    await page.fill('#netgw', '192.168.50.1');
+    await page.click('#netpreview');
+    await page.waitForFunction(() => /ipv4\.addresses 192\.168\.50\.20\/24/.test(document.getElementById('netplan').textContent));
+    await page.fill('#netaddr', '8.8.8.8; reboot');
+    if (shots) await page.screenshot({ path: path.join(shots, '6-network.png'), fullPage: true });
+    await page.click('#netapply');
+    await page.waitForFunction(() => /address/i.test(document.getElementById('netresult').textContent) && document.getElementById('netresult').className.includes('err'));
+    await page.fill('#netaddr', '192.168.50.20');
+    await page.click('#netapply');
+    await page.waitForSelector('#netpending');
+    await page.waitForFunction(() => /Reverts in \d+ s/.test(document.getElementById('netleft').textContent));
+    await page.click('#netconfirm');
+    await page.waitForSelector('#netiface');
+    await page.click('#netmodes >> text=Direct cable');
+    await page.click('#netapply');
+    await page.waitForSelector('#netpending');
+    await page.click('#netrevert');
+    await page.waitForSelector('#netiface');
     await page.waitForSelector('#oscline:has-text("Off")');
     await page.click('#osctoggle');
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
@@ -131,7 +156,7 @@ function startServer() {
     console.log('panel browser test: OK');
   } catch (e) {
     failed = true;
-    console.error('FAILED:', e.message);
+    console.error('FAILED:', e.message, (e.stack || '').split('\n').filter(function (l) { return /panel.test.js/.test(l); }).slice(0, 2).join(' | '));
   } finally {
     await browser.close();
     server.kill();
