@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck the installer and image scripts (strict)
-        run: shellcheck install/install.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh
+        run: shellcheck install/install.sh tools/make-release.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh
 
   panel-ui:
     runs-on: ubuntu-latest

@@ -98,3 +98,23 @@ Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the
 **Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), OSC and MIDI, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.
 
 **Tested:** unit tests for settings, auth, modules and themes; HTTP tests for authentication, CSRF, roles, path confinement and validation; an end-to-end test through HTTP into a real headless mpv; and a real-browser test (Playwright) that pairs, assigns and plays a pad, drags a slider, switches theme, opens a guest link and fails on any CSP violation. Not tested on a real Pi, on real touch hardware, or with a real display.
+
+## Updates and rollback
+
+Releases are signed bundles, installed by `sudo pvj-update`. Nothing is fetched from the internet by default; an update works from a USB stick at a venue with no network.
+
+**One-time setup (your signing key).**
+
+1. On your own computer: `ssh-keygen -t ed25519 -f ~/.ssh/pvj-release -C nxlx-release`. Keep the private key safe and offline.
+2. On each box add one line to `/etc/pvj/allowed_signers` (the installer creates the file empty; until a key is listed every update is refused):
+   `pvj-release namespaces="pvj-release" ssh-ed25519 AAAA...your public key...`
+
+**Making a release.** Set the version in `pvj/__init__.py`, commit, then `tools/make-release.sh 4.0.1 --key ~/.ssh/pvj-release`. It writes `dist/pvj-4.0.1.tar.gz`, `.sha256` and `.sig`. The archive is reproducible (same commit, same bytes) and contains only `pvj/`, `bin/` and `install/`, never the legacy code.
+
+**Installing.** Put the three files in a `pvj-update/` folder on a USB stick, plug it in and run `sudo pvj-update usb`; or `sudo pvj-update apply pvj-4.0.1.tar.gz`. `pvj-update check FILE` verifies without installing; `pvj-update status` shows the current and previous release.
+
+**What it checks before touching anything:** SHA-256, the OpenSSH Ed25519 signature against your key, safe unpacking (no absolute or `..` paths, no links or device files, no setuid bits, size limits), enough disk space, a newer version, and that the settings format is not being downgraded (`--force` overrides the last two). It then backs up `settings.json`, installs into a new folder under `/opt/pvj/releases`, switches `/opt/pvj/current` atomically, restarts the services and waits for the panel to answer. **If it does not answer, the previous release and your settings are put back automatically.**
+
+**Rolling back by hand:** `sudo pvj-update rollback`. Settings migrations only go forward, so rollback restores the backup taken before the update; anything changed since is set aside as `settings.json.rolled-back-<time>`, not deleted. The last five backups are kept.
+
+**Not built yet:** a button in the panel (the panel runs unprivileged and cannot install), fetching updates over the network, and the Stable/Beta/Nightly channels, which need a hosted release feed. Tested here with the real installer in stage mode and real OpenSSH signatures; not tested with a real `systemctl` restart, on a Pi, or with a real USB stick.

@@ -87,7 +87,7 @@ uninstall() {
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 		systemctl disable --now pvj-player.service 2>/dev/null || true
 	fi
-	run rm -f "$UNIT" "$WEB_UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs" "$BIN_LINKS/pvj-pin"
+	run rm -f "$UNIT" "$WEB_UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs" "$BIN_LINKS/pvj-pin" "$BIN_LINKS/pvj-update"
 	run rm -rf "${ROOT}${PREFIX:?}"
 	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
@@ -166,6 +166,7 @@ run ln -sfn "$PREFIX/current/bin/pvj-selftest" "$BIN_LINKS/pvj-selftest"
 run ln -sfn "$PREFIX/current/bin/pvj-usb" "$BIN_LINKS/pvj-usb"
 run ln -sfn "$PREFIX/current/bin/pvj-rootfs" "$BIN_LINKS/pvj-rootfs"
 run ln -sfn "$PREFIX/current/bin/pvj-pin" "$BIN_LINKS/pvj-pin"
+run ln -sfn "$PREFIX/current/bin/pvj-update" "$BIN_LINKS/pvj-update"
 
 # --- settings and media (never overwritten if they exist) -----------------
 run mkdir -p "$ETC"
@@ -184,6 +185,15 @@ ENV
 	fi
 else
 	log "keeping existing $ETC/pvj.env"
+fi
+# Public keys whose signatures pvj-update accepts (one line per key, see install/README.md).
+if [ ! -e "$ETC/allowed_signers" ] && [ "$DRY" = 0 ]; then
+	cat > "$ETC/allowed_signers" <<KEYS
+# Add your release signing key here. Format:
+#   pvj-release namespaces="pvj-release" ssh-ed25519 AAAA... comment
+# Until a key is listed, pvj-update refuses every bundle.
+KEYS
+	chmod 644 "$ETC/allowed_signers"
 fi
 run mkdir -p "$ROOT$MEDIA"
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then
