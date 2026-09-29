@@ -27,5 +27,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: ShellCheck the installer (strict)
-        run: shellcheck install/install.sh
+      - name: ShellCheck the installer and image scripts (strict)
+        run: shellcheck install/install.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh
