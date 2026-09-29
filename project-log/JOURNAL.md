@@ -4,6 +4,18 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (first image build)
+
+Done:
+- The first run of `image.yml` (workflow dispatch on master, run 36627808613) built successfully in about 34 minutes. Artifact `nxlx-mastercontrol-image`, 717 MB, `image_2026-09-29-nxlx-mastercontrol.img.xz`, sha256 `b270f92c2e021cd78373b961bcc5810d4d29c0eb0b8af08ed619f8953bb779f9`. It kept for 90 days.
+- That build predates the schedule, streams, DMX and MIDI modules (it ran on the commit before them); rebuild before flashing for a test.
+
+Not verified:
+- The image was **never booted**, on a Pi or in an emulator. "Built" means the pi-gen stage ran to the end and produced a file; it says nothing about whether it boots, brings up `pvj-player` and `pvj-web`, or shows the pairing PIN.
+
+Open:
+- Flash it on a Pi 4 and run `tools/device-test.sh`.
+
 ## 2026-09-29 (DMX and MIDI)
 
 Done:

@@ -27,7 +27,7 @@ Phases 0 to 4 and two feature screens are merged: security hotfix, platform laye
 ## What has NOT been done or verified
 
 - **Nothing has run on a real Pi, display, USB stick, TouchOSC or NetworkManager.** All testing was in a container with a real headless mpv and fakes. The Network feature in particular needs a test on a real device, with another way to reach the box.
-- The OS image has never been built. The workflow exists (`.github/workflows/image.yml`).
+- The OS image has been built once in CI (2026-09-29, about 34 minutes, 717 MB artifact) but **never booted**. Rebuild from current master before testing. Workflow: `.github/workflows/image.yml`.
 - Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, the NDI/Dante/ST 2110 screens, mapper, presenter, wall, MIDI learn, custom DMX layouts, Art-Net discovery.
 - The panel cannot restart a wedged mpv (it is unprivileged by design).
 - The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub (checked 2026-09-29).
