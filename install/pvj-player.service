@@ -14,6 +14,7 @@ SupplementaryGroups=video render audio input
 RuntimeDirectory=pvj
 RuntimeDirectoryMode=0770
 UMask=0007
+EnvironmentFile=-/etc/pvj/pvj.env
 Environment=PVJ_RUNTIME_DIR=/run/pvj
 ExecStart=@PVJ_DIR@/bin/pvj-player serve
 # A crashed or wedged player comes back on its own, mid-gig.

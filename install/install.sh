@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# NXLX PocketVJ installer. Idempotent: run it again to update or repair.
+#
+#   sudo install/install.sh [options]
+#
+# Options
+#   --prefix DIR     install location (default /opt/pvj)
+#   --user NAME      account that owns the screen and sound card (default: the
+#                    user who ran sudo, else a new system user "pvj-player")
+#   --web-user NAME  account of the web panel, added to group "pvj" (default www-data if it exists)
+#   --media DIR      video folder (default /var/lib/pvj/video)
+#   --offline        never touch the network; fail if a dependency is missing
+#   --no-start       install and enable the service but do not start it
+#   --stage DIR      install into DIR without users, apt or systemctl (for tests and image builds)
+#   --dry-run        print what would happen
+#   --uninstall      remove the service and program files (keeps /etc/pvj and media)
+#   --purge          with --uninstall, also remove /etc/pvj
+set -euo pipefail
+
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PREFIX=/opt/pvj
+PVJ_USER=""
+WEB_USER=""
+MEDIA=/var/lib/pvj/video
+OFFLINE=0
+START=1
+STAGE=""
+DRY=0
+UNINSTALL=0
+PURGE=0
+
+log() { printf 'pvj-install: %s\n' "$*"; }
+die() { printf 'pvj-install: error: %s\n' "$*" >&2; exit 1; }
+run() {
+	if [ "$DRY" = 1 ]; then printf '  would run: %s\n' "$*"; else "$@"; fi
+}
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--prefix) PREFIX="${2:?}"; shift 2 ;;
+	--user) PVJ_USER="${2:?}"; shift 2 ;;
+	--web-user) WEB_USER="${2:?}"; shift 2 ;;
+	--media) MEDIA="${2:?}"; shift 2 ;;
+	--offline) OFFLINE=1; shift ;;
+	--no-start) START=0; shift ;;
+	--stage) STAGE="${2:?}"; shift 2 ;;
+	--dry-run) DRY=1; shift ;;
+	--uninstall) UNINSTALL=1; shift ;;
+	--purge) PURGE=1; shift ;;
+	-h | --help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+	*) die "unknown option $1 (try --help)" ;;
+	esac
+done
+
+case "$PREFIX" in /*) ;; *) die "--prefix must be an absolute path" ;; esac
+case "$MEDIA" in /*) ;; *) die "--media must be an absolute path" ;; esac
+for name in "$PVJ_USER" "$WEB_USER"; do
+	[[ "$name" =~ ^([a-z_][a-z0-9_-]*)?$ ]] || die "user names may only use a-z, 0-9, _ and -"
+done
+# Refuse prefixes that would make uninstall dangerous (/, /opt, /usr, ...).
+[[ "$PREFIX" =~ ^/[^/]+/[^/]+ ]] || die "--prefix must be at least two levels deep, e.g. /opt/pvj"
+case "$PREFIX" in /usr/* | /etc/* | /bin/* | /sbin/* | /lib/* | /boot/* | /var/lib/dpkg*) die "--prefix must not be inside a system directory" ;; esac
+for path in "$PREFIX" "$MEDIA"; do
+	[[ "$path" =~ ^[A-Za-z0-9/_.-]+$ ]] || die "paths may only use letters, digits, / _ . and -"
+done
+
+if [ -n "$STAGE" ]; then
+	ROOT="${STAGE%/}"
+else
+	ROOT=""
+	if [ "$DRY" = 0 ] && [ "$(id -u)" -ne 0 ]; then die "run as root (sudo), or use --dry-run or --stage"; fi
+fi
+REAL=$([ -z "$STAGE" ] && echo 1 || echo 0)
+
+ETC="$ROOT/etc/pvj"
+UNIT="$ROOT/etc/systemd/system/pvj-player.service"
+BIN_LINKS="$ROOT/usr/local/bin"
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/pvj/__init__.py")"
+[ -n "$VERSION" ] || die "cannot read version from pvj/__init__.py"
+RELEASE="$ROOT$PREFIX/releases/$VERSION"
+
+uninstall() {
+	log "uninstalling"
+	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
+		systemctl disable --now pvj-player.service 2>/dev/null || true
+	fi
+	run rm -f "$UNIT" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest"
+	run rm -rf "${ROOT}${PREFIX:?}"
+	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
+	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
+	log "done. Kept ${ETC} and media unless --purge; users and group pvj are left in place."
+}
+
+if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
+
+# --- dependencies -------------------------------------------------------
+need=()
+command -v mpv >/dev/null || need+=(mpv)
+command -v python3 >/dev/null || need+=(python3)
+if command -v python3 >/dev/null && ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))'; then
+	die "Python 3.9 or newer is required"
+fi
+if [ ${#need[@]} -gt 0 ]; then
+	if [ "$OFFLINE" = 1 ]; then die "offline mode and missing: ${need[*]}"; fi
+	if [ "$REAL" = 0 ]; then log "stage mode: not installing ${need[*]}"
+	elif command -v apt-get >/dev/null; then
+		log "installing ${need[*]}"
+		run apt-get install -y --no-install-recommends "${need[@]}"
+	else
+		die "unsupported system (no apt-get). Install manually: ${need[*]}"
+	fi
+fi
+
+# --- accounts -----------------------------------------------------------
+if [ -z "$PVJ_USER" ]; then
+	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then PVJ_USER="$SUDO_USER"; else PVJ_USER=pvj-player; fi
+fi
+if [ -z "$WEB_USER" ] && [ "$REAL" = 1 ] && id www-data >/dev/null 2>&1; then WEB_USER=www-data; fi
+
+if [ "$REAL" = 1 ]; then
+	getent group pvj >/dev/null || run groupadd --system pvj
+	if ! id "$PVJ_USER" >/dev/null 2>&1; then
+		log "creating system user $PVJ_USER"
+		run useradd --system --create-home --home-dir /var/lib/pvj --shell /usr/sbin/nologin --gid pvj "$PVJ_USER"
+	fi
+	for g in pvj video render audio input; do
+		getent group "$g" >/dev/null && run usermod -aG "$g" "$PVJ_USER"
+	done
+	if [ -n "$WEB_USER" ]; then run usermod -aG pvj "$WEB_USER"; fi
+fi
+
+# --- program files: releases/<version>, "current" points at the active one --
+log "installing version $VERSION to $PREFIX"
+run mkdir -p "$ROOT$PREFIX/releases"
+run rm -rf "$RELEASE.new"
+run mkdir -p "$RELEASE.new"
+if [ "$DRY" = 0 ]; then
+	cp -a "$SRC/pvj" "$SRC/bin" "$RELEASE.new/"
+	find "$RELEASE.new" -name __pycache__ -type d -prune -exec rm -rf {} +
+fi
+previous=""
+[ -L "$ROOT$PREFIX/current" ] && previous="$(readlink "$ROOT$PREFIX/current")"
+run rm -rf "$RELEASE"
+run mv "$RELEASE.new" "$RELEASE"
+# Atomic switch: rename a fresh symlink over "current".
+run ln -sfn "$PREFIX/releases/$VERSION" "$ROOT$PREFIX/current.tmp"
+run mv -T "$ROOT$PREFIX/current.tmp" "$ROOT$PREFIX/current"
+if [ -n "$previous" ] && [ "$previous" != "$PREFIX/releases/$VERSION" ]; then
+	[ "$DRY" = 0 ] && printf '%s\n' "$previous" > "$ROOT$PREFIX/previous"
+fi
+if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then chown -R root:root "$ROOT$PREFIX"; fi
+run chmod -R go-w "$ROOT$PREFIX"
+
+run mkdir -p "$BIN_LINKS"
+run ln -sfn "$PREFIX/current/bin/pvj-player" "$BIN_LINKS/pvj-player"
+run ln -sfn "$PREFIX/current/bin/pvj-selftest" "$BIN_LINKS/pvj-selftest"
+
+# --- settings and media (never overwritten if they exist) -----------------
+run mkdir -p "$ETC"
+if [ ! -e "$ETC/pvj.env" ]; then
+	if [ "$DRY" = 0 ]; then
+		cat > "$ETC/pvj.env" <<ENV
+# Settings for the pvj-player service. Edit, then: sudo systemctl restart pvj-player
+PVJ_MEDIA_DIR=$MEDIA
+PVJ_USB_DIR=/media/usb
+ENV
+	fi
+else
+	log "keeping existing $ETC/pvj.env"
+fi
+run mkdir -p "$ROOT$MEDIA"
+if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then chown "$PVJ_USER":pvj "$MEDIA"; chmod 2775 "$MEDIA"; fi
+if [ "$DRY" = 0 ]; then
+	printf '{"version": "%s", "prefix": "%s", "user": "%s", "installed": "%s"}\n' \
+		"$VERSION" "$PREFIX" "$PVJ_USER" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ETC/install.json"
+fi
+
+# --- service ------------------------------------------------------------
+run mkdir -p "$(dirname "$UNIT")"
+if [ "$DRY" = 0 ]; then
+	sed -e "s|@PVJ_USER@|$PVJ_USER|g" -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-player.service" > "$UNIT"
+fi
+if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
+	systemctl daemon-reload
+	systemctl enable pvj-player.service
+	if [ "$START" = 1 ]; then systemctl restart pvj-player.service; fi
+fi
+
+log "installed. Check the device with: pvj-selftest --play"
