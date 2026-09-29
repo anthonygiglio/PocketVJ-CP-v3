@@ -13,7 +13,7 @@ import re
 import threading
 import time
 
-from . import hardware, themes as themes_mod
+from . import hardware, osc as osc_mod, presets, themes as themes_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
 from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -79,7 +79,7 @@ class Fader:
 
 class Api:
     def __init__(self, player, settings, auth, registry, themes, media_dir, board, addons_dir=None,
-                 spawn=False, on_pin=None):
+                 spawn=False, on_pin=None, osc=None):
         self.player = player
         self.settings = settings
         self.auth = auth
@@ -90,6 +90,7 @@ class Api:
         self.addons_dir = addons_dir
         self.spawn = spawn        # True only for development: start mpv ourselves
         self.on_pin = on_pin      # called with the new PIN so the box can show it
+        self.osc = osc            # OscManager or None
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
 
@@ -172,7 +173,25 @@ class Api:
         self.settings.save()
         return {"banks": self.settings.data["pads"]["banks"]}
 
+    def play_preset(self, body, name):
+        """A legacy start script name (startlessonce05 ...) played from the media folder."""
+        try:
+            preset = presets.parse_legacy_name(name if isinstance(name, str) else "")
+            files = presets.resolve_files(preset, self.media_dir)
+        except PlayerError as e:
+            raise bad(str(e))
+        root = os.path.realpath(self.media_dir)
+        paths = [f for f in (os.path.realpath(f) for f in files)
+                 if os.path.dirname(f) == root and f.lower().endswith(MEDIA_EXTENSIONS)]
+        if not paths:
+            raise ApiError(404, "no playable files for that preset")
+        self._player_call(self.player.play, paths, preset["loop"], None, False, self.spawn)
+        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        return {"playing": name, "files": len(paths)}
+
     def play(self, body, device, client):
+        if "preset" in body:
+            return self.play_preset(body, body["preset"])
         if "pad" in body:
             pad = body["pad"]
             if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in pad)):
@@ -249,6 +268,10 @@ class Api:
             if not isinstance(body.get("value"), bool):
                 raise bad("value must be true or false")
             self._player_call(p.mute, body["value"])
+        elif action == "stop":
+            self._player_call(p.clear)
+        elif action == "volume_step":
+            self._player_call(p.volume_step, number(body, "value", -50, 50))
         elif action == "reset":
             self.mix.update(opacity=100, size=100, position=0, rotate=0)
             for fn, arg in ((p.opacity, 255), (p.size, 100), (p.position, 0), (p.speed, 1), (p.rotate, 0)):
@@ -346,6 +369,40 @@ class Api:
             self.on_pin(pin)
         return {"ok": True, "pin": pin}
 
+    def get_osc(self, body, device, client):
+        if self.osc is None:
+            raise ApiError(404, "OSC is not available")
+        return self.osc.status()
+
+    def set_osc(self, body, device, client):
+        if self.osc is None:
+            raise ApiError(404, "OSC is not available")
+        cfg = self.settings.data["osc"]
+        new = dict(cfg)
+        if "enabled" in body:
+            if not isinstance(body["enabled"], bool):
+                raise bad("enabled must be true or false")
+            new["enabled"] = body["enabled"]
+        if "port" in body:
+            new["port"] = number(body, "port", 1024, 65535, integer=True)
+        if "allow" in body:
+            try:
+                new["allow"] = osc_mod.validate_allow(body["allow"])
+            except osc_mod.OscError as e:
+                raise bad(str(e))
+        self.settings.data["osc"] = new
+        try:
+            self.osc.apply()
+        except osc_mod.OscError as e:
+            self.settings.data["osc"] = cfg  # keep the last working configuration
+            try:
+                self.osc.apply()
+            except osc_mod.OscError:
+                pass
+            raise ApiError(409, str(e))
+        self.settings.save()
+        return self.osc.status()
+
     # --- routing -------------------------------------------------------
     def routes(self):
         # (method, path) -> (minimum role or None, handler)
@@ -358,6 +415,8 @@ class Api:
             ("GET", "/api/pads"): ("view", self.get_pads),
             ("GET", "/api/modules"): ("view", self.get_modules),
             ("GET", "/api/theme"): ("view", self.get_theme),
+            ("GET", "/api/osc"): ("view", self.get_osc),
+            ("POST", "/api/osc"): ("full", self.set_osc),
             ("POST", "/api/play"): ("live", self.play),
             ("POST", "/api/control"): ("live", self.control),
             ("POST", "/api/blackout"): ("live", self.blackout),

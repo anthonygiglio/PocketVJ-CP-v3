@@ -15,11 +15,12 @@ import json
 import os
 import signal
 import sys
+import traceback
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import hardware, themes as themes_mod
+from . import hardware, osc as osc_mod, themes as themes_mod
 from .api import Api
 from .auth import Auth
 from .modules import Registry
@@ -142,7 +143,12 @@ def make_handler(api, auth, web_dir=WEB_DIR):
 
         def _api(self, method, path, body):
             device = auth.authenticate(self._token())
-            status, payload = api.handle(method, path, body, device, self.client_address[0])
+            try:
+                status, payload = api.handle(method, path, body, device, self.client_address[0])
+            except Exception:
+                # Never drop the connection silently: log for the journal, tell the client plainly.
+                traceback.print_exc()
+                return self._json(500, {"error": "internal error"})
             extra = []
             if status == 200 and path in ("/api/pair", "/api/session") and payload.get("token"):
                 extra.append(("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
@@ -177,7 +183,12 @@ def build(env=None, player=None):
     rundir = player.rundir
     api = Api(player, settings, auth, registry, themes, media, board,
               spawn=env.get("PVJ_DEV_SPAWN") == "1", on_pin=lambda pin: write_pin_file(rundir, pin))
+    api.osc = osc_mod.OscManager(api, settings)
     write_pin_file(rundir, auth.current_pin)
+    try:
+        api.osc.apply()
+    except osc_mod.OscError as e:
+        print("pvj-web: OSC not started: %s" % e, file=sys.stderr)
     return api, auth, rundir
 
 
@@ -200,4 +211,6 @@ def main(argv=None):
         pass
     finally:
         httpd.server_close()
+        if api.osc:
+            api.osc.stop()
     return 0

@@ -83,6 +83,11 @@ function startServer() {
     await page.waitForSelector('text=Modules');
     assert(await page.isVisible('text=NDI'), 'NDI module listed');
     assert(await page.isVisible('text=Not built yet'), 'planned modules are labelled');
+    await page.waitForSelector('#oscline:has-text("Off")');
+    await page.click('#osctoggle');
+    await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
+    await page.click('#osctoggle');
+    await page.waitForFunction(() => document.getElementById('oscline').textContent === 'Off');
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');

@@ -95,7 +95,9 @@ Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the
 
 **Modules** are JSON manifests in `pvj/modules.d`: core modules are locked on, optional ones switch on and off, board support and dependencies are enforced, and modules that are not built yet (mapper, NDI, SRT/RTSP/RTMP, AES67/Dante, ST 2110, presenter, wall, control, projector) are listed as "Not built yet" and cannot be switched on. **Themes** are token files (`pvj/themes.d`, plus your own in `<state>/addons/themes`, which updates never touch); colours are validated as `#rrggbb` and text on an accent is chosen for contrast automatically.
 
-**Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), OSC and MIDI, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.
+**OSC** is built, off by default, receive-only and limited to private networks; see [OSC.md](OSC.md) for the addresses and the safety rules.
+
+**Not built yet:** crossfade (needs a second player; "Dip to black" and "Cut" work), the desktop screens (Library upload, Setup, Network, Inputs, Mapper, Presenter, Wall, Schedule, Control), MIDI, DMX and Art-Net, updates from a signed USB stick or the network, and a rollback command. The old PHP panel still exists for the legacy Pi 3 line.
 
 **Tested:** unit tests for settings, auth, modules and themes; HTTP tests for authentication, CSRF, roles, path confinement and validation; an end-to-end test through HTTP into a real headless mpv; and a real-browser test (Playwright) that pairs, assigns and plays a pad, drags a slider, switches theme, opens a guest link and fails on any CSP violation. Not tested on a real Pi, on real touch hardware, or with a real display.
 

@@ -6,7 +6,7 @@ SPDX-PackageName = "NXLX PocketVJ"
 path = [
   "pvj/modules.d/**",
   "pvj/themes.d/**",
-  "pvj/README.md",
+  "pvj/*.md",
   "install/README.md",
   "image/README.md",
   "image/config",

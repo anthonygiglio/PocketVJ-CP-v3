@@ -251,6 +251,13 @@ class Player:
     def volume(self, percent):
         self._set("volume", min(130.0, max(0.0, float(percent))))
 
+    def clear(self):
+        """Stop the current clip but keep the player service and window alive."""
+        self.ipc.request("stop")
+
+    def volume_step(self, delta):
+        self.ipc.request("add", "volume", float(delta))
+
     def opacity(self, value):
         """0..255 like the old panel. mpv cannot blend against other layers, so
         this fades to black (correct for a black stage background)."""

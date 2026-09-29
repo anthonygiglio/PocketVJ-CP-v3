@@ -65,6 +65,15 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(original["files"], ["a.mp4", "b.mp4"])
         self.assertEqual(self.read()["schema"], 2)
 
+    def test_real_migration_from_schema_1_adds_osc_section(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 1, "theme": {"name": "light", "accent": None}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual(data["schema"], settings.SCHEMA)
+        self.assertEqual(data["osc"], {"enabled": False, "port": 9876, "allow": []})
+        self.assertEqual(data["theme"]["name"], "light")  # existing values untouched
+        self.assertEqual(self.read(self.path + ".bak-v1")["schema"], 1)
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

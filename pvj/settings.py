@@ -16,7 +16,7 @@ import json
 import os
 import tempfile
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 class SettingsError(Exception):
@@ -33,11 +33,17 @@ def default_settings():
         "modules": {"enabled": {}},
         "theme": {"name": "dark-stage", "accent": None},
         "mix": {"transition": "dip", "duration": 1.0},
+        "osc": {"enabled": False, "port": 9876, "allow": []},
     }
 
 
 # version -> function that upgrades a settings dict FROM that version to the next.
-MIGRATIONS = {}
+def _v1_to_v2(data):
+    """2: OSC settings. Off by default; only private networks may send, plus any extra ranges listed."""
+    data.setdefault("osc", {"enabled": False, "port": 9876, "allow": []})
+
+
+MIGRATIONS = {1: _v1_to_v2}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

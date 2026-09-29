@@ -3,8 +3,10 @@
 import http.client
 import json
 import os
+import struct
 import tempfile
 import threading
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 
@@ -12,6 +14,7 @@ from pvj import server, themes as themes_mod
 from pvj.api import Api
 from pvj.auth import Auth
 from pvj.modules import Registry
+from pvj.osc import OscManager
 from pvj.settings import Settings
 
 
@@ -29,7 +32,7 @@ class FakePlayer:
         self.running = True
 
     def __getattr__(self, name):
-        if name in ("pause", "seek", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute"):
+        if name in ("pause", "seek", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
             def call(*args):
                 self.calls.append((name,) + args)
                 return True if name == "pause" else None
@@ -70,6 +73,8 @@ class ServerBase(unittest.TestCase):
         self.api = Api(self.player, self.settings, self.auth, Registry(self.settings, "x86"),
                        themes_mod.load_themes(), self.media, board,
                        on_pin=lambda pin: server.write_pin_file(rundir, pin))
+        self.api.osc = OscManager(self.api, self.settings, host="127.0.0.1", log=lambda *_: None)
+        self.addCleanup(self.api.osc.stop)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.api, self.auth, self.web))
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
@@ -209,6 +214,66 @@ class ServerTest(ServerBase):
         st, _, _ = self.call("POST", "/api/control", token=token, raw=b'{"action":"opacity","value":NaN}')
         self.assertEqual(st, 400)
 
+    def test_stop_volume_step_and_legacy_presets(self):
+        token, _ = self.pair()
+        self.assertEqual(self.call("POST", "/api/control", {"action": "stop"}, token=token)[0], 200)
+        self.assertEqual(self.player.calls[-1], ("clear",))
+        self.assertEqual(self.call("POST", "/api/control", {"action": "volume_step", "value": -10}, token=token)[0], 200)
+        self.assertEqual(self.player.calls[-1], ("volume_step", -10.0))
+        self.assertEqual(self.call("POST", "/api/control", {"action": "volume_step", "value": 99}, token=token)[0], 400)
+        for n in ("05_intro.mp4", "05_outro.mov", "07_other.mp4"):
+            open(os.path.join(self.media, n), "w").close()
+        st, body, _ = self.call("POST", "/api/play", {"preset": "startlessonce05"}, token=token)
+        self.assertEqual((st, body["files"]), (200, 2))
+        kind, paths, loop, spawn = next(c for c in reversed(self.player.calls) if c[0] == "play")
+        self.assertFalse(loop)  # "once" presets do not loop
+        self.assertEqual([os.path.basename(p) for p in paths], ["05_intro.mp4", "05_outro.mov"])
+        st, body, _ = self.call("POST", "/api/play", {"preset": "startless07"}, token=token)
+        self.assertEqual(st, 200)
+        self.assertTrue(next(c for c in reversed(self.player.calls) if c[0] == "play")[2])  # loops
+        for bad in ("startless99", "startmaster05; reboot", "../startless01", "reboot", "startslave", 5, None, ""):
+            self.assertEqual(self.call("POST", "/api/play", {"preset": bad}, token=token)[0], 400, repr(bad))
+
+    def test_osc_settings_endpoint(self):
+        import socket
+        full, _ = self.pair()
+        _, body, _ = self.call("POST", "/api/devices/invite", {"name": "tech", "role": "live"}, token=full)
+        live = body["token"]
+        st, body, _ = self.call("GET", "/api/osc", token=live)
+        self.assertEqual((st, body["enabled"], body["listening"]), (200, False, False))
+        self.assertEqual(self.call("POST", "/api/osc", {"enabled": True}, token=live)[0], 403)
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        st, body, _ = self.call("POST", "/api/osc", {"enabled": True, "port": port, "allow": ["10.20.0.0/16"]}, token=full)
+        self.assertEqual((st, body["listening"], body["allow"]), (200, True, ["10.20.0.0/16"]))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(b"/pvj/speed\0\0,f\0\0" + struct.pack(">f", 3.0), ("127.0.0.1", port))
+            deadline = time.time() + 5
+            while time.time() < deadline and ("speed", 3.0) not in self.player.calls:
+                time.sleep(0.05)
+        self.assertIn(("speed", 3.0), self.player.calls)
+        from pvj.settings import Settings as S2
+        self.assertTrue(S2(self.settings.path).load()["osc"]["enabled"])  # persisted
+        st, body, _ = self.call("POST", "/api/osc", {"enabled": False}, token=full)
+        self.assertEqual((st, body["listening"]), (200, False))
+
+    def test_osc_settings_validation_and_port_clash(self):
+        import socket
+        token, _ = self.pair()
+        for body in ({"enabled": "yes"}, {"port": 80}, {"port": 70000}, {"port": "9876"}, {"port": True},
+                     {"allow": ["0.0.0.0/0"]}, {"allow": ["::/0"]}, {"allow": ["8.0.0.0/7"]}, {"allow": "10.0.0.0/8"},
+                     {"allow": ["nonsense"]}, {"allow": ["10.0.0.0/8"] * 17}):
+            self.assertEqual(self.call("POST", "/api/osc", body, token=token)[0], 400, body)
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(blocker.close)
+        blocker.bind(("127.0.0.1", 0))
+        st, body, _ = self.call("POST", "/api/osc", {"enabled": True, "port": blocker.getsockname()[1]}, token=token)
+        self.assertEqual(st, 409)
+        self.assertFalse(self.settings.data["osc"]["enabled"])  # last working configuration kept
+        self.assertFalse(self.call("GET", "/api/osc", token=token)[1]["listening"])
+
     def test_pads_validation_and_playing_a_pad(self):
         token, _ = self.pair()
         self.assertEqual(self.call("POST", "/api/pads", {"bank": 0, "index": 1, "label": "Tunnel", "file": "b.mov"},
@@ -231,6 +296,17 @@ class ServerTest(ServerBase):
         self.call("POST", "/api/blackout", {"on": False}, token=token)
         self.assertEqual(self.player.calls[-1], ("opacity", 204))
         self.assertEqual(self.call("POST", "/api/blackout", {"on": "yes"}, token=token)[0], 400)
+
+    def test_unexpected_error_is_a_clean_500_and_the_server_keeps_working(self):
+        token, _ = self.pair()
+
+        def boom(*a, **k):
+            raise RuntimeError("bug")
+        self.player.status = boom
+        st, body, _ = self.call("GET", "/api/status", token=token)
+        self.assertEqual((st, body), (500, {"error": "internal error"}))
+        del self.player.status  # back to the class method
+        self.assertEqual(self.call("GET", "/api/status", token=token)[0], 200)
 
     def test_player_down_is_503_not_a_crash(self):
         token, _ = self.pair()

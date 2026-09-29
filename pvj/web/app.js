@@ -308,7 +308,7 @@
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
     cards.push(modulesCard(full));
-    if (full) cards.push(appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
+    if (full) cards.push(oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
       if (!S.device) return;
@@ -329,6 +329,33 @@
           onclick: function () { act('POST', '/api/modules/' + m.id, { enabled: !m.enabled }, function (d) { S.modules = d.modules; render(); }); } });
         return h('div', { class: 'item' }, h('span', {}, m.name, h('br'), h('span', { class: 'k', text: m.version + ' · ' + note })), b);
       })));
+  }
+  function oscCard() {
+    var line = h('div', { class: 'k', id: 'oscline', text: 'Loading...' });
+    var port = h('input', { class: 'text-input mono', type: 'number', min: 1024, max: 65535, 'aria-label': 'OSC port' });
+    var allow = h('input', { class: 'text-input mono', 'aria-label': 'Extra allowed networks, comma separated', placeholder: 'Extra networks, e.g. 192.168.50.0/24' });
+    var toggle = h('button', { class: 'btn', id: 'osctoggle', text: '...' });
+    var current = null;
+    function show(d) {
+      current = d;
+      line.textContent = d.error ? 'Problem: ' + d.error : (d.listening ? 'Listening on UDP ' + d.port + ' (' + d.received + ' messages received)' : 'Off');
+      toggle.textContent = d.enabled ? 'OSC is on. Turn off' : 'Turn OSC on';
+      toggle.className = 'btn' + (d.enabled ? ' on' : '');
+      port.value = d.port;
+      allow.value = d.allow.join(', ');
+    }
+    function push(patch) {
+      act('POST', '/api/osc', patch, function (d) { say(''); show(d); });
+    }
+    api('GET', '/api/osc').then(function (r) { if (r.ok) show(r.data); else line.textContent = 'Not available'; });
+    toggle.addEventListener('click', function () { if (current) push({ enabled: !current.enabled }); });
+    var save = h('button', { class: 'btn small', text: 'Save port and networks', onclick: function () {
+      var nets = allow.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean);
+      push({ port: parseInt(port.value, 10), allow: nets });
+    } });
+    return h('div', { class: 'card' }, h('h2', { text: 'Control (OSC)' }),
+      h('div', { text: 'Off by default. Only private networks may send. Shutdown and reboot are never available over OSC.' }),
+      line, toggle, h('label', { class: 'k', for: 'oscport', text: 'UDP port' }), (port.id = 'oscport', port), allow, save);
   }
   function appearanceCard() {
     var t = S.theme || {};
