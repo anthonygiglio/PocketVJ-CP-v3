@@ -4,6 +4,17 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (scheduler)
+
+Done:
+- Dispatched the first image build (`image.yml`) by hand; result in the next entry or the Actions tab.
+- Added the weekly schedule module (`pvj/scheduler.py`, `/api/schedule`, System > Schedule card, settings schema 3 with a migration, `pvj/SCHEDULE.md`), with unit tests on a fake clock and API tests. See D15.
+- The browser test has a new schedule step. Playwright is not installed on the dev Mac, so that step has only been syntax-checked locally; CI runs it.
+- On macOS, 10 `tests/test_update.py` tests fail with `mv: illegal option -- T` (GNU only). They fail the same way on master; they pass on Linux CI.
+
+Open:
+- Scheduler not run on real hardware or across a daylight-saving change.
+
 ## 2026-09-29 (later)
 
 Done:

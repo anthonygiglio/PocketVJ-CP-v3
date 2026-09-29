@@ -45,3 +45,7 @@ Why: a cloud session cannot reach devices on a LAN. The workflow starts only by 
 
 ## D14. Working process: one PR per finished branch, short comment, merge when green
 Why: keeps history readable and CI as the gate. No history rewriting. Risky features (root, network, uploads, auth) get an independent read-only review, with every finding fixed by a test that reproduces it.
+
+## D15. The scheduler never replays missed events, and can only do four harmless things
+Why: a Pi has no battery clock, so its time jumps when the network sets it; replaying "missed" entries after a jump could start clips at the wrong moment on a live stage. The scheduler fires only for minutes it watched (short stalls of up to two minutes are caught up) and can only play, stop, blackout or show. Cost: a box that was off at 18:00 does not start the 18:00 entry when it boots at 18:05; use an autostart preset for that. Beta and off by default, like the network module.
+
