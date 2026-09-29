@@ -4,6 +4,20 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (DMX and MIDI)
+
+Done:
+- Merged the streams module (#14).
+- Added DMX over the network (Art-Net, sACN) and USB MIDI input: `pvj/dmx.py`, `pvj/midi.py`, `/api/dmx`, `/api/midi`, System cards, settings schema 5, `pvj/DMX.md`, `pvj/MIDI.md`, tests. See D17.
+- A test found a real bug: regexes ending in `$` accepted a trailing newline (`"/dev/snd/midiC1D0\n"`, `"09:00\n"`). All new validation now uses `fullmatch`. Lesson recorded.
+- Independent read-only review (agent) found: no way to reach shutdown, files or other routes, but real defects, all fixed with tests: unlocked apply/stop could leak a second receiver; DMX pad and function channels fired on every value change; the per-source rate limit is defeated by forged sources (added global packet and command caps); turning the module off left the receiver running; a returning source was not a new baseline; a failed level was never retried; MIDI path checks (ASCII digits, character device, no links) and a non-OSError killing the reader.
+- Not fixed, by choice: sACN sequence numbers are ignored (documented).
+- Never run against a real console, network or USB controller.
+
+Open:
+- The image build had not finished when this was written.
+- DMX and MIDI need a test with real gear (console or QLC+ on a laptop; a USB pad controller on a Pi, with the service user in the `audio` group).
+
 ## 2026-09-29 (streams)
 
 Done:

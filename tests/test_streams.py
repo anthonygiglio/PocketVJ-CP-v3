@@ -38,7 +38,7 @@ class StreamUrlTest(unittest.TestCase):
     def test_validate_saved(self):
         e = streams.new_entry("A", "srt://h:1")
         self.assertEqual(streams.validate_saved([e]), [e])
-        for bad in ("x", [e, e], [{"id": "zz", "name": "A", "url": "srt://h:1"}], [dict(e, url="file:///x")],
+        for bad in ("x", [e, e], [{"id": "zz", "name": "A", "url": "srt://h:1"}], [dict(e, id="abcd1234\n")], [dict(e, url="file:///x")],
                     [streams.new_entry("A", "srt://h:1")] * 25):
             with self.assertRaises(streams.StreamError):
                 streams.validate_saved(bad)

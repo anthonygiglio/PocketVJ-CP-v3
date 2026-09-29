@@ -1,0 +1,12 @@
+{
+  "id": "control-dmx",
+  "name": "DMX over the network (Art-Net, sACN)",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": ["core"],
+  "boards": ["pi3", "pi4", "pi5", "x86"],
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Control the box from a lighting console or software: eight channels for opacity, size, position, speed, volume, blackout, pad and function. Receive only."
+}

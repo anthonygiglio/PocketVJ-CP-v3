@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import hardware, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
+from . import dmx as dmx_mod, hardware, midi as midi_mod, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
 from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
@@ -283,11 +283,18 @@ def build(env=None, player=None):
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
+    api.dmx = dmx_mod.DmxManager(api, settings)
+    api.midi = midi_mod.MidiManager(api, settings)
     write_pin_file(rundir, auth.current_pin)
     try:
         api.osc.apply()
     except osc_mod.OscError as e:
         print("pvj-web: OSC not started: %s" % e, file=sys.stderr)
+    for name, manager in (("DMX", api.dmx), ("MIDI", api.midi)):
+        try:
+            manager.apply()
+        except Exception as e:  # a missing controller or a busy port must not stop the panel
+            print("pvj-web: %s not started: %s" % (name, e), file=sys.stderr)
     return api, auth, rundir
 
 
@@ -311,6 +318,8 @@ def main(argv=None):
     finally:
         httpd.server_close()
         api.scheduler.stop()
+        api.dmx.stop()
+        api.midi.stop()
         if api.osc:
             api.osc.stop()
     return 0

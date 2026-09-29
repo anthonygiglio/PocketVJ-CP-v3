@@ -91,6 +91,14 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(data["schedule"]["enabled"])
         self.assertEqual(self.read(self.path + ".bak-v3")["schema"], 3)
 
+    def test_real_migration_from_schema_4_adds_control_off(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 4, "streams": []}, f)
+        data = Settings(self.path).load()
+        self.assertEqual(data["schema"], settings.SCHEMA)
+        self.assertFalse(data["control"]["dmx"]["enabled"] or data["control"]["midi"]["enabled"])
+        self.assertEqual(self.read(self.path + ".bak-v4")["schema"], 4)
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

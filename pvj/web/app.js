@@ -367,7 +367,7 @@
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
     cards.push(modulesCard(full), streamsCard(full));
-    if (full) cards.push(scheduleCard(), networkCard(), oscCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
+    if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
       if (!S.device) return;
@@ -388,6 +388,86 @@
           onclick: function () { act('POST', '/api/modules/' + m.id, { enabled: !m.enabled }, function (d) { S.modules = d.modules; render(); }); } });
         return h('div', { class: 'item' }, h('span', {}, m.name, h('br'), h('span', { class: 'k', text: m.version + ' · ' + note })), b);
       })));
+  }
+  // ---- DMX and MIDI ---------------------------------------------------
+  var dmxForm = { universe: null, start: null, allow: null };  // survive redraws
+  function moduleOn(id) { var m = S.modules.filter(function (x) { return x.id === id; })[0]; return !!(m && m.enabled); }
+  function dmxCard() {
+    var card = h('div', { class: 'card', id: 'dmxcard' }, h('h2', { text: 'DMX (Art-Net, sACN)' }));
+    var body = h('div', { class: 'list', id: 'dmxbody' });
+    card.appendChild(body);
+    if (!moduleOn('control-dmx')) {
+      body.appendChild(h('div', { class: 'k', id: 'dmxmsg', text: 'Off. Switch on "DMX over the network" under Modules above (beta).' }));
+      return card;
+    }
+    function draw(d) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'dmxline', text: d.error ? 'Problem: ' + d.error :
+        (d.listening ? 'Listening on UDP ' + d.port + ' (' + d.received + ' frames for this universe)' : 'Off') }));
+      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + 7) + ': ' + d.channels.join(' ') }));
+      var proto = h('select', { class: 'text-input', id: 'dmxproto', 'aria-label': 'Protocol' },
+        [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)']].map(function (p) { return h('option', { value: p[0], text: p[1], selected: p[0] === d.protocol }); }));
+      var uni = h('input', { class: 'text-input mono', id: 'dmxuni', type: 'number', 'aria-label': 'Universe', value: dmxForm.universe === null ? d.universe : dmxForm.universe });
+      var start = h('input', { class: 'text-input mono', id: 'dmxstart', type: 'number', min: 1, max: 505, 'aria-label': 'Start channel', value: dmxForm.start === null ? d.start : dmxForm.start });
+      var allow = h('input', { class: 'text-input mono', id: 'dmxallow', 'aria-label': 'Extra allowed networks, comma separated', placeholder: 'Extra networks, e.g. 192.168.50.0/24',
+        value: dmxForm.allow === null ? d.allow.join(', ') : dmxForm.allow });
+      uni.addEventListener('input', function () { dmxForm.universe = uni.value; });
+      start.addEventListener('input', function () { dmxForm.start = start.value; });
+      allow.addEventListener('input', function () { dmxForm.allow = allow.value; });
+      function send(patch) {
+        act('POST', '/api/dmx', patch, function (data) { dmxForm = { universe: null, start: null, allow: null }; say(''); draw(data); });
+      }
+      function fields() {
+        return { protocol: proto.value, universe: parseInt(uni.value, 10), start: parseInt(start.value, 10),
+          allow: allow.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean) };
+      }
+      body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'dmxtoggle', text: d.enabled ? 'DMX is on. Turn off' : 'Turn DMX on',
+        onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
+      body.appendChild(proto); body.appendChild(h('label', { class: 'k', for: 'dmxuni', text: 'Universe' })); body.appendChild(uni);
+      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels)' })); body.appendChild(start); body.appendChild(allow);
+      body.appendChild(h('button', { class: 'btn small', id: 'dmxsave', text: 'Save', onclick: function () { send(fields()); } }));
+      body.appendChild(h('div', { class: 'k', text: 'Off until you turn it on. Only private networks may send. The first frame only sets a starting point, and the box holds its last state if the signal stops.' }));
+    }
+    api('GET', '/api/dmx').then(function (r) {
+      if (!document.getElementById('dmxcard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'dmxmsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
+  }
+  function midiCard() {
+    var card = h('div', { class: 'card', id: 'midicard' }, h('h2', { text: 'MIDI controller' }));
+    var body = h('div', { class: 'list', id: 'midibody' });
+    card.appendChild(body);
+    if (!moduleOn('control-midi')) {
+      body.appendChild(h('div', { class: 'k', id: 'midimsg', text: 'Off. Switch on "MIDI controller (USB)" under Modules above (beta).' }));
+      return card;
+    }
+    function draw(d) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'midiline', text: !d.enabled ? 'Off' : (d.connected ? 'Connected' + (d.last ? '. Last message: ' + d.last : '') : 'Waiting for the controller') }));
+      var dev = h('select', { class: 'text-input', id: 'midi-device', 'aria-label': 'MIDI device' },
+        [h('option', { value: '', text: d.devices.length ? 'Choose a device' : 'No MIDI devices found' })].concat(d.devices.map(function (p) {
+          return h('option', { value: p, text: p, selected: p === d.device });
+        })));
+      var chan = h('select', { class: 'text-input', id: 'midichan', 'aria-label': 'MIDI channel' },
+        [h('option', { value: 0, text: 'All channels', selected: d.channel === 0 })].concat(Array.apply(null, Array(16)).map(function (_, i) {
+          return h('option', { value: i + 1, text: 'Channel ' + (i + 1), selected: d.channel === i + 1 });
+        })));
+      function send(patch) { act('POST', '/api/midi', patch, function (data) { say(''); draw(data); }); }
+      function fields() { return { device: dev.value, channel: parseInt(chan.value, 10) }; }
+      body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'miditoggle', text: d.enabled ? 'MIDI is on. Turn off' : 'Turn MIDI on',
+        onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
+      body.appendChild(dev); body.appendChild(chan);
+      body.appendChild(h('button', { class: 'btn small', id: 'midisave', text: 'Save', onclick: function () { send(fields()); } }));
+      body.appendChild(h('div', { class: 'k', text: 'Notes 36 to 71 play pads 1 to 36. See MIDI.md for the rest.' }));
+    }
+    api('GET', '/api/midi').then(function (r) {
+      if (!document.getElementById('midicard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'midimsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
   }
   // ---- streams (SRT, RTSP, RTMP) --------------------------------------
   var streamForm = { name: '', url: '' };  // survives redraws

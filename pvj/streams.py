@@ -37,7 +37,7 @@ def valid_url(url):
         raise StreamError("that is not a valid address")
     if parts.scheme.lower() not in SCHEMES:
         raise StreamError("the address must start with %s" % ", ".join(s + "://" for s in SCHEMES))
-    if not host or not _HOST.match(host):
+    if not host or not _HOST.fullmatch(host):
         raise StreamError("the address needs a host name or IP address")
     if port is not None and not 1 <= port <= 65535:
         raise StreamError("bad port number")
@@ -71,7 +71,7 @@ def validate_saved(items):
         raise StreamError("streams must be a list of at most %d" % MAX_STREAMS)
     seen = set()
     for it in items:
-        if not isinstance(it, dict) or not _ID.match(str(it.get("id", ""))) or it["id"] in seen:
+        if not isinstance(it, dict) or not _ID.fullmatch(str(it.get("id", ""))) or it["id"] in seen:
             raise StreamError("bad stream entry")
         seen.add(it["id"])
         clean_name(it.get("name"))

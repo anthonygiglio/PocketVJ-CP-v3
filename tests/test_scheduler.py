@@ -127,7 +127,7 @@ class SchedulerTest(unittest.TestCase):
             {"entries": [entry(days="0")]}, {"entries": [entry(action="reboot")]}, {"entries": [entry(action="shutdown")]},
             {"entries": [entry(file="../x.mp4")]}, {"entries": [entry(file="a.txt")]}, {"entries": [entry(file=None)]},
             {"entries": [entry(loop="yes")]}, {"entries": [entry(label="x" * 41)]}, {"entries": [entry(label="a\nb")]},
-            {"entries": [entry(id="ZZZZ")]}, {"entries": ["x"]},
+            {"entries": [entry(id="ZZZZ")]}, {"entries": [entry(time="09:00\n")]}, {"entries": [entry(id="abcd1234\n")]}, {"entries": ["x"]},
             {"entries": [entry(id="%08x" % i) for i in range(scheduler.MAX_ENTRIES + 1)]},
         ]
         for body in bad:

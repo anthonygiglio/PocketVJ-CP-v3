@@ -17,7 +17,7 @@ import threading
 import time
 import unicodedata
 
-from . import hardware, netcfg, osc as osc_mod, presets, streams as streams_mod, themes as themes_mod
+from . import dmx as dmx_mod, hardware, midi as midi_mod, netcfg, osc as osc_mod, presets, streams as streams_mod, themes as themes_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
 from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -122,6 +122,8 @@ class Api:
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
         self.scheduler = None     # Scheduler or None
+        self.dmx = None           # DmxManager or None
+        self.midi = None          # MidiManager or None
 
     # --- helpers -------------------------------------------------------
     def _apply_opacity(self, percent):
@@ -580,6 +582,12 @@ class Api:
             self.registry.set_enabled(module_id, body.get("enabled"))
         except ModuleError as e:
             raise ApiError(409, str(e))
+        for mid, manager in (("control-dmx", self.dmx), ("control-midi", self.midi)):
+            if module_id == mid and manager is not None:   # switching the module off stops the receiver
+                try:
+                    manager.apply()
+                except Exception as e:
+                    print("pvj-web: %s: %s" % (mid, e))
         return {"modules": self.registry.list()}
 
     def get_theme(self, body, device, client):
@@ -665,6 +673,46 @@ class Api:
             raise ApiError(409, str(e))
         self.settings.save()
         return self.osc.status()
+
+    # --- DMX and MIDI input --------------------------------------------
+    def _need_control(self, module, manager):
+        if manager is None or not self.registry.enabled(module):
+            raise ApiError(409, "turn on the %s module in System first" % ("DMX" if module == "control-dmx" else "MIDI"))
+
+    def _set_control(self, key, module, manager, validate, error_type, body):
+        self._need_control(module, manager)
+        with self.settings.lock:      # validate, assign, start, revert and save happen as one step
+            current = self.settings.data["control"][key]
+            try:
+                new = validate(body, current)
+            except error_type as e:
+                raise bad(str(e))
+            self.settings.data["control"][key] = new
+            try:
+                manager.apply()
+            except Exception as e:
+                self.settings.data["control"][key] = current   # keep the last working configuration
+                try:
+                    manager.apply()
+                except Exception:
+                    pass
+                raise ApiError(409, str(e))
+            self.settings.save()
+            return manager.status()
+
+    def get_dmx(self, body, device, client):
+        self._need_control("control-dmx", self.dmx)
+        return self.dmx.status()
+
+    def set_dmx(self, body, device, client):
+        return self._set_control("dmx", "control-dmx", self.dmx, dmx_mod.validate, dmx_mod.DmxError, body)
+
+    def get_midi(self, body, device, client):
+        self._need_control("control-midi", self.midi)
+        return self.midi.status()
+
+    def set_midi(self, body, device, client):
+        return self._set_control("midi", "control-midi", self.midi, midi_mod.validate, midi_mod.MidiError, body)
 
     # --- schedule ------------------------------------------------------
     def _need_scheduler(self):
@@ -797,6 +845,10 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/dmx"): ("full", self.get_dmx),
+            ("POST", "/api/dmx"): ("full", self.set_dmx),
+            ("GET", "/api/midi"): ("full", self.get_midi),
+            ("POST", "/api/midi"): ("full", self.set_midi),
             ("GET", "/api/streams"): ("view", self.get_streams),
             ("POST", "/api/streams"): ("full", self.set_streams),
             ("GET", "/api/schedule"): ("view", self.get_schedule),
