@@ -100,7 +100,7 @@ function startServer() {
     // Network: switch the module on, preview, apply, watch the countdown, confirm
     await page.click('.item:has-text("Network settings") >> button');
     await page.waitForSelector('#netiface');
-    assert(await page.isVisible('#netcard >> text=192.168.1.9/24'), 'current address shown');
+    await page.waitForSelector('#netcard >> text=192.168.1.9/24', { timeout: 8000 });  // the address arrives after the card first draws
     await page.click('#netmodes >> text=Fixed address');
     await page.fill('#netaddr', '192.168.50.20');
     await page.fill('#netprefix', '24');
