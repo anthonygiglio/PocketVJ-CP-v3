@@ -19,3 +19,5 @@ Append new lessons at the bottom. Format: what happened, what we do now.
 - **When the shell tool went down mid-work**, files were backed up to a throwaway branch through the GitHub API before resuming. Commit and push early.
 - **Claims must match what was run.** Everything so far ran in a container with a real headless mpv and fakes. Nothing has run on a real Pi, display, USB stick, TouchOSC or NetworkManager. Say so in every summary until that changes.
 - **On macOS, pulling the case-collision fix left the surviving image showing as deleted.** #9 removed `01_hdmi_connect.jpg`; on a case-insensitive disk that also removed the file on disk that `01_Hdmi_connect.jpg` maps to. The tracked file was fine; `git checkout -- <path>` restored it. If `git status` shows a lone deletion after such a pull, check for a case-variant removal before assuming damage.
+- **`re.match` with a `$` anchor accepts a trailing newline.** A MIDI device path and a schedule time both passed with `\n` on the end. Use `re.fullmatch` for every validation of untrusted text; a test that appends `\n` to a good value catches it.
+

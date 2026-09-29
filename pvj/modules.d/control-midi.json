@@ -1,0 +1,12 @@
+{
+  "id": "control-midi",
+  "name": "MIDI controller (USB)",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": ["core"],
+  "boards": ["pi3", "pi4", "pi5", "x86"],
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Play pads, fade and mix from a USB MIDI pad controller, keyboard or fader box. Receive only. Needs the service account in the audio group."
+}

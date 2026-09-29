@@ -55,11 +55,11 @@ def validate(body):
         eid = e.get("id")
         if eid is None or eid == "":
             eid = uuid.uuid4().hex[:8]
-        if not isinstance(eid, str) or not _ID.match(eid) or eid in seen:
+        if not isinstance(eid, str) or not _ID.fullmatch(eid) or eid in seen:
             raise ScheduleError(where + "bad or repeated id")
         seen.add(eid)
         at = e.get("time")
-        if not isinstance(at, str) or not _TIME.match(at):
+        if not isinstance(at, str) or not _TIME.fullmatch(at):
             raise ScheduleError(where + "time must be HH:MM, 24 hour")
         days = e.get("days")
         if (not isinstance(days, list) or not days or len(days) > 7

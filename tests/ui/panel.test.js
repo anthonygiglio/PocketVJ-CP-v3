@@ -139,6 +139,20 @@ function startServer() {
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
     await page.click('#osctoggle');
     await page.waitForFunction(() => document.getElementById('oscline').textContent === 'Off');
+    // DMX: switch the module on, reject a bad universe, turn it on and off
+    await page.click('.item:has-text("DMX over the network") >> button');
+    await page.waitForSelector('#dmxline:has-text("Off")');
+    await page.fill('#dmxuni', '99999');
+    await page.click('#dmxsave');
+    await page.waitForFunction(() => /universe/i.test(document.getElementById('msg').textContent));
+    await page.fill('#dmxuni', '2');
+    await page.click('#dmxsave');
+    await page.waitForFunction(() => document.getElementById('dmxuni').value === '2');
+    // MIDI: switch the module on; turning it on needs a device
+    await page.click('.item:has-text("MIDI controller") >> button');
+    await page.waitForSelector('#midiline:has-text("Off")');
+    await page.click('#miditoggle');
+    await page.waitForFunction(() => /choose a MIDI device/i.test(document.getElementById('msg').textContent));
     // Streams: switch the module on, reject a bad address, save one with a login (hidden), remove it
     await page.click('.item:has-text("Streams: SRT") >> button');
     await page.waitForSelector('#streamempty');

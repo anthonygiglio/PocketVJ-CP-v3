@@ -17,11 +17,16 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 4
+SCHEMA = 5
 
 
 class SettingsError(Exception):
     pass
+
+
+def default_control():
+    return {"dmx": {"enabled": False, "protocol": "artnet", "universe": 0, "start": 1, "allow": []},
+            "midi": {"enabled": False, "device": "", "channel": 0}}
 
 
 def default_settings():
@@ -37,6 +42,7 @@ def default_settings():
         "osc": {"enabled": False, "port": 9876, "allow": []},
         "schedule": {"enabled": False, "entries": []},
         "streams": [],
+        "control": default_control(),
     }
 
 
@@ -56,7 +62,12 @@ def _v3_to_v4(data):
     data.setdefault("streams", [])
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4}
+def _v4_to_v5(data):
+    """5: DMX (Art-Net, sACN) and MIDI input. Both off."""
+    data.setdefault("control", default_control())
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5}
 
 
 def migrate(data, migrations=None, current=SCHEMA):
