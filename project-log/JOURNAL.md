@@ -4,6 +4,17 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-29 (device plan)
+
+Done:
+- Reviewed the device test plan against what is actually in the image and rewrote it: new "Option C" in `tools/DEVICE-TESTING.md` (test the built image on a Pi: flash, first login without a keyboard, a numbered checklist, one test per beta module, what to send back). Option A and B were written for a Pi that already had Raspberry Pi OS, git, mpv and a clone; the image has no `git` and no `tests/`, so `tools/device-test.sh` needs a copy of the repository.
+- Found by reading the unit file: `pvj-web.service` used `PrivateDevices=yes` and had no `audio` group, so the MIDI module could never see `/dev/snd/midi*` on the image. Now `SupplementaryGroups=audio`, `DevicePolicy=closed` and read-only ALSA access. Unit text checked by a test; not run under systemd.
+- Added `tools/artnet-send.py` to test DMX from a laptop.
+- Fixed the stale `image/README.md` (it said the panel was not in the image and the build took an hour).
+
+Open:
+- Pi 4 not yet reachable: moved to 192.168.0.0/24; no Raspberry Pi hardware address seen yet, and the SD card is not flashed. The earlier Debian host on 172.16.1.95 could not be logged into.
+
 ## 2026-09-29 (CI notes)
 
 - I merged #16 (docs only) while its `panel-ui` check had failed, after commenting "checks green" without reading the result. The failure was the network form step (`panel.test.js` line 110, "typed values survive the redraw", 8 s timeout). The same code on master passed `panel-ui` on the next run, so it is a flake, not reproduced and not root-caused (Playwright is not installed on the dev Mac). Rule from now: read the check list for failures before merging, every time.

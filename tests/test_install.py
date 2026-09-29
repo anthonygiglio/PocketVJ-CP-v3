@@ -53,6 +53,12 @@ class InstallTest(unittest.TestCase):
         web = self.read(self.p("etc/systemd/system/pvj-web.service"))
         self.assertIn("ExecStart=/opt/pvj/current/bin/pvj-web", web)
         self.assertIn("User=pvj-web", web)
+        # the MIDI module needs to read /dev/snd/midi*: audio group, a device policy instead of PrivateDevices
+        self.assertIn("SupplementaryGroups=audio", web)
+        self.assertIn("DeviceAllow=char-alsa r", web)
+        self.assertIn("DevicePolicy=closed", web)
+        self.assertNotIn("DeviceAllow=char-alsa rw", web)
+        self.assertNotRegex(web, r"(?m)^PrivateDevices=yes")
         self.assertIn("NoNewPrivileges=yes", web)
         self.assertNotIn("@PVJ", web)
         net = self.read(self.p("etc/systemd/system/pvj-netd.service"))
