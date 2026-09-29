@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
+# SPDX-License-Identifier: Apache-2.0
+name: Device test
+
+# Runs on a real board registered as a self-hosted runner with the label "pvj-device".
+# Manual start only: it never runs for pushes or pull requests, so nobody else's code reaches the board.
+on:
+  workflow_dispatch:
+    inputs:
+      play:
+        description: 'Also play a test pattern on the attached display'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: device-test
+  cancel-in-progress: false
+
+jobs:
+  device:
+    # Only the repository owner may start it.
+    if: github.actor == github.repository_owner
+    runs-on: [self-hosted, pvj-device]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run the device test
+        env:
+          PVJ_DEVICE_PLAY: ${{ inputs.play && '1' || '0' }}
+        run: tools/device-test.sh device-report
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-report
+          path: device-report/
+          if-no-files-found: warn
