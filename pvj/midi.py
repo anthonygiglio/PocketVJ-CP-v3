@@ -19,14 +19,18 @@ import glob
 import os
 import re
 import select
+import stat
 import threading
 import time
 
+from .osc import RateLimiter
+
 MIDI_DEVICE = {"id": "midi", "name": "MIDI", "role": "live"}
-DEVICE_PATH = re.compile(r"^/dev/snd/midiC\d{1,3}D\d{1,3}$")
+DEVICE_PATH = re.compile(r"/dev/snd/midiC[0-9]{1,3}D[0-9]{1,3}")
 FIRST_PAD_NOTE = 36     # notes 36 to 71 are pads 1 to 36
 PADS = 36
 MIN_INTERVAL = 0.05
+MAX_CALLS_PER_SECOND = 50.0
 CC_LEVELS = {20: ("opacity", 0, 100), 21: ("size", 1, 200), 22: ("position", -100, 100),
              23: ("speed", 0.25, 2.0), 24: ("volume", 0, 100)}
 CC_BLACKOUT = 25
@@ -146,7 +150,8 @@ class MidiInput:
     def __init__(self, api, cfg, log=print, clock=time.monotonic, open_fn=None, retry=2.0):
         self.api, self.cfg, self.log = api, dict(cfg), log
         self.mapper = MidiMapper(self._do, cfg.get("channel", 0), api.mix, clock)
-        self._open = open_fn or (lambda path: os.open(path, os.O_RDONLY | os.O_NONBLOCK))
+        self._open = open_fn or self._open_device
+        self.calls = RateLimiter(clock, rate=MAX_CALLS_PER_SECOND, burst=MAX_CALLS_PER_SECOND)   # a faulty pad cannot flood the player
         self.retry = retry
         self._stop = threading.Event()
         self._thread = None
@@ -161,7 +166,21 @@ class MidiInput:
             self._quiet_until = now + 10
             self.log("midi: " + text)
 
+    @staticmethod
+    def _open_device(path):
+        """Open a MIDI device file, but only a character device that really is one of /dev/snd/midi*."""
+        if not isinstance(path, str) or not DEVICE_PATH.fullmatch(path):
+            raise OSError("not a MIDI device path")
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        if not stat.S_ISCHR(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise OSError("not a character device")
+        return fd
+
     def _do(self, path, body):
+        if not self.calls.allow("all"):
+            self._note("too many commands a second; some were dropped")
+            return False
         status, payload = self.api.handle("POST", path, body, MIDI_DEVICE, "midi")
         if status != 200:
             self._note("%s -> %s %s" % (path, status, payload.get("error", "")))
@@ -180,15 +199,18 @@ class MidiInput:
             fd = None
             try:
                 fd = self._open(path)
-            except OSError:
+            except Exception:       # missing, busy, not a MIDI device, a hand-edited bad path: keep looking
                 self.connected = False
                 self._stop.wait(self.retry)
                 continue
             self.connected = True
             parser = MidiParser()
+            self.mapper.pending.clear()      # a fader value held from before the unplug is stale
+            poller = select.poll()           # unlike select(), fine for any descriptor number
+            poller.register(fd, select.POLLIN | select.POLLERR | select.POLLHUP)
             try:
                 while not self._stop.is_set():
-                    ready, _, _ = select.select([fd], [], [], 0.1)
+                    ready = poller.poll(100)
                     if ready:
                         chunk = os.read(fd, 256)
                         if not chunk:
@@ -246,21 +268,29 @@ class MidiManager:
     def __init__(self, api, settings, log=print, open_fn=None, lister=list_devices):
         self.api, self.settings, self.log, self._open_fn, self._lister = api, settings, log, open_fn, lister
         self.input = None
+        self._lock = threading.RLock()
 
     def apply(self):
-        cfg = self.settings.data["control"]["midi"]
-        self.stop()
-        if cfg["enabled"]:
-            self.input = MidiInput(self.api, cfg, log=self.log, open_fn=self._open_fn)
-            self.input.start()
+        """Make reality match the settings and the module switch."""
+        with self._lock:
+            cfg = self.settings.data["control"]["midi"]
+            self._stop_input()
+            if cfg["enabled"] and self.api.registry.enabled("control-midi"):
+                self.input = MidiInput(self.api, cfg, log=self.log, open_fn=self._open_fn)
+                self.input.start()
 
     def status(self):
-        cfg = self.settings.data["control"]["midi"]
-        i = self.input
-        return dict(cfg, devices=self._lister(), connected=bool(i and i.connected),
-                    messages=i.stats["messages"] if i else 0, last=i.mapper.last_message if i else None)
+        with self._lock:
+            cfg = self.settings.data["control"]["midi"]
+            i = self.input
+            return dict(cfg, devices=self._lister(), connected=bool(i and i.connected),
+                        messages=i.stats["messages"] if i else 0, last=i.mapper.last_message if i else None)
 
-    def stop(self):
+    def _stop_input(self):
         if self.input:
             self.input.stop()
             self.input = None
+
+    def stop(self):
+        with self._lock:
+            self._stop_input()

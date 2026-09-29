@@ -114,12 +114,12 @@ class DmxMapperTest(unittest.TestCase):
         self.frame(0)
         self.frame(0, 0, 0, 0, 0, 0, 5, at=101)     # 0 to 5: idle
         self.frame(0, 0, 0, 0, 0, 0, 6, at=102)     # pad 1
-        self.frame(0, 0, 0, 0, 0, 0, 11, at=103)    # still pad 1: same range would re-fire only via value change
+        self.frame(0, 0, 0, 0, 0, 0, 11, at=103)    # still pad 1: does not fire again
         self.frame(0, 0, 0, 0, 0, 0, 13, at=104)    # pad 2
         self.frame(0, 0, 0, 0, 0, 0, 6 * 13, at=105)  # pad 13 = bank 2, index 0
         self.frame(0, 0, 0, 0, 0, 0, 255, at=106)   # above the last pad (6*37=222): nothing
         pads = [b["pad"] for p, b in self.rec.calls if p == "/api/play"]
-        self.assertEqual(pads, [[0, 0], [0, 0], [0, 1], [1, 0]])
+        self.assertEqual(pads, [[0, 0], [0, 1], [1, 0]])
 
     def test_function_channel(self):
         self.frame(0)
@@ -128,6 +128,24 @@ class DmxMapperTest(unittest.TestCase):
         self.assertEqual([c for c in self.rec.calls], [
             ("/api/control", {"action": "stop"}), ("/api/control", {"action": "pause", "value": True}),
             ("/api/control", {"action": "pause", "value": False}), ("/api/fadeout", {"seconds": 2})])
+
+    def test_dithering_inside_a_range_fires_once(self):
+        self.frame(0)
+        for at, v in enumerate((6, 7, 8, 11, 9, 6), 101):
+            self.frame(0, 0, 0, 0, 0, 0, v, at=at)
+        for at, v in enumerate((0, 50, 60, 99, 70, 0, 200, 230, 255, 210), 110):
+            self.frame(0, 0, 0, 0, 0, 0, 0, v, at=at)
+        self.assertEqual(self.rec.calls, [("/api/play", {"pad": [0, 0]}), ("/api/control", {"action": "stop"}), ("/api/fadeout", {"seconds": 2})])
+
+    def test_a_level_that_failed_is_retried_and_a_returning_source_is_a_new_baseline(self):
+        self.frame(0)
+        self.rec.status = 500
+        self.assertEqual(self.frame(100, at=101), 0)
+        self.rec.status = 200
+        self.assertEqual(self.frame(100, at=102), 1)                # the same value goes through on the next frame
+        self.assertEqual(self.frame(0, 0, 0, 0, 0, 255, at=200), 0)  # 98 s of silence: this frame is only a baseline
+        self.assertEqual(len(self.rec.calls), 2)                     # the failed try and the retry; nothing from the baseline
+        self.assertEqual(self.frame(0, 0, 0, 0, 0, 0, at=201), 1)   # and later changes are acted on again
 
     def test_start_address_and_short_frames(self):
         m = DmxMapper(self.rec, start=10, clock=lambda: self.t[0])
@@ -144,10 +162,21 @@ class DmxMapperTest(unittest.TestCase):
 
 
 class DmxServerTest(ServerBase):
-    def make(self, **over):
+    def make(self, clock=time.monotonic, **over):
         cfg = {"enabled": True, "protocol": "artnet", "universe": 3, "start": 1, "allow": []}
         cfg.update(over)
-        return DmxServer(self.api, cfg, host="127.0.0.1", log=lambda *_: None)
+        return DmxServer(self.api, cfg, host="127.0.0.1", log=lambda *_: None, clock=clock)
+
+    def test_forged_sources_cannot_get_past_the_global_limits(self):
+        srv = self.make(clock=lambda: 50.0)      # time stands still: only the burst allowance exists
+        srv.handle_packet(artnet(3, [0] * 8), "10.0.0.1")
+        handled = 0
+        for i in range(2000):                    # every packet from a new private address
+            level = i % 2 * 255
+            handled += srv.handle_packet(artnet(3, [level] + [0] * 7), "10.1.%d.%d" % (i // 250, i % 250 + 1))
+        self.assertLessEqual(srv.stats["received"] - srv.stats["dropped"], 501 + 2)
+        self.assertLessEqual(srv.stats["handled"], 51)      # commands to the player are capped as well
+        self.assertGreater(srv.stats["dropped"], 1000)
 
     def test_packets_end_to_end(self):
         srv = self.make()
@@ -175,6 +204,7 @@ class DmxServerTest(ServerBase):
             srv.start()
             self.assertTrue(srv.listening)
             tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.addCleanup(tx.close)
             tx.sendto(artnet(3, [0] * 8), ("127.0.0.1", free))
             tx.sendto(artnet(3, [0, 0, 0, 0, 0, 255, 0, 0]), ("127.0.0.1", free))
             deadline = time.time() + 3
@@ -184,6 +214,15 @@ class DmxServerTest(ServerBase):
         finally:
             srv.stop()
         self.assertFalse(srv.listening)
+
+    def test_a_port_in_use_is_reported(self):
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        blocker.bind(("127.0.0.1", 0))
+        self.addCleanup(blocker.close)
+        srv = self.make()
+        srv.port = blocker.getsockname()[1]
+        with self.assertRaises(dmx.DmxError):
+            srv.start()
 
     def test_sacn_protocol(self):
         srv = self.make(protocol="sacn", universe=5)
@@ -316,6 +355,62 @@ class MidiInputTest(ServerBase):
         assert cond(), "condition not met"
 
 
+class MidiHardeningTest(ServerBase):
+    def test_a_faulty_pad_cannot_flood_the_player(self):
+        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None, clock=lambda: 5.0)
+        parser = MidiParser()
+        for _ in range(400):
+            inp.feed(parser, bytes([0x90, 36, 100]))
+        self.assertLessEqual(inp.stats["handled"], 51)
+
+    def test_bad_paths_never_open_and_never_kill_the_thread(self):
+        with self.assertRaises(OSError):
+            MidiInput._open_device("/etc/passwd")
+        with self.assertRaises(OSError):
+            MidiInput._open_device("/dev/snd/midiC\u0663D\u0663")
+        self.assertIsNone(midi.DEVICE_PATH.fullmatch("/dev/snd/midiC\u0663D\u0663"))
+        calls = []
+
+        def open_fn(path):
+            calls.append(path)
+            raise ValueError("embedded null byte")
+        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None, open_fn=open_fn, retry=0.02)
+        inp.start()
+        try:
+            end = time.time() + 3
+            while time.time() < end and len(calls) < 3:
+                time.sleep(0.02)
+            self.assertGreaterEqual(len(calls), 3)          # still trying: the thread survived the error
+        finally:
+            inp.stop()
+
+    def test_concurrent_apply_leaves_exactly_one_reader(self):
+        self.settings.data["control"]["midi"] = {"enabled": True, "device": "/dev/snd/midiC1D0", "channel": 0}
+        self.api.registry.set_enabled("control-midi", True)
+        mgr = MidiManager(self.api, self.settings, log=lambda *_: None, open_fn=lambda p: (_ for _ in ()).throw(OSError()))
+        threads = [threading.Thread(target=mgr.apply) for _ in range(12)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertEqual(sum(t.name == "midi" and t.is_alive() for t in threading.enumerate()), 1)
+        mgr.stop()
+        self.assertEqual(sum(t.name == "midi" and t.is_alive() for t in threading.enumerate()), 0)
+
+    def test_stale_held_fader_value_is_dropped_on_reconnect(self):
+        r1, w1 = os.pipe()
+        r2, w2 = os.pipe()
+        fds = [r1, r2]
+        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None,
+                        open_fn=lambda p: fds.pop(0) if fds else (_ for _ in ()).throw(OSError()), retry=0.05)
+        inp.mapper.pending[20] = 99
+        inp.start()
+        try:
+            MidiInputTest.wait(lambda: inp.connected)
+            self.assertEqual(inp.mapper.pending, {})
+        finally:
+            inp.stop()
+            os.close(w1), os.close(w2)
+
+
 class MidiValidateTest(unittest.TestCase):
     cur = {"enabled": False, "device": "", "channel": 0}
 
@@ -353,9 +448,9 @@ class ControlApiTest(ServerBase):
         blocker.bind(("127.0.0.1", 6454))
         self.addCleanup(blocker.close)
         st, body, _ = self.call("POST", "/api/dmx", {"enabled": True, "universe": 2}, token=self.full)
-        if st == 409:   # exclusive bind on this host: the last working configuration is kept
-            self.assertFalse(self.settings.data["control"]["dmx"]["enabled"])
-            self.assertEqual(self.settings.data["control"]["dmx"]["universe"], 0)
+        self.assertEqual(st, 409)       # the port is taken: the last working configuration is kept
+        self.assertFalse(self.settings.data["control"]["dmx"]["enabled"])
+        self.assertEqual(self.settings.data["control"]["dmx"]["universe"], 0)
         self.assertEqual(self.call("POST", "/api/dmx", {"universe": 99999}, token=self.full)[0], 400)
 
     def test_midi_roundtrip(self):
@@ -367,6 +462,34 @@ class ControlApiTest(ServerBase):
         self.assertEqual((st, body["enabled"], body["channel"]), (200, True, 2))
         self.assertEqual(Settings(self.settings.path).load()["control"]["midi"]["device"], "/dev/snd/midiC1D0")
         self.assertEqual(self.call("POST", "/api/midi", {"device": "/etc/passwd"}, token=self.full)[0], 400)
+
+    def test_switching_the_module_off_stops_the_receiver_and_boot_respects_it(self):
+        self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)
+        self.call("POST", "/api/midi", {"device": "/dev/snd/midiC1D0", "enabled": True}, token=self.full)
+        self.assertIsNotNone(self.api.midi.input)
+        self.call("POST", "/api/modules/control-midi", {"enabled": False}, token=self.full)
+        self.assertIsNone(self.api.midi.input)
+        self.assertTrue(self.settings.data["control"]["midi"]["enabled"])   # the choice is kept
+        self.api.midi.apply()                                               # as at boot: module off, so nothing starts
+        self.assertIsNone(self.api.midi.input)
+        self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)
+        self.assertIsNotNone(self.api.midi.input)
+
+    def test_any_failure_while_applying_reverts_and_answers_409(self):
+        self.call("POST", "/api/modules/control-dmx", {"enabled": True}, token=self.full)
+        before = dict(self.settings.data["control"]["dmx"])
+        real = self.api.dmx.apply
+        state = {"n": 0}
+
+        def flaky():
+            state["n"] += 1
+            if state["n"] == 1:
+                raise KeyError("hand-edited settings")
+            return real()
+        self.api.dmx.apply = flaky
+        st, body, _ = self.call("POST", "/api/dmx", {"universe": 4}, token=self.full)
+        self.assertEqual(st, 409)
+        self.assertEqual(self.settings.data["control"]["dmx"], before)
 
     def test_roles(self):
         self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)

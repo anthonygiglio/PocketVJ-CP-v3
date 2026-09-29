@@ -31,6 +31,9 @@ DMX_DEVICE = {"id": "dmx", "name": "DMX", "role": "live"}
 MIN_INTERVAL = 0.05
 PAD_STEP = 6            # each pad owns six values on the pad channel: 6-11 is pad 1, 12-17 pad 2, ...
 PADS = 36
+STALE_SECONDS = 3.0      # no valid frame for this long: the next one is a new baseline
+MAX_PACKETS_PER_SECOND = 500.0
+MAX_CALLS_PER_SECOND = 50.0
 
 
 class DmxError(Exception):
@@ -68,6 +71,19 @@ def parse_sacn(data):
     return universe, data[126:126 + count]
 
 
+def pad_of(v):
+    """The pad (0 to 35) a value on the pad channel selects, or None for idle or out of range."""
+    pad = v // PAD_STEP - 1
+    return pad if 0 <= pad < PADS else None
+
+
+def function_of(v):
+    for lo, name in ((200, "fade"), (150, "resume"), (100, "pause"), (50, "stop")):
+        if v >= lo:
+            return name
+    return None
+
+
 def _scale(v, lo, hi):
     return lo + (hi - lo) * v / 255.0
 
@@ -75,14 +91,12 @@ def _scale(v, lo, hi):
 class DmxMapper:
     """Turns frames into API calls. `do(path, body)` performs one call."""
 
-    def __init__(self, do, start=1, mix=None, clock=time.monotonic):
-        self.do, self.start, self.mix, self._clock = do, start, mix, clock
+    def __init__(self, do, start=1, clock=time.monotonic):
+        self.do, self.start, self._clock = do, start, clock
         self.applied = None      # last values acted on
+        self.last_frame = 0.0
         self.last_time = [0.0] * CHANNELS
         self.seen = None         # the eight raw values of the latest frame, for the panel
-
-    def reset(self, start):
-        self.start, self.applied, self.seen = start, None, None
 
     def frame(self, dmx):
         i = self.start - 1
@@ -90,11 +104,14 @@ class DmxMapper:
             return 0
         values = list(dmx[i:i + CHANNELS])
         self.seen = values
+        now = self._clock()
+        if self.applied is not None and now - self.last_frame > STALE_SECONDS:
+            self.applied = None        # the signal was gone: a source that comes back sets a new baseline
+        self.last_frame = now
         if self.applied is None:
-            self.applied = values      # baseline: no action
+            self.applied = list(values)  # baseline: no action
             return 0
         done = 0
-        now = self._clock()
         for ch, v in enumerate(values):
             if v == self.applied[ch]:
                 continue
@@ -104,6 +121,8 @@ class DmxMapper:
             self.last_time[ch] = now
             if self._act(ch, v, old):
                 done += 1
+            elif ch <= 4:
+                self.applied[ch] = old   # a level that did not land is tried again on the next frame
         return done
 
     def _act(self, ch, v, old):
@@ -122,19 +141,21 @@ class DmxMapper:
             on = v >= 128
             return self.do("/api/blackout", {"on": on}) if on != (old >= 128) else False
         if ch == 6:
-            pad = v // PAD_STEP - 1
-            if 0 <= pad < PADS:
+            pad = pad_of(v)
+            if pad is not None and pad != pad_of(old):     # only when the channel moves onto a different pad
                 return self.do("/api/play", {"pad": [pad // 12, pad % 12]})
             return False
         if ch == 7:
-            if 50 <= v < 100:
+            zone = function_of(v)
+            if zone is None or zone == function_of(old):   # only when the channel moves into a new zone
+                return False
+            if zone == "stop":
                 return self.do("/api/control", {"action": "stop"})
-            if 100 <= v < 150:
+            if zone == "pause":
                 return control("pause", True)
-            if 150 <= v < 200:
+            if zone == "resume":
                 return control("pause", False)
-            if v >= 200:
-                return self.do("/api/fadeout", {"seconds": 2})
+            return self.do("/api/fadeout", {"seconds": 2})
         return False
 
 
@@ -143,7 +164,10 @@ class DmxServer:
         self.api, self.cfg, self.host, self.log = api, dict(cfg), host, log
         self.extra = parse_networks(cfg.get("allow", []))
         self.limiter = RateLimiter(clock, rate=200.0, burst=400.0)
-        self.mapper = DmxMapper(self._do, cfg["start"], api.mix, clock)
+        # Source addresses can be forged, which defeats a per-source limit; these two limits do not depend on them.
+        self.total = RateLimiter(clock, rate=MAX_PACKETS_PER_SECOND, burst=MAX_PACKETS_PER_SECOND)
+        self.calls = RateLimiter(clock, rate=MAX_CALLS_PER_SECOND, burst=MAX_CALLS_PER_SECOND)
+        self.mapper = DmxMapper(self._do, cfg["start"], clock)
         self._sock = None
         self._thread = None
         self._quiet_until = 0.0
@@ -158,6 +182,9 @@ class DmxServer:
             self.log("dmx: " + text)
 
     def _do(self, path, body):
+        if not self.calls.allow("all"):
+            self._note("too many commands a second; some were dropped")
+            return False
         status, payload = self.api.handle("POST", path, body, DMX_DEVICE, "dmx")
         if status != 200:
             self._note("%s -> %s %s" % (path, status, payload.get("error", "")))
@@ -171,7 +198,7 @@ class DmxServer:
             self.stats["dropped"] += 1
             self._note("ignoring %s (not on an allowed network)" % source_ip)
             return 0
-        if not self.limiter.allow(source_ip):
+        if not self.limiter.allow(source_ip) or not self.total.allow("all"):
             self.stats["dropped"] += 1
             return 0
         parsed = (parse_artnet if self.cfg["protocol"] == "artnet" else parse_sacn)(data)
@@ -185,7 +212,6 @@ class DmxServer:
             return
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((self.host, self.port))
         except OSError as e:
             sock.close()
@@ -273,24 +299,34 @@ class DmxManager:
         self.api, self.settings, self.host, self.log = api, settings, host, log
         self.server = None
         self.error = None
+        self._lock = threading.RLock()
 
     def apply(self):
-        cfg = self.settings.data["control"]["dmx"]
-        if self.server:
-            self.server.stop()
-            self.server = None
-        self.error = None
-        if not cfg["enabled"]:
-            return
-        server = DmxServer(self.api, cfg, host=self.host, log=self.log)
-        try:
-            server.start()
-        except DmxError as e:
-            self.error = str(e)
-            raise
-        self.server = server
+        """Make reality match the settings and the module switch. Any failure is reported as DmxError."""
+        with self._lock:
+            cfg = self.settings.data["control"]["dmx"]
+            if self.server:
+                self.server.stop()
+                self.server = None
+            self.error = None
+            if not cfg["enabled"] or not self.api.registry.enabled("control-dmx"):
+                return
+            try:
+                server = DmxServer(self.api, cfg, host=self.host, log=self.log)
+                server.start()
+            except DmxError as e:
+                self.error = str(e)
+                raise
+            except Exception as e:
+                self.error = "cannot start DMX: %s" % e
+                raise DmxError(self.error)
+            self.server = server
 
     def status(self):
+        with self._lock:
+            return self._status()
+
+    def _status(self):
         cfg = self.settings.data["control"]["dmx"]
         s = self.server
         return dict(cfg, listening=bool(s and s.listening), error=self.error,
@@ -298,6 +334,7 @@ class DmxManager:
                     port=s.port if s else (ARTNET_PORT if cfg["protocol"] == "artnet" else SACN_PORT))
 
     def stop(self):
-        if self.server:
-            self.server.stop()
-            self.server = None
+        with self._lock:
+            if self.server:
+                self.server.stop()
+                self.server = None

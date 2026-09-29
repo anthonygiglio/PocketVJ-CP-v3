@@ -4,7 +4,7 @@
 
 Play pads, fade and mix from a class-compliant USB MIDI pad controller, keyboard or fader box. Switch on **MIDI controller (USB)** under System > Modules, then pick the device under System > MIDI controller. Off until you turn it on. Full-access devices only.
 
-The box reads the raw ALSA device `/dev/snd/midiC<card>D<device>`: no MIDI libraries. Only paths of that form can be chosen. The service account must be in the `audio` group to read it. Unplug and replug is fine: the box keeps looking for the controller and reconnects. Receive only; nothing is written to the device.
+The box reads the raw ALSA device `/dev/snd/midiC<card>D<device>`: no MIDI libraries. Only paths of that form can be chosen, and the box opens only a real character device (no links). The service account must be in the `audio` group to read it. Unplug and replug is fine: the box keeps looking for the controller and reconnects. Receive only; nothing is written to the device.
 
 ## Mapping
 
@@ -24,7 +24,7 @@ The box reads the raw ALSA device `/dev/snd/midiC<card>D<device>`: no MIDI libra
 | CC 24 | Volume, 0 to 100 |
 | CC 25 | Blackout, 64 and up is on |
 
-Note off, aftertouch, pitch bend, system exclusive and everything else are ignored. Choose a channel (1 to 16) or all channels. A fader sweep is thinned to 20 changes a second, and the final position always lands.
+Note off, aftertouch, pitch bend, system exclusive and everything else are ignored. Choose a channel (1 to 16) or all channels. A fader sweep is thinned to 20 changes a second, and the final position always lands. At most 50 commands a second reach the player, so a faulty controller cannot flood it. Turning the module off in System stops the reader.
 
 ## Not verified
 

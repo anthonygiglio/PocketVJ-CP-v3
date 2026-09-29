@@ -582,6 +582,12 @@ class Api:
             self.registry.set_enabled(module_id, body.get("enabled"))
         except ModuleError as e:
             raise ApiError(409, str(e))
+        for mid, manager in (("control-dmx", self.dmx), ("control-midi", self.midi)):
+            if module_id == mid and manager is not None:   # switching the module off stops the receiver
+                try:
+                    manager.apply()
+                except Exception as e:
+                    print("pvj-web: %s: %s" % (mid, e))
         return {"modules": self.registry.list()}
 
     def get_theme(self, body, device, client):
@@ -675,25 +681,24 @@ class Api:
 
     def _set_control(self, key, module, manager, validate, error_type, body):
         self._need_control(module, manager)
-        current = self.settings.data["control"][key]
-        try:
-            new = validate(body, current)
-        except error_type as e:
-            raise bad(str(e))
-        with self.settings.lock:
+        with self.settings.lock:      # validate, assign, start, revert and save happen as one step
+            current = self.settings.data["control"][key]
+            try:
+                new = validate(body, current)
+            except error_type as e:
+                raise bad(str(e))
             self.settings.data["control"][key] = new
-        try:
-            manager.apply()
-        except error_type as e:
-            with self.settings.lock:
-                self.settings.data["control"][key] = current   # keep the last working configuration
             try:
                 manager.apply()
-            except error_type:
-                pass
-            raise ApiError(409, str(e))
-        self.settings.save()
-        return manager.status()
+            except Exception as e:
+                self.settings.data["control"][key] = current   # keep the last working configuration
+                try:
+                    manager.apply()
+                except Exception:
+                    pass
+                raise ApiError(409, str(e))
+            self.settings.save()
+            return manager.status()
 
     def get_dmx(self, body, device, client):
         self._need_control("control-dmx", self.dmx)

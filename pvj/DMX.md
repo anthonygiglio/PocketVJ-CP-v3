@@ -18,18 +18,20 @@ Eight channels starting at the start address you choose (1 to 505):
 | 4 | Speed | 0 to 255 is 0.25x to 2x |
 | 5 | Volume | 0 to 255 is 0 to 100 |
 | 6 | Blackout | 128 and up is on |
-| 7 | Pad | 0 to 5 idle; each pad owns six values: 6 to 11 is pad 1, 12 to 17 is pad 2, up to pad 36 (216 to 221). Bank A is pads 1 to 12, B 13 to 24, C 25 to 36. A pad plays when the channel moves into its range |
-| 8 | Function | 50 to 99 stop, 100 to 149 pause, 150 to 199 resume, 200 to 255 fade out (2 s). 0 to 49 does nothing |
+| 7 | Pad | 0 to 5 idle; each pad owns six values: 6 to 11 is pad 1, 12 to 17 is pad 2, up to pad 36 (216 to 221). Bank A is pads 1 to 12, B 13 to 24, C 25 to 36. A pad plays when the channel moves onto a different pad |
+| 8 | Function | 50 to 99 stop, 100 to 149 pause, 150 to 199 resume, 200 to 255 fade out (2 s). 0 to 49 does nothing. Each action fires once when the channel moves into its range, not on every value inside it |
 
 ## Safety and behaviour
 
 - Only private networks may send (loopback, 10/8, 172.16/12, 192.168/16, link-local and their IPv6 equivalents); add your show network under "Extra networks". Ranges wider than a /8 are refused. UDP sources can be forged, so this keeps the internet out, not a hostile device on your own network.
 - **The first frame after turning it on only sets a baseline.** Nothing fires from it, so a console sitting at zero cannot black out the screen. The same happens after changing the settings.
-- If the signal stops, the box holds its last state.
-- Each level channel is applied at most 20 times a second; the next frame carries the change on.
+- If the signal stops, the box holds its last state. If no valid frame arrives for 3 seconds, the next frame (from the same console or another) is a new baseline, so a restarted console cannot fire anything by coming back at zero.
+- Each level channel is applied at most 20 times a second; the next frame carries the change on, and a change that could not be applied is tried again.
+- Limits that do not depend on the sender's address (which can be forged): 500 packets a second in total, and 50 commands a second to the player. The port is not shared: if another program holds UDP 6454 or 5568, the box reports it.
+- Turning the module off in System stops the receiver.
 - Only the actions in the table are reachable. Nothing that shuts down, reboots or reconfigures the box.
 - Art-Net universe 0 to 32767; sACN universe 1 to 63999 (the box joins the multicast group `239.255.x.y` for its universe; unicast also works).
 
 ## Not verified
 
-Tested with hand-built packets and a loopback UDP socket, never with a real console or on a real network. The sACN multicast join has not been tried on a real network. Merged or multiple sources (sACN priorities, merging two consoles) are not handled: the newest frame wins.
+Tested with hand-built packets and a loopback UDP socket, never with a real console or on a real network. The sACN multicast join has not been tried on a real network. Merged or multiple sources (sACN priorities, merging two consoles) are not handled: the newest frame wins. sACN sequence numbers are not checked, so a duplicated or reordered packet is treated as a new frame.
