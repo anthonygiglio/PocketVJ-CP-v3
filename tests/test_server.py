@@ -439,7 +439,7 @@ class EndToEndTest(ServerBase):
         self.assertEqual(self.call("POST", "/api/player/restart", {}, token=token)[0], 200)
 
 
-class MediaTest(ServerBase):
+class MediaBase(ServerBase):
     OCT = {"Content-Type": "application/octet-stream"}
 
     def upload(self, name, data, token, query="", **kw):
@@ -450,6 +450,7 @@ class MediaTest(ServerBase):
     def leftovers(self):
         return [n for n in os.listdir(self.media) if n.startswith(".upload-")]
 
+class MediaTest(MediaBase):
     def test_listing_has_sizes_and_free_space(self):
         token, _ = self.pair()
         st, body, _ = self.call("GET", "/api/media", token=token)
@@ -558,6 +559,118 @@ class MediaTest(ServerBase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "secret.mp4")))  # the symlink target is safe
         _, body, _ = self.call("POST", "/api/devices/invite", {"name": "tech", "role": "live"}, token=token)
         self.assertEqual(self.call("POST", "/api/media/delete", {"name": "b.mov"}, token=body["token"])[0], 403)
+
+
+class MediaHardeningTest(MediaBase):
+    """Findings from the independent review of the upload feature."""
+
+    def open_upload(self, token, name, length, sent, extra_headers=""):
+        import socket
+        c = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        self.addCleanup(c.close)
+        c.sendall(("POST /api/media/upload?name=%s HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+                   "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n%s"
+                   "Content-Length: %d\r\n\r\n" % (name, token, extra_headers, length)).encode() + sent)
+        time.sleep(0.3)
+        return c
+
+    def reply(self, c):
+        c.settimeout(5)
+        return c.recv(4096)
+
+    def read_file(self, name):
+        with open(os.path.join(self.media, name), "rb") as f:
+            return f.read()
+
+    def test_a_file_renamed_into_place_during_an_upload_is_never_overwritten(self):
+        token, _ = self.pair()
+        with open(os.path.join(self.media, "a.mp4"), "wb") as f:
+            f.write(b"precious")
+        c = self.open_upload(token, "x.mp4", 1000, b"y" * 100)
+        st, _, _ = self.call("POST", "/api/media/rename", {"name": "a.mp4", "new": "x.mp4"}, token=token)
+        self.assertEqual(st, 200)  # the name was free at that moment
+        c.sendall(b"y" * 900)
+        self.assertIn(b"409", self.reply(c))  # the upload notices and refuses, instead of clobbering
+        self.assertEqual(self.read_file("x.mp4"), b"precious")
+        self.assertEqual(self.leftovers(), [])
+
+    def test_stale_temp_files_from_a_crash_are_swept(self):
+        token, _ = self.pair()
+        for n in (".upload-crash1", ".upload-crash2"):
+            with open(os.path.join(self.media, n), "wb") as f:
+                f.write(b"x" * 1000)
+        self.assertEqual(self.api.sweep_stale_uploads(), 2)
+        with open(os.path.join(self.media, ".upload-crash3"), "wb") as f:
+            f.write(b"x")
+        self.assertEqual(self.upload("ok.mp4", b"data", token)[0], 200)  # an upload also clears leftovers
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_trickling_sender_is_cut_off_and_frees_the_lock(self):
+        import pvj.api as api_mod
+        token, _ = self.pair()
+        old = (api_mod.RATE_GRACE_SECONDS, api_mod.MIN_UPLOAD_RATE)
+        api_mod.RATE_GRACE_SECONDS, api_mod.MIN_UPLOAD_RATE = 0.4, 10 * 1024 * 1024
+        self.addCleanup(lambda: setattr(api_mod, "RATE_GRACE_SECONDS", old[0]))
+        self.addCleanup(lambda: setattr(api_mod, "MIN_UPLOAD_RATE", old[1]))
+        c = self.open_upload(token, "slow.mp4", 5000000, b"x" * 100)
+        time.sleep(0.6)
+        c.sendall(b"x" * 100)  # the next packet arrives after the grace period, far below the minimum rate
+        self.assertIn(b"408", self.reply(c))
+        self.assertEqual(self.leftovers(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.media, "slow.mp4")))
+        api_mod.RATE_GRACE_SECONDS, api_mod.MIN_UPLOAD_RATE = old
+        self.assertEqual(self.upload("after.mp4", b"fine", token)[0], 200)
+
+    def test_revoking_a_device_stops_its_running_upload(self):
+        owner, _ = self.pair("owner")
+        st, body, _ = self.call("POST", "/api/pair", {"pin": self.pin, "name": "second"})
+        second, second_id = body["token"], body["device"]["id"]
+        c = self.open_upload(second, "revoked.mp4", 1000, b"z" * 100)
+        self.assertEqual(self.call("POST", "/api/devices/revoke", {"id": second_id}, token=owner)[0], 200)
+        c.sendall(b"z" * 100)
+        self.assertIn(b"403", self.reply(c))
+        self.assertFalse(os.path.exists(os.path.join(self.media, "revoked.mp4")))
+        self.assertEqual(self.upload("free.mp4", b"ok", owner)[0], 200)  # lock released
+
+    def test_upload_creates_a_missing_media_folder(self):
+        import shutil
+        token, _ = self.pair()
+        for n in os.listdir(self.media):
+            p = os.path.join(self.media, n)
+            os.unlink(p)
+        shutil.rmtree(self.media)
+        st, body, _ = self.upload("first.mp4", b"data", token)
+        self.assertEqual((st, body["name"]), (200, "first.mp4"))
+
+    def test_links_inside_the_folder_are_never_deleted_or_renamed_through(self):
+        token, _ = self.pair()
+        os.symlink(os.path.join(self.media, "a.mp4"), os.path.join(self.media, "alias.mp4"))
+        self.assertEqual(self.call("POST", "/api/media/delete", {"name": "alias.mp4"}, token=token)[0], 409)
+        self.assertEqual(self.call("POST", "/api/media/rename", {"name": "alias.mp4", "new": "b2.mp4"}, token=token)[0], 409)
+        self.assertTrue(os.path.exists(os.path.join(self.media, "a.mp4")))
+
+    def test_names_are_checked_in_bytes_and_for_invisible_characters(self):
+        token, _ = self.pair()
+        for name in ("\u20ac" * 100 + ".mp4", "evil\u202egnp.mp4", "c1\x85.mp4", "x.mp4\n", "zero\u200bwidth.mp4"):
+            st, _, _ = self.upload(name, b"data", token)
+            self.assertEqual(st, 400, repr(name))
+        st, _, _ = self.call("POST", "/api/media/upload?name=%ff%fe.mp4", raw=b"data", token=token, headers=self.OCT)
+        self.assertEqual(st, 400)  # bytes that are not valid UTF-8
+        self.assertEqual(self.upload("caf\u00e9 \u65e5\u672c.mp4", b"data", token)[0], 200)  # real names still work
+
+    def test_chunked_bodies_are_refused_not_stored_with_their_framing(self):
+        token, _ = self.pair()
+        c = self.open_upload(token, "chunk.mp4", 10, b"5\r\nhello\r\n0\r\n\r\n", extra_headers="Transfer-Encoding: chunked\r\n")
+        self.assertIn(b"501", self.reply(c))
+        self.assertFalse(os.path.exists(os.path.join(self.media, "chunk.mp4")))
+
+    def test_pads_follow_a_rename_and_delete_reports_pads_using_the_clip(self):
+        token, _ = self.pair()
+        self.call("POST", "/api/pads", {"bank": 0, "index": 4, "label": "Intro", "file": "b.mov"}, token=token)
+        self.call("POST", "/api/media/rename", {"name": "b.mov", "new": "b-renamed.mov"}, token=token)
+        self.assertEqual(self.settings.data["pads"]["banks"][0]["pads"][4]["file"], "b-renamed.mov")
+        st, body, _ = self.call("POST", "/api/media/delete", {"name": "b-renamed.mov"}, token=token)
+        self.assertEqual((st, body["pads_using"]), (200, 1))
 
 
 class HostileClientTest(ServerBase):

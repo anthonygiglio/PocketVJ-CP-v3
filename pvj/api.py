@@ -13,6 +13,7 @@ import re
 import tempfile
 import threading
 import time
+import unicodedata
 
 from . import hardware, osc as osc_mod, presets, themes as themes_mod
 from .auth import Auth, AuthError
@@ -21,8 +22,19 @@ from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
 from .themes import ThemeError
 
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
-_NAME = re.compile(r"^[^\x00-\x1f/\\]{1,120}$")
+_NAME = re.compile(r"[^\x00-\x1f/\\]{1,120}")
 _MODULE_ID = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+
+
+def valid_name(name):
+    """A plain file name: no path parts, no control, bidi or other invisible characters, short enough for
+    the filesystem in bytes (ext4 limit 255), not a dotfile."""
+    if not isinstance(name, str) or not _NAME.fullmatch(name) or name in (".", "..") or name.startswith("."):
+        return False
+    if len(name.encode("utf-8", "surrogatepass")) > 200:
+        return False
+    # U+FFFD is what invalid UTF-8 from a client turns into: a name that is not really a name
+    return "\ufffd" not in name and not any(unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn") for ch in name)
 
 
 class ApiError(Exception):
@@ -46,7 +58,9 @@ def number(body, key, lo, hi, integer=False):
 
 MAX_UPLOAD_BYTES = int(os.environ.get("PVJ_MAX_UPLOAD_MB", "8192")) * 1024 * 1024
 FREE_SPACE_RESERVE = 200 * 1024 * 1024  # never fill the disk completely: the system needs room to work
-CHUNK = 1024 * 1024
+CHUNK = 256 * 1024
+MIN_UPLOAD_RATE = 20 * 1024   # bytes/second: slower than this after the grace period is abandoned
+RATE_GRACE_SECONDS = 30.0
 
 
 class Fader:
@@ -99,6 +113,7 @@ class Api:
         self.osc = osc            # OscManager or None
         self._free_space = free_space or self._statvfs_free
         self._upload_lock = threading.Lock()  # one upload at a time: protects the SD card and the threads
+        self._media_lock = threading.Lock()   # rename, delete and publishing an upload never interleave
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
 
@@ -111,7 +126,7 @@ class Api:
 
     def resolve_media(self, name):
         """A media file by name, guaranteed to live inside the media folder."""
-        if not isinstance(name, str) or not _NAME.match(name) or name in (".", "..") or name.startswith("."):
+        if not valid_name(name):
             raise bad("invalid file name")
         if not name.lower().endswith(MEDIA_EXTENSIONS):
             raise bad("not a media file")
@@ -162,11 +177,34 @@ class Api:
                 "device": device}
 
     def _statvfs_free(self):
+        path = self.media_dir
+        while path and not os.path.exists(path):  # a media folder not created yet: ask its parent
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
         try:
-            st = os.statvfs(self.media_dir)
+            st = os.statvfs(path)
         except OSError:
             return 0
         return st.f_bavail * st.f_frsize
+
+    def sweep_stale_uploads(self):
+        """Delete .upload-* temp files. They are hidden, can be gigabytes, and are left behind by a
+        power cut or a killed service. Safe whenever no upload is running (we hold the lock or are starting)."""
+        removed = 0
+        try:
+            names = os.listdir(self.media_dir)
+        except OSError:
+            return 0
+        for n in names:
+            if n.startswith(".upload-"):
+                try:
+                    os.unlink(os.path.join(self.media_dir, n))
+                    removed += 1
+                except OSError:
+                    pass
+        return removed
 
     def media(self, body, device, client):
         details = []
@@ -180,48 +218,68 @@ class Api:
                 "max_upload": MAX_UPLOAD_BYTES}
 
     def _safe_new_name(self, name):
-        if not isinstance(name, str) or not _NAME.match(name) or name in (".", "..") or name.startswith("."):
+        if not valid_name(name):
             raise bad("invalid file name")
         if not name.lower().endswith(MEDIA_EXTENSIONS):
             raise bad("only video and image files: " + ", ".join(MEDIA_EXTENSIONS))
         return name
 
-    def upload(self, name, length, read, replace=False):
-        """Store a file from a stream. `read(n)` returns up to n bytes ('' or b'' at the end)."""
+    def upload(self, name, length, read, replace=False, check=None, clock=time.monotonic):
+        """Store a file from a stream. `read(n)` returns up to n bytes (b'' at the end); `check()` is
+        called between chunks and may raise ApiError to abandon the upload (device revoked)."""
         name = self._safe_new_name(name)
         if not isinstance(length, int) or length <= 0:
             raise ApiError(411, "Content-Length required")
         if length > MAX_UPLOAD_BYTES:
             raise ApiError(413, "file is larger than the %d MB limit" % (MAX_UPLOAD_BYTES // (1024 * 1024)))
-        if length + FREE_SPACE_RESERVE > self._free_space():
-            raise ApiError(507, "not enough free space on the box")
+        root = os.path.realpath(self.media_dir)
+        try:
+            os.makedirs(root, exist_ok=True)
+        except OSError as e:
+            raise ApiError(500, "media folder is not writable: %s" % (e.strerror or e))
         if not self._upload_lock.acquire(blocking=False):
             raise ApiError(409, "another upload is in progress")
         tmp = None
         try:
-            root = os.path.realpath(self.media_dir)
-            os.makedirs(root, exist_ok=True)
+            self.sweep_stale_uploads()  # any .upload-* file now is left over from a crash: no upload is running
+            if length + FREE_SPACE_RESERVE > self._free_space():
+                raise ApiError(507, "not enough free space on the box")
             final = os.path.join(root, name)
             if os.path.lexists(final) and not replace:
                 raise ApiError(409, "a file with that name already exists")
             if os.path.islink(final):
                 raise ApiError(409, "refusing to replace a link")
             fd, tmp = tempfile.mkstemp(prefix=".upload-", dir=root)  # hidden, so it never shows in the list
-            got = 0
+            got, started = 0, clock()
             with os.fdopen(fd, "wb") as out:
                 while got < length:
+                    if check:
+                        check()
                     chunk = read(min(CHUNK, length - got))
                     if not chunk:
                         break
                     out.write(chunk)
                     got += len(chunk)
+                    elapsed = clock() - started
+                    if elapsed > RATE_GRACE_SECONDS and got / elapsed < MIN_UPLOAD_RATE:
+                        raise ApiError(408, "upload too slow (under %d KB/s); try again on a better connection"
+                                       % (MIN_UPLOAD_RATE // 1024))
                 out.flush()
                 os.fsync(out.fileno())
             if got != length:
                 raise ApiError(400, "upload was cut short (%d of %d bytes)" % (got, length))
             os.chmod(tmp, 0o664)
-            os.replace(tmp, final)
-            tmp = None
+            with self._media_lock:
+                if replace:
+                    os.replace(tmp, final)
+                else:
+                    try:
+                        os.link(tmp, final)  # fails if the name appeared meanwhile: never overwrites silently
+                    except FileExistsError:
+                        raise ApiError(409, "a file with that name appeared during the upload")
+                    os.unlink(tmp)
+                tmp = None
+            self._fsync_dir(root)
             return {"name": name, "size": length}
         except (TimeoutError, ConnectionError):
             raise ApiError(400, "upload interrupted")
@@ -235,24 +293,57 @@ class Api:
                     pass
             self._upload_lock.release()
 
-    def delete_media(self, body, device, client):
-        path = self.resolve_media(body.get("name"))
+    @staticmethod
+    def _fsync_dir(path):
         try:
-            os.unlink(path)
-        except OSError as e:
-            raise ApiError(500, "could not delete: %s" % e.strerror)
-        return {"deleted": body["name"]}
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            pass  # not every filesystem supports it (some USB mounts); the file itself was synced
+
+    def _real_media_file(self, name):
+        """The path of a real (non-link) media file called `name`; links are refused so a delete or rename
+        can never act on something other than the name the user saw."""
+        path = self.resolve_media(name)
+        plain = os.path.join(os.path.realpath(self.media_dir), name)
+        if os.path.islink(plain):
+            raise ApiError(409, "%s is a link; change it on the box, not from here" % name)
+        return plain
+
+    def _pads_using(self, name):
+        return [(b, i) for b, bank in enumerate(self.settings.data["pads"]["banks"])
+                for i, p in enumerate(bank["pads"]) if p.get("file") == name]
+
+    def delete_media(self, body, device, client):
+        name = body.get("name")
+        with self._media_lock:
+            path = self._real_media_file(name)
+            try:
+                os.unlink(path)
+            except OSError as e:
+                raise ApiError(500, "could not delete: %s" % (e.strerror or e))
+        return {"deleted": name, "pads_using": len(self._pads_using(name))}
 
     def rename_media(self, body, device, client):
-        src = self.resolve_media(body.get("name"))
+        name = body.get("name")
         new = self._safe_new_name(body.get("new"))
-        dst = os.path.join(os.path.realpath(self.media_dir), new)
-        if os.path.lexists(dst):
-            raise ApiError(409, "a file with that name already exists")
-        try:
-            os.rename(src, dst)
-        except OSError as e:
-            raise ApiError(500, "could not rename: %s" % e.strerror)
+        with self._media_lock:
+            src = self._real_media_file(name)
+            dst = os.path.join(os.path.realpath(self.media_dir), new)
+            try:
+                os.link(src, dst)  # fails if `new` exists: a rename must never overwrite
+            except FileExistsError:
+                raise ApiError(409, "a file with that name already exists")
+            except OSError as e:
+                raise ApiError(500, "could not rename: %s" % (e.strerror or e))
+            os.unlink(src)
+        with self.settings.lock:  # pads that used the old name follow the file
+            for b, i in self._pads_using(name):
+                self.settings.data["pads"]["banks"][b]["pads"][i]["file"] = new
+            self.settings.save()
         return {"name": new}
 
     def get_pads(self, body, device, client):
@@ -265,8 +356,7 @@ class Api:
         if not isinstance(label, str) or len(label) > 40 or re.search(r"[\x00-\x1f]", label):
             raise bad("invalid label")
         if file != "":
-            if not isinstance(file, str) or not _NAME.match(file) or file.startswith(".") \
-                    or not file.lower().endswith(MEDIA_EXTENSIONS):
+            if not valid_name(file) or not file.lower().endswith(MEDIA_EXTENSIONS):
                 raise bad("invalid file name")
         with self.settings.lock:
             self.settings.data["pads"]["banks"][bank]["pads"][index] = {"label": label, "file": file}

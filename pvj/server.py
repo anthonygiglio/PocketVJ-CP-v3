@@ -126,6 +126,8 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
                 return None, (413, "body too large")
             if not (self.headers.get("Content-Type") or "").startswith("application/json"):
                 return None, (415, "send application/json")
+            if self.headers.get("Transfer-Encoding"):
+                return None, (501, "chunked bodies are not supported; send Content-Length")
             try:
                 data = json.loads(self.rfile.read(length) or b"{}")
             except (ValueError, RecursionError):  # RecursionError: absurdly nested JSON
@@ -168,9 +170,17 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=30.0):
                 replace = (query.get("replace") or ["0"])[0] == "1"
                 # Authenticated owner: the short connection lifetime would cut a big file off, so use
                 # an idle timeout instead (the connection cap still applies).
+                if self.headers.get("Transfer-Encoding"):
+                    raise ApiError(501, "chunked uploads are not supported; send Content-Length")
+                token = self._token()
+
+                def still_paired():
+                    if auth.authenticate(token) is None:  # revoked while the upload runs: stop at once
+                        raise ApiError(403, "this device was removed")
                 self._reaper.cancel()
                 self.connection.settimeout(30)
-                result = api.upload(name, length, self.rfile.read, replace)
+                # read1 returns what has arrived, so slow senders are noticed after every packet
+                result = api.upload(name, length, self.rfile.read1, replace, check=still_paired)
                 self._json(200, result)
             except ApiError as e:
                 self.close_connection = True  # an unread body must not be parsed as the next request
@@ -269,6 +279,7 @@ def build(env=None, player=None):
     rundir = player.rundir
     api = Api(player, settings, auth, registry, themes, media, board,
               spawn=env.get("PVJ_DEV_SPAWN") == "1", on_pin=lambda pin: write_pin_file(rundir, pin))
+    api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     write_pin_file(rundir, auth.current_pin)
     try:

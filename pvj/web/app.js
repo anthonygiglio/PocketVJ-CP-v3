@@ -289,7 +289,11 @@
   // ---- media ----------------------------------------------------------
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
   function refreshMedia() {
-    return api('GET', '/api/media').then(function (r) { if (r.ok) { S.media = r.data.files; S.mediaInfo = r.data; render(); } });
+    return api('GET', '/api/media').then(function (r) {
+      if (!r.ok) return;
+      S.media = r.data.files; S.mediaInfo = r.data;
+      if (!S.uploading) render();  // a redraw would wipe the progress bars of uploads still running
+    });
   }
   function uploadFile(file, bar, label) {
     return new Promise(function (resolve) {
@@ -319,10 +323,11 @@
     picker.addEventListener('change', function () {
       var files = Array.prototype.slice.call(picker.files);
       picker.value = '';
+      S.uploading = (S.uploading || 0) + files.length;
       files.reduce(function (chain, file) {
         var bar = h('div', {}); var label = h('div', { class: 'k', text: file.name + ' (' + megabytes(file.size) + ')' });
         uploads.appendChild(h('div', { class: 'item' }, h('div', { class: 'grow' }, label, h('div', { class: 'progress' }, bar))));
-        return chain.then(function () { return uploadFile(file, bar, label); });
+        return chain.then(function () { return uploadFile(file, bar, label); }).then(function () { S.uploading -= 1; });
       }, Promise.resolve()).then(refreshMedia);
     });
     var items = details.map(function (d) {
