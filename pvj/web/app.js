@@ -391,6 +391,7 @@
   }
   // ---- network (wired) ------------------------------------------------
   var netTimer = null;
+  var netForm = { mode: 'dhcp', vals: {} };  // survives redraws of the System screen, so typing is never wiped
   var NET_MODES = [
     ['dhcp', 'Automatic (DHCP)', 'Take an address from a router.'],
     ['static', 'Fixed address', 'You choose the address. Use a range your other gear is on.'],
@@ -400,7 +401,7 @@
   function networkCard() {
     var body = h('div', { class: 'list', id: 'netbody' });
     var card = h('div', { class: 'card', id: 'netcard' }, h('h2', { text: 'Network (wired)' }), body);
-    var mode = 'dhcp';
+    var mode = netForm.mode;
     var out = { iface: null, address: null, prefix: null, gateway: null, dns: null, secs: null, preview: null, msg: null };
     var mod = S.modules.filter(function (m) { return m.id === 'network'; })[0];
     if (!mod || !mod.enabled) {
@@ -445,17 +446,23 @@
       var modes = h('div', { class: 'row wrap', id: 'netmodes' });
       var help = h('div', { class: 'k', id: 'nethelp' });
       var fields = h('div', { class: 'list', id: 'netfields' });
+      function remember(el) {
+        if (netForm.vals[el.id]) el.value = netForm.vals[el.id];
+        el.addEventListener('input', function () { netForm.vals[el.id] = el.value; });
+      }
       function drawFields() {
         fields.textContent = '';
         NET_MODES.forEach(function (m) { if (m[0] === mode) help.textContent = m[2]; });
         if (mode === 'static' || mode === 'share') {
           out.address = h('input', { class: 'text-input mono', id: 'netaddr', 'aria-label': 'Address', placeholder: mode === 'share' ? '10.42.0.1' : '192.168.1.50', inputmode: 'decimal' });
           out.prefix = h('input', { class: 'text-input mono', id: 'netprefix', 'aria-label': 'Prefix length', placeholder: '24 (means 255.255.255.0)', inputmode: 'numeric' });
+          remember(out.address); remember(out.prefix);
           fields.appendChild(out.address); fields.appendChild(out.prefix);
         }
         if (mode === 'static') {
           out.gateway = h('input', { class: 'text-input mono', id: 'netgw', 'aria-label': 'Gateway (optional)', placeholder: 'Gateway (optional)', inputmode: 'decimal' });
           out.dns = h('input', { class: 'text-input mono', id: 'netdns', 'aria-label': 'DNS servers (optional)', placeholder: 'DNS servers (optional)' });
+          remember(out.gateway); remember(out.dns);
           fields.appendChild(out.gateway); fields.appendChild(out.dns);
         }
       }
@@ -463,7 +470,7 @@
         modes.textContent = '';
         NET_MODES.forEach(function (m) {
           modes.appendChild(h('button', { class: 'btn small' + (m[0] === mode ? ' on' : ''), text: m[1], 'aria-pressed': m[0] === mode ? 'true' : 'false',
-            onclick: function () { mode = m[0]; drawModes(); drawFields(); } }));
+            onclick: function () { mode = netForm.mode = m[0]; drawModes(); drawFields(); } }));
         });
       }
       out.secs = h('select', { class: 'text-input', id: 'netsecs', 'aria-label': 'Revert automatically after' },
@@ -487,6 +494,7 @@
             var where = (c.mode === 'static' || c.mode === 'share') ? ' If this page stops responding, open http://' + (c.address || '10.42.0.1') + ' and press Confirm before the timer runs out.'
               : ' If this page stops responding, find the box at its new address and press Confirm before the timer runs out.';
             S.netNote = 'Applied.' + where;
+            netForm.vals = {};
             refresh();
           });
         } })));

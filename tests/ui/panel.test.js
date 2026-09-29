@@ -105,6 +105,13 @@ function startServer() {
     await page.fill('#netaddr', '192.168.50.20');
     await page.fill('#netprefix', '24');
     await page.fill('#netgw', '192.168.50.1');
+    // A redraw of the screen must not wipe what was typed
+    const oldField = await page.$('#netaddr');
+    await page.click('nav >> text=System');
+    await page.waitForFunction((el) => !el.isConnected, oldField);
+    await page.waitForSelector('#netaddr');
+    assert.strictEqual(await page.inputValue('#netaddr'), '192.168.50.20', 'typed address survives a redraw');
+    assert.strictEqual(await page.inputValue('#netgw'), '192.168.50.1', 'typed gateway survives a redraw');
     await page.click('#netpreview');
     await page.waitForFunction(() => /ipv4\.addresses 192\.168\.50\.20\/24/.test(document.getElementById('netplan').textContent));
     await page.fill('#netaddr', '8.8.8.8; reboot');
