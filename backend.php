@@ -1,5 +1,11 @@
 <?php
 
+require_once __DIR__ . '/security.php';
+// State-changing actions must be same-origin POSTs; see security.php.
+pvj_require_post();
+$_GET['action'] = (isset($_POST['action']) && preg_match('/^[A-Za-z0-9_]{1,64}$/', $_POST['action'])) ? $_POST['action'] : '';
+$outputtext = '';
+
 //# Shortcuts
 
 if ($_GET['action'] == 'pause') {
@@ -2025,7 +2031,7 @@ if ($_GET['action'] == 'servicecheck'){
 
 //# Webserver
 
-if ($_GET['action'] == 'passwddissable'){
+if ($_GET['action'] == 'passwddissable' || $_GET['action'] == 'passwddisable'){
 	$outputtext =  "disable CP login password";
 	system("sudo cp /var/www/sync/passwddisable /etc/lighttpd/lighttpd.conf");
 	system("sudo service lighttpd restart");

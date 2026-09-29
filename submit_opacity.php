@@ -1,7 +1,6 @@
 <?php
-// ds grift dr input vom js script opacity alpha im CP ab:
-    $alphavalue = $_POST['opacityValue'];
-// u ds fuert naer us
-    shell_exec("sudo /var/www/sync/dbuscontrol.sh setalpha $alphavalue");
+require_once __DIR__ . '/security.php';
+pvj_require_post();
 
-?>
+$alphavalue = pvj_post_int('opacityValue', 0, 255);
+shell_exec('sudo /var/www/sync/dbuscontrol.sh setalpha ' . escapeshellarg((string)$alphavalue));

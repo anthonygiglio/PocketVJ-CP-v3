@@ -7,12 +7,15 @@
 </script>
 
 <?php
-$usertime = htmlentities($_COOKIE['usertime'], 3, 'UTF-8');
+// The clock string comes from a cookie set by the script above. Only accept
+// an exact "YYYY-MM-DD HH:MM:SS" timestamp; anything else is ignored.
+$usertime = isset($_COOKIE['usertime']) ? trim($_COOKIE['usertime']) : '';
 
-shell_exec("sudo date -s '".$usertime."'");
-shell_exec("sudo hwclock -w");
-
-echo htmlentities($_COOKIE['usertime'], 3, 'UTF-8');
+if (preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/', $usertime)) {
+	shell_exec('sudo date -s ' . escapeshellarg($usertime));
+	shell_exec('sudo hwclock -w');
+	echo htmlspecialchars($usertime, ENT_QUOTES, 'UTF-8');
+}
 ?>
 
 

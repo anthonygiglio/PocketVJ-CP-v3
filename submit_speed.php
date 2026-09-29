@@ -1,9 +1,9 @@
 <?php
+require_once __DIR__ . '/security.php';
+pvj_require_post();
 
-// das grift dr input vom js script im CP ab, speed cha vo 0.0 bis 4 ufe ga
-    $usgab = $_POST['speedValue'];
-    echo $usgab;
-    
-    shell_exec("sudo /var/www/sync/dbuscontrol.sh rate $usgab");
-
-?>
+$speed = pvj_post_float('speedValue', 0, 4);
+$speed = rtrim(rtrim(sprintf('%.3f', $speed), '0'), '.');
+shell_exec('sudo /var/www/sync/dbuscontrol.sh rate ' . escapeshellarg($speed));
+header('Content-Type: text/plain; charset=utf-8');
+echo $speed;

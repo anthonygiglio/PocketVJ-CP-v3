@@ -1,12 +1,6 @@
 <?php
-     $Xposition = $_POST['XpositionValue'];
-   
-     //$Yposition = $_POST['YpositionValue'];
+require_once __DIR__ . '/security.php';
+pvj_require_post();
 
-    shell_exec("sudo /var/www/sync/omxXposition $Xposition");
-    //shell_exec("sudo /var/www/sync/omxYposition $Yposition");
-
-
-    //if someone can tell me how to map several $_POST value to several shell commands within on php file, please tell me,
-    //otherwise I need to create hunderts of php files for each function, which is a bit silly 
-?>
+$Xposition = pvj_post_int('XpositionValue', -1000, 1000);
+shell_exec('sudo /var/www/sync/omxXposition ' . escapeshellarg((string)$Xposition));
