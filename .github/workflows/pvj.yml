@@ -1,0 +1,31 @@
+name: pvj platform layer
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install mpv
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
+      - name: Unit tests (real mpv, headless)
+        run: python -m unittest discover -s tests -t . -v
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck the installer and image scripts (strict)
+        run: shellcheck install/install.sh image/stage-pvj/prerun.sh image/stage-pvj/00-install-pvj/01-run.sh

@@ -1,0 +1,60 @@
+name: Build image
+
+# Builds a Raspberry Pi OS Lite (Trixie, 64-bit) image with NXLX PocketVJ installed.
+# Slow (about an hour); run by hand or when a version tag is pushed.
+on:
+  workflow_dispatch:
+    inputs:
+      pi_gen_ref:
+        description: pi-gen branch, tag or commit (the arm64 branch builds 64-bit images)
+        default: arm64
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pocketvj
+
+      - uses: actions/checkout@v4
+        with:
+          repository: RPi-Distro/pi-gen
+          ref: ${{ inputs.pi_gen_ref || 'arm64' }}
+          path: pi-gen
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Add our stage and configuration to pi-gen
+        run: |
+          cp -a pocketvj/image/stage-pvj pi-gen/stage-pvj
+          mkdir pi-gen/stage-pvj/00-install-pvj/files/pvj-src
+          cp -a pocketvj/pvj pocketvj/bin pocketvj/install pi-gen/stage-pvj/00-install-pvj/files/pvj-src/
+          find pi-gen/stage-pvj/00-install-pvj/files/pvj-src -name __pycache__ -type d -prune -exec rm -rf {} +
+          cp pocketvj/image/config pi-gen/config
+          # Lite only: our stage exports the image, so stage2 must not.
+          touch pi-gen/stage2/SKIP_IMAGES pi-gen/stage2/SKIP_NOOBS
+
+      - name: Build
+        working-directory: pi-gen
+        run: ./build-docker.sh
+
+      - name: Checksums
+        working-directory: pi-gen/deploy
+        run: sha256sum *.img.xz > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nxlx-pocketvj-image
+          path: |
+            pi-gen/deploy/*.img.xz
+            pi-gen/deploy/SHA256SUMS
+          if-no-files-found: error

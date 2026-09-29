@@ -1,0 +1,13 @@
+# pi-gen configuration for the NXLX PocketVJ image (64-bit, Lite, Trixie).
+# Used by .github/workflows/image.yml; see image/README.md.
+IMG_NAME='nxlx-pocketvj'
+RELEASE='trixie'
+TARGET_HOSTNAME='nxlx-pocketvj'
+LOCALE_DEFAULT='en_GB.UTF-8'
+TIMEZONE_DEFAULT='UTC'
+# No default password is baked in: the first boot asks for a user name and password.
+DISABLE_FIRST_BOOT_USER_RENAME=0
+# SSH is off by default; turn it on with raspi-config after setting a password.
+ENABLE_SSH=0
+STAGE_LIST='stage0 stage1 stage2 stage-pvj'
+DEPLOY_COMPRESSION='xz'

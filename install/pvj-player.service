@@ -1,0 +1,25 @@
+[Unit]
+Description=NXLX PocketVJ player (mpv)
+After=multi-user.target systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+StartLimitIntervalSec=0
+
+[Service]
+# The installer replaces @PVJ_USER@ with the account that owns the screen and
+# sound card, and @PVJ_DIR@ with the install directory.
+User=@PVJ_USER@
+Group=pvj
+SupplementaryGroups=video render audio input
+# Control socket for the web panel and OSC: /run/pvj, group-writable by "pvj".
+RuntimeDirectory=pvj
+RuntimeDirectoryMode=0770
+UMask=0007
+EnvironmentFile=-/etc/pvj/pvj.env
+Environment=PVJ_RUNTIME_DIR=/run/pvj
+ExecStart=@PVJ_DIR@/bin/pvj-player serve
+# A crashed or wedged player comes back on its own, mid-gig.
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
