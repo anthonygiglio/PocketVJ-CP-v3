@@ -1,0 +1,18 @@
+{
+  "id": "inputs-ndi",
+  "name": "NDI",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Receive NDI from Resolume, MadMapper and others. The NDI runtime is proprietary and free; the module fetches and updates it."
+}

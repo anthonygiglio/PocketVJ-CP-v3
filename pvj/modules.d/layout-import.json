@@ -1,0 +1,18 @@
+{
+  "id": "layout-import",
+  "name": "Layout import (MadMapper, Resolume)",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "beta",
+  "requires": [
+    "mapper"
+  ],
+  "boards": [
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": false,
+  "description": "Research only until sample exports exist."
+}

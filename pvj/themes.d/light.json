@@ -1,0 +1,13 @@
+{
+  "id": "light",
+  "name": "Light",
+  "tokens": {
+    "bg": "#f4f3ef",
+    "cd": "#ffffff",
+    "fg": "#1c1c1c",
+    "ln": "#1c1c1c",
+    "mu": "#55554f",
+    "ac": "#c2410c",
+    "on": "#ffffff"
+  }
+}

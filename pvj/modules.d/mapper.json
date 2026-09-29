@@ -1,0 +1,18 @@
+{
+  "id": "mapper",
+  "name": "Projection mapper",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": false,
+  "description": "Warp and blend video onto surfaces. Approach chosen after the Phase 6 spike."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "high-contrast",
+  "name": "High contrast",
+  "tokens": {
+    "bg": "#000000",
+    "cd": "#000000",
+    "fg": "#ffffff",
+    "ln": "#ffffff",
+    "mu": "#e6e6e6",
+    "ac": "#ffff00",
+    "on": "#000000"
+  }
+}

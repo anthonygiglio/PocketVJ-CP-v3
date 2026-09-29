@@ -1,0 +1,19 @@
+{
+  "id": "inputs-srt",
+  "name": "SRT, RTSP, RTMP",
+  "version": "0.1.0",
+  "type": "optional",
+  "channel": "stable",
+  "requires": [
+    "core"
+  ],
+  "boards": [
+    "pi3",
+    "pi4",
+    "pi5",
+    "x86"
+  ],
+  "status": "planned",
+  "default_enabled": true,
+  "description": "Open network streams via mpv and ffmpeg."
+}
