@@ -402,7 +402,7 @@ class Updater:
 def main(argv=None):
     import argparse
     import sys
-    ap = argparse.ArgumentParser(prog="pvj-update", description="Update or roll back NXLX PocketVJ")
+    ap = argparse.ArgumentParser(prog="pvj-update", description="Update or roll back nxlx.mastercontrol")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status")
     for name in ("check", "apply"):

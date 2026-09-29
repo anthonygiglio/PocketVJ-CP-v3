@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
-# NXLX PocketVJ installer. Idempotent: run it again to update or repair.
+# nxlx.mastercontrol installer. Idempotent: run it again to update or repair.
 #
 #   sudo install/install.sh [options]
 #

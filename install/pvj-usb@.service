@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 [Unit]
-Description=Mount USB drive %I for PocketVJ
+Description=Mount USB drive %I for nxlx.mastercontrol
 # Stops (and unmounts) when the device disappears.
 BindsTo=dev-%i.device
 After=dev-%i.device

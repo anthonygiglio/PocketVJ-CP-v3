@@ -171,7 +171,7 @@
     (bank ? bank.pads : []).forEach(function (p, i) { pads.appendChild(padButton(S.bank, i, p)); });
     var canLive = can('live');
     return h('div', { class: 'screen' },
-      h('div', { class: 'top' }, h('h1', { text: 'PocketVJ' }), h('div', { class: 'pill k', id: 'pill' })),
+      h('div', { class: 'top' }, h('h1', { text: 'nxlx.mastercontrol' }), h('div', { class: 'pill k', id: 'pill' })),
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Now playing' }),
         h('div', { id: 'np', style: false, text: '' }),

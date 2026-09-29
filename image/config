@@ -1,8 +1,8 @@
-# pi-gen configuration for the NXLX PocketVJ image (64-bit, Lite, Trixie).
+# pi-gen configuration for the nxlx.mastercontrol image (64-bit, Lite, Trixie).
 # Used by .github/workflows/image.yml; see image/README.md.
-IMG_NAME='nxlx-pocketvj'
+IMG_NAME='nxlx-mastercontrol'
 RELEASE='trixie'
-TARGET_HOSTNAME='nxlx-pocketvj'
+TARGET_HOSTNAME='nxlx-mastercontrol'
 LOCALE_DEFAULT='en_GB.UTF-8'
 TIMEZONE_DEFAULT='UTC'
 # No default password is baked in: the first boot asks for a user name and password.

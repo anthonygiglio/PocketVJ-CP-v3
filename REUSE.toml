@@ -1,5 +1,5 @@
 version = 1
-SPDX-PackageName = "NXLX PocketVJ"
+SPDX-PackageName = "nxlx.mastercontrol"
 
 # Files that cannot carry a comment header, and documentation, written for this fork.
 [[annotations]]

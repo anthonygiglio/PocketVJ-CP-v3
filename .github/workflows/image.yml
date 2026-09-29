@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Build image
 
-# Builds a Raspberry Pi OS Lite (Trixie, 64-bit) image with NXLX PocketVJ installed.
+# Builds a Raspberry Pi OS Lite (Trixie, 64-bit) image with nxlx.mastercontrol installed.
 # Slow (about an hour); run by hand or when a version tag is pushed.
 on:
   workflow_dispatch:
@@ -55,7 +55,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nxlx-pocketvj-image
+          name: nxlx-mastercontrol-image
           path: |
             pi-gen/deploy/*.img.xz
             pi-gen/deploy/SHA256SUMS

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 [Unit]
-Description=NXLX PocketVJ network helper (root, NetworkManager only)
+Description=nxlx.mastercontrol network helper (root, NetworkManager only)
 After=NetworkManager.service
 Wants=NetworkManager.service
 # Nothing to do on a system without NetworkManager.

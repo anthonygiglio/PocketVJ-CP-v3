@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
 [Unit]
-Description=NXLX PocketVJ player (mpv)
+Description=nxlx.mastercontrol player (mpv)
 After=multi-user.target systemd-udev-settle.service
 Wants=systemd-udev-settle.service
 StartLimitIntervalSec=0

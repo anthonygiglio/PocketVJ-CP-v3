@@ -11,7 +11,7 @@ from .player import Player, PlayerError
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="pvj-player", description="Control the PocketVJ mpv player")
+    p = argparse.ArgumentParser(prog="pvj-player", description="Control the nxlx.mastercontrol mpv player")
     p.add_argument("--mpv-arg", action="append", default=[], help="extra argument for mpv (repeatable)")
     sub = p.add_subparsers(dest="cmd", required=True)
     pl = sub.add_parser("play", help="play files, folders or URLs (switches clips without a black gap)")

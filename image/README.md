@@ -1,6 +1,6 @@
 # Image build (Raspberry Pi OS Lite, Trixie, 64-bit)
 
-`.github/workflows/image.yml` builds `nxlx-pocketvj-*.img.xz` with [pi-gen](https://github.com/RPi-Distro/pi-gen) (`arm64` branch) and uploads it, with `SHA256SUMS`, as a workflow artifact. Run it from the Actions tab (it takes about an hour) or by pushing a `v*` tag.
+`.github/workflows/image.yml` builds `nxlx-mastercontrol-*.img.xz` with [pi-gen](https://github.com/RPi-Distro/pi-gen) (`arm64` branch) and uploads it, with `SHA256SUMS`, as a workflow artifact. Run it from the Actions tab (it takes about an hour) or by pushing a `v*` tag.
 
 The image works on Pi 3, 4 and 5 (all 64-bit capable). It contains Raspberry Pi OS Lite plus `mpv`, `python3` and this repository's `pvj/`, `bin/` and `install/`, installed with the offline installer, with `pvj-player.service` enabled. The web panel is **not** in the image yet.
 
