@@ -138,7 +138,7 @@
     return h('div', { class: 'shell' },
       h('div', { class: 'screen' },
         h('h1', { text: 'Connect to your box' }),
-        h('p', { text: "Join the box's network, then enter the 4 digit PIN shown on the projector test screen or in the terminal. No internet needed." }),
+        h('p', { text: "Join the box's network, then enter the 4 digit PIN shown on the box's screen (until the first device has paired) or printed by \"sudo pvj-pin\" on the box. No internet needed." }),
         h('div', { class: 'k', text: 'PIN' }),
         h('div', { class: 'pin-row' }, pins),
         h('label', { class: 'k', for: 'devname', text: 'Device name' }),

@@ -18,7 +18,7 @@ The web panel listens on port 80. Connect the box and your phone to the same net
 
 ## 2. Pair your phone
 
-Open `http://<address of the box>/` in a browser. The box makes a new four digit PIN every time it starts. Read it on the box's screen or with `sudo pvj-pin`, and type it in.
+Open `http://<address of the box>/` in a browser. The box makes a new four digit PIN every time it starts. Until the first device has paired, the box draws the PIN and its address on its own screen whenever nothing is playing; after that it never appears on screen again, so it cannot show at a gig. You can always read it with `sudo pvj-pin`, and any full-access device can make a new PIN or a guest link in System.
 
 ![Connect screen](images/ui/connect.png)
 

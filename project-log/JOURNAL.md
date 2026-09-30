@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (PIN on screen)
+
+Done: `pvj/pinscreen.py`. The pairing PIN and the panel's addresses are drawn by mpv on its idle screen every 3 seconds, only while no device has ever paired and nothing is playing, using a whitelist of characters (mpv expands `${...}`). Tests use a fake player.
+
+Hardware: mpv's on-screen text on the idle Pi 4 was confirmed by the owner (top left, readable). The PinScreen thread itself was NOT run on the board, because the box already has paired devices and the feature deliberately stays silent then. To test: System > Access, remove every device (or a fresh SD card), reboot, look at the monitor.
+
 ## 2026-09-30 (USB, MIDI, audio, playback on the real Pi 4)
 
 Verified on the board:
