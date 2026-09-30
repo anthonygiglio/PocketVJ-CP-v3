@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 7
+SCHEMA = 8
 
 
 class SettingsError(Exception):
@@ -26,7 +26,7 @@ class SettingsError(Exception):
 
 def default_control():
     return {"dmx": {"enabled": False, "protocol": "artnet", "universe": 0, "start": 1, "allow": []},
-            "midi": {"enabled": False, "device": "", "channel": 0}}
+            "midi": {"enabled": False, "builtin": True, "map": []}}
 
 
 def default_settings():
@@ -79,7 +79,15 @@ def _v6_to_v7(data):
     data.setdefault("audio", {"device": "auto"})
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7}
+def _v7_to_v8(data):
+    """8: MIDI reads every controller and has a learnable map. The single chosen device and channel go; whether MIDI
+    was switched on is kept; the built-in map stays on so nothing changes until the user maps a control."""
+    control = data.setdefault("control", default_control())
+    old = control.get("midi") or {}
+    control["midi"] = {"enabled": bool(old.get("enabled", False)), "builtin": True, "map": []}
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

@@ -106,6 +106,16 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual((data["schema"], data["autostart"]["mode"]), (settings.SCHEMA, "off"))
         self.assertEqual(self.read(self.path + ".bak-v5")["schema"], 5)
 
+    def test_real_migration_from_schema_7_turns_the_single_midi_device_into_the_hub_settings(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 7, "control": {"dmx": {"enabled": True, "protocol": "sacn", "universe": 3, "start": 5, "allow": []},
+                                                 "midi": {"enabled": True, "device": "/dev/snd/midiC1D0", "channel": 4}}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual(data["schema"], settings.SCHEMA)
+        self.assertEqual(data["control"]["midi"], {"enabled": True, "builtin": True, "map": []})   # on stays on; device and channel go
+        self.assertTrue(data["control"]["dmx"]["enabled"])                                          # DMX untouched
+        self.assertEqual(self.read(self.path + ".bak-v7")["control"]["midi"]["device"], "/dev/snd/midiC1D0")
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

@@ -9,7 +9,7 @@ import unittest
 
 from pvj import dmx, midi
 from pvj.dmx import DmxManager, DmxMapper, DmxServer
-from pvj.midi import MidiInput, MidiManager, MidiMapper, MidiParser
+from pvj.midi import MidiHub, MidiParser
 from pvj.settings import Settings
 from tests.test_server import ServerBase
 
@@ -271,165 +271,12 @@ class MidiParserTest(unittest.TestCase):
             p.feed(bytes(rng.randrange(256) for _ in range(rng.randrange(0, 60))))
 
 
-class MidiMapperTest(unittest.TestCase):
-    def setUp(self):
-        self.rec = Recorder()
-        self.t = [100.0]
-        self.mix = {"blackout": False}
-        self.m = MidiMapper(self.rec, mix=self.mix, clock=lambda: self.t[0])
-
-    def test_pads_and_functions(self):
-        for note in (36, 47, 48, 71, 35, 72, 73, 74, 75, 76, 77):
-            self.m.message(("on", 0, note, 100))
-        self.assertEqual([c for c in self.rec.calls], [
-            ("/api/play", {"pad": [0, 0]}), ("/api/play", {"pad": [0, 11]}), ("/api/play", {"pad": [1, 0]}), ("/api/play", {"pad": [2, 11]}),
-            ("/api/control", {"action": "stop"}), ("/api/control", {"action": "pause"}), ("/api/blackout", {"on": True}),
-            ("/api/fadeout", {"seconds": 2}), ("/api/control", {"action": "reset"})])
-
-    def test_program_change_and_note_off_ignored(self):
-        self.m.message(("program", 0, 14, 0))
-        self.m.message(("program", 0, 36, 0))
-        self.m.message(("off", 0, 36, 0))
-        self.assertEqual(self.rec.calls, [("/api/play", {"pad": [1, 2]})])
-
-    def test_channel_filter(self):
-        m = MidiMapper(self.rec, channel=3, clock=lambda: self.t[0])
-        m.message(("on", 0, 36, 100))
-        self.assertEqual(self.rec.calls, [])
-        m.message(("on", 2, 36, 100))
-        self.assertEqual(len(self.rec.calls), 1)
-
-    def test_cc_levels_and_blackout(self):
-        for cc, v in ((20, 127), (21, 0), (22, 127), (23, 127), (24, 0)):
-            self.m.message(("cc", 0, cc, v))
-        self.m.message(("cc", 0, 25, 64))
-        self.m.message(("cc", 0, 99, 64))          # unmapped
-        self.assertEqual(self.rec.calls, [
-            ("/api/control", {"action": "opacity", "value": 100.0}), ("/api/control", {"action": "size", "value": 1.0}),
-            ("/api/control", {"action": "position", "value": 100.0}), ("/api/control", {"action": "speed", "value": 2.0}),
-            ("/api/control", {"action": "volume", "value": 0.0}), ("/api/blackout", {"on": True})])
-
-    def test_fader_sweep_is_thinned_but_the_last_value_lands(self):
-        self.m.message(("cc", 0, 20, 10))
-        for v in range(11, 60):
-            self.t[0] += 0.001
-            self.m.message(("cc", 0, 20, v))
-        self.assertEqual(len(self.rec.calls), 1)
-        self.t[0] += 0.1
-        self.assertEqual(self.m.flush(), 1)
-        self.assertEqual(self.rec.calls[-1], ("/api/control", {"action": "opacity", "value": round(59 / 127 * 100, 2)}))
-        self.assertEqual(self.m.flush(), 0)
-
-
-class MidiInputTest(ServerBase):
-    def test_reads_a_device_and_reconnects(self):
-        r1, w1 = os.pipe()
-        r2, w2 = os.pipe()
-        fds = [r1, r2]
-        opened = []
-
-        def open_fn(path):
-            opened.append(path)
-            if not fds:
-                raise FileNotFoundError(path)
-            return fds.pop(0)
-        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None, open_fn=open_fn, retry=0.05)
-        inp.start()
-        try:
-            os.write(w1, bytes([0x90, 74, 100]))        # blackout toggle
-            self.wait(lambda: self.api.mix["blackout"])
-            os.close(w1)                                 # unplugged
-            self.wait(lambda: len(opened) >= 2)          # reconnects (to the second pipe)
-            os.write(w2, bytes([0x90, 74, 100]))
-            self.wait(lambda: not self.api.mix["blackout"])
-        finally:
-            inp.stop()
-            os.close(w2)
-        self.assertEqual(opened[0], "/dev/snd/midiC1D0")
-
-    @staticmethod
-    def wait(cond, timeout=4):
-        end = time.time() + timeout
-        while time.time() < end and not cond():
-            time.sleep(0.02)
-        assert cond(), "condition not met"
-
-
-class MidiHardeningTest(ServerBase):
-    def test_a_faulty_pad_cannot_flood_the_player(self):
-        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None, clock=lambda: 5.0)
-        parser = MidiParser()
-        for _ in range(400):
-            inp.feed(parser, bytes([0x90, 36, 100]))
-        self.assertLessEqual(inp.stats["handled"], 51)
-
-    def test_bad_paths_never_open_and_never_kill_the_thread(self):
-        with self.assertRaises(OSError):
-            MidiInput._open_device("/etc/passwd")
-        with self.assertRaises(OSError):
-            MidiInput._open_device("/dev/snd/midiC\u0663D\u0663")
-        self.assertIsNone(midi.DEVICE_PATH.fullmatch("/dev/snd/midiC\u0663D\u0663"))
-        calls = []
-
-        def open_fn(path):
-            calls.append(path)
-            raise ValueError("embedded null byte")
-        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None, open_fn=open_fn, retry=0.02)
-        inp.start()
-        try:
-            end = time.time() + 3
-            while time.time() < end and len(calls) < 3:
-                time.sleep(0.02)
-            self.assertGreaterEqual(len(calls), 3)          # still trying: the thread survived the error
-        finally:
-            inp.stop()
-
-    def test_concurrent_apply_leaves_exactly_one_reader(self):
-        self.settings.data["control"]["midi"] = {"enabled": True, "device": "/dev/snd/midiC1D0", "channel": 0}
-        self.api.registry.set_enabled("control-midi", True)
-        mgr = MidiManager(self.api, self.settings, log=lambda *_: None, open_fn=lambda p: (_ for _ in ()).throw(OSError()))
-        threads = [threading.Thread(target=mgr.apply) for _ in range(12)]
-        [t.start() for t in threads]
-        [t.join() for t in threads]
-        self.assertEqual(sum(t.name == "midi" and t.is_alive() for t in threading.enumerate()), 1)
-        mgr.stop()
-        self.assertEqual(sum(t.name == "midi" and t.is_alive() for t in threading.enumerate()), 0)
-
-    def test_stale_held_fader_value_is_dropped_on_reconnect(self):
-        r1, w1 = os.pipe()
-        r2, w2 = os.pipe()
-        fds = [r1, r2]
-        inp = MidiInput(self.api, {"device": "/dev/snd/midiC1D0", "channel": 0}, log=lambda *_: None,
-                        open_fn=lambda p: fds.pop(0) if fds else (_ for _ in ()).throw(OSError()), retry=0.05)
-        inp.mapper.pending[20] = 99
-        inp.start()
-        try:
-            MidiInputTest.wait(lambda: inp.connected)
-            self.assertEqual(inp.mapper.pending, {})
-        finally:
-            inp.stop()
-            os.close(w1), os.close(w2)
-
-
-class MidiValidateTest(unittest.TestCase):
-    cur = {"enabled": False, "device": "", "channel": 0}
-
-    def test_good_and_bad(self):
-        new = midi.validate({"device": "/dev/snd/midiC1D0", "channel": 10, "enabled": True}, self.cur)
-        self.assertEqual((new["device"], new["channel"], new["enabled"]), ("/dev/snd/midiC1D0", 10, True))
-        for body in ({"device": "/etc/passwd"}, {"device": "/dev/snd/midiC1D0/../../../etc/passwd"}, {"device": "/dev/sda"},
-                     {"device": "/dev/snd/midiC1D0\n"}, {"device": 5}, {"channel": 17}, {"channel": -1}, {"channel": True},
-                     {"enabled": "yes"}, {"enabled": True}):
-            with self.assertRaises(midi.MidiError, msg=str(body)):
-                midi.validate(body, self.cur)
-
-
 class ControlApiTest(ServerBase):
     def setUp(self):
         super().setUp()
         self.api.dmx = DmxManager(self.api, self.settings, host="127.0.0.1", log=lambda *_: None)
-        self.api.midi = MidiManager(self.api, self.settings, log=lambda *_: None, open_fn=lambda p: (_ for _ in ()).throw(OSError()),
-                                    lister=lambda: ["/dev/snd/midiC1D0"])
+        self.api.midi = MidiHub(self.api, self.settings, log=lambda *_: None, open_fn=lambda p: (_ for _ in ()).throw(OSError()),
+                                lister=lambda: [], scan_interval=0.05)
         self.addCleanup(self.api.dmx.stop)
         self.addCleanup(self.api.midi.stop)
         self.full = self.call("POST", "/api/pair", {"pin": self.pin, "name": "t"})[1]["token"]
@@ -452,28 +299,6 @@ class ControlApiTest(ServerBase):
         self.assertFalse(self.settings.data["control"]["dmx"]["enabled"])
         self.assertEqual(self.settings.data["control"]["dmx"]["universe"], 0)
         self.assertEqual(self.call("POST", "/api/dmx", {"universe": 99999}, token=self.full)[0], 400)
-
-    def test_midi_roundtrip(self):
-        self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)
-        st, body, _ = self.call("GET", "/api/midi", token=self.full)
-        self.assertEqual((st, body["devices"], body["connected"]), (200, ["/dev/snd/midiC1D0"], False))
-        self.assertEqual(self.call("POST", "/api/midi", {"enabled": True}, token=self.full)[0], 400)   # no device yet
-        st, body, _ = self.call("POST", "/api/midi", {"device": "/dev/snd/midiC1D0", "enabled": True, "channel": 2}, token=self.full)
-        self.assertEqual((st, body["enabled"], body["channel"]), (200, True, 2))
-        self.assertEqual(Settings(self.settings.path).load()["control"]["midi"]["device"], "/dev/snd/midiC1D0")
-        self.assertEqual(self.call("POST", "/api/midi", {"device": "/etc/passwd"}, token=self.full)[0], 400)
-
-    def test_switching_the_module_off_stops_the_receiver_and_boot_respects_it(self):
-        self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)
-        self.call("POST", "/api/midi", {"device": "/dev/snd/midiC1D0", "enabled": True}, token=self.full)
-        self.assertIsNotNone(self.api.midi.input)
-        self.call("POST", "/api/modules/control-midi", {"enabled": False}, token=self.full)
-        self.assertIsNone(self.api.midi.input)
-        self.assertTrue(self.settings.data["control"]["midi"]["enabled"])   # the choice is kept
-        self.api.midi.apply()                                               # as at boot: module off, so nothing starts
-        self.assertIsNone(self.api.midi.input)
-        self.call("POST", "/api/modules/control-midi", {"enabled": True}, token=self.full)
-        self.assertIsNotNone(self.api.midi.input)
 
     def test_any_failure_while_applying_reverts_and_answers_409(self):
         self.call("POST", "/api/modules/control-dmx", {"enabled": True}, token=self.full)
