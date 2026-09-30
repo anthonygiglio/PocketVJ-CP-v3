@@ -83,6 +83,7 @@ function startServer() {
 
     // Turn the beta modules on and give them something to show.
     for (const id of ['scheduler', 'control-dmx', 'control-midi', 'inputs-srt', 'network']) await api('POST', '/api/modules/' + id, { enabled: true });
+    await api('POST', '/api/autostart', { mode: 'file', file: 'intro.mkv', loop: true, delay: 5 });
     await api('POST', '/api/schedule', { enabled: true, entries: [
       { label: 'Doors', time: '18:30', days: [4, 5], action: 'play', file: 'intro.mkv', loop: true },
       { label: 'Close', time: '23:30', days: [0, 1, 2, 3, 4, 5, 6], action: 'blackout' }] });
@@ -99,6 +100,7 @@ function startServer() {
     await page.evaluate(() => { document.querySelector('.tabs').style.setProperty('display', 'none', 'important'); });   // the fixed tab bar would cover the bottom of tall cards
     await shot('system-vitals', (f) => card('Vitals').screenshot({ path: f }));
     await shot('system-modules', (f) => card('Modules').screenshot({ path: f }));
+    await shot('autostart', (f) => card('Autostart').screenshot({ path: f }));
     await shot('schedule', (f) => card('Schedule').screenshot({ path: f }));
     await shot('streams', (f) => card('Streams').screenshot({ path: f }));
     await shot('dmx', (f) => card('DMX').screenshot({ path: f }));

@@ -33,7 +33,7 @@ _NAME = re.compile(r"^start(?P<family>masterone|masterusb|master|lesseronce|less
 
 def parse_legacy_name(name):
     """Return the preset for a legacy script name, or raise PlayerError."""
-    m = _NAME.match(os.path.basename(name))
+    m = _NAME.fullmatch(os.path.basename(name))  # fullmatch: a trailing newline must not pass
     if not m:
         raise PlayerError("unknown preset %r (slave, stream and wifi presets are not ported yet)" % name)
     loop, audio, usb, sync_master = FAMILIES[m.group("family")]

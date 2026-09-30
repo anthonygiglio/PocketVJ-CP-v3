@@ -4,6 +4,16 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (autostart)
+
+Done:
+- Merged the screenshots (#19). Reran the browser test on master to catch the intermittent network-form failure; results in the next entry if any.
+- Built Autostart (legacy tab 1): `pvj/autostart.py`, `/api/autostart` (+ `/test`), System > Autostart card, settings schema 6, `pvj/AUTOSTART.md`, tests. See D18.
+- A test found a circular import that only shows when `pvj.api` is the first module loaded; fixed with a lazy import, and a test now imports each module first in a fresh interpreter.
+- Fixed a latent bug: legacy preset names were matched with `$`, so `startless\n` passed; now `fullmatch`.
+
+Not verified: never run through a real reboot or an mpv crash on a board.
+
 ## 2026-09-30 (screenshots)
 
 Done:

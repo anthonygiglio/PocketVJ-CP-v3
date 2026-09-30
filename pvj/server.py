@@ -22,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import dmx as dmx_mod, hardware, midi as midi_mod, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
+from . import autostart as autostart_mod, dmx as dmx_mod, hardware, midi as midi_mod, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
 from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
@@ -283,6 +283,7 @@ def build(env=None, player=None):
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
+    api.autostart = autostart_mod.Autostart(api, settings)
     api.dmx = dmx_mod.DmxManager(api, settings)
     api.midi = midi_mod.MidiManager(api, settings)
     write_pin_file(rundir, auth.current_pin)
@@ -308,6 +309,7 @@ def main(argv=None):
     host, port = env.get("PVJ_BIND", "0.0.0.0"), int(env.get("PVJ_PORT", "8080"))
     httpd = PvjServer((host, port), make_handler(api, auth))
     api.scheduler.start()
+    api.autostart.start()
     print("pvj-web: listening on %s:%d; pairing PIN %s (also in %s/pin)" % (host, port, auth.current_pin, rundir),
           flush=True)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))
@@ -318,6 +320,7 @@ def main(argv=None):
     finally:
         httpd.server_close()
         api.scheduler.stop()
+        api.autostart.stop()
         api.dmx.stop()
         api.midi.stop()
         if api.osc:

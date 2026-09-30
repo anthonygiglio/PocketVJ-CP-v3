@@ -22,7 +22,7 @@ The repository was renamed from `PocketVJ-CP-v3` to `nxlx.mastercontrol`.
 
 ## What exists
 
-Phases 0 to 4 and two feature screens are merged: security hotfix, platform layer, installer/services/image definition, the new core (API, panel, modules, themes, OSC receive, signed updates), the Library screen (upload, rename, delete), the wired Network screen (beta, off by default) the weekly schedule, network streams, DMX over the network and USB MIDI input (all beta, off by default; see `pvj/SCHEDULE.md`, `pvj/STREAMS.md`, `pvj/DMX.md`, `pvj/MIDI.md`). See ROADMAP.md for the phase list and the module manifests in `pvj/modules.d`.
+Phases 0 to 4 and two feature screens are merged: security hotfix, platform layer, installer/services/image definition, the new core (API, panel, modules, themes, OSC receive, signed updates), the Library screen (upload, rename, delete), the wired Network screen (beta, off by default) the weekly schedule, network streams, autostart, DMX over the network and USB MIDI input (the last four are off by default; see `pvj/AUTOSTART.md`, `pvj/SCHEDULE.md`, `pvj/STREAMS.md`, `pvj/DMX.md`, `pvj/MIDI.md`). See ROADMAP.md for the phase list and the module manifests in `pvj/modules.d`.
 
 ## What has NOT been done or verified
 

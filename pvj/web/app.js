@@ -366,7 +366,7 @@
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
-    cards.push(modulesCard(full), streamsCard(full));
+    cards.push(modulesCard(full), autostartCard(full), streamsCard(full));
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -465,6 +465,50 @@
     api('GET', '/api/midi').then(function (r) {
       if (!document.getElementById('midicard')) return;
       if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'midimsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
+  }
+  // ---- autostart -------------------------------------------------------
+  var autoForm = null;  // survives redraws: { mode, file, preset, loop, delay }
+  function autostartCard(full) {
+    var body = h('div', { class: 'list', id: 'autobody' });
+    var card = h('div', { class: 'card', id: 'autocard' }, h('h2', { text: 'Autostart' }), body);
+    var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['preset', 'Legacy start script']];
+    function draw(d) {
+      body.textContent = '';
+      var c = autoForm || { mode: d.config.mode, file: d.config.file, preset: d.config.preset, loop: d.config.loop, delay: d.config.delay };
+      var line = d.config.mode === 'off' ? 'Off: the box waits for you at power-up.' :
+        'On: ' + MODES.filter(function (m) { return m[0] === d.config.mode; })[0][1] + (d.config.mode === 'file' ? ' (' + d.config.file + ')' : d.config.mode === 'preset' ? ' (' + d.config.preset + ')' : '') + ', after ' + d.config.delay + ' s.';
+      body.appendChild(h('div', { class: 'k', id: 'autoline', text: line }));
+      if (d.last) body.appendChild(h('div', { class: 'k', id: 'autolast', text: 'Last run ' + d.last.at + ': ' + (d.last.ok ? 'started' : 'failed, ' + d.last.message) }));
+      if (!full) return;
+      var mode = h('select', { class: 'text-input', id: 'automode', 'aria-label': 'What to play at power-up' },
+        MODES.map(function (m) { return h('option', { value: m[0], text: m[1], selected: m[0] === c.mode }); }));
+      var file = h('select', { class: 'text-input', id: 'autofile', 'aria-label': 'Clip', hidden: c.mode !== 'file' },
+        S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === (c.file || S.media[0]) }); }));
+      var preset = h('input', { class: 'text-input mono', id: 'autopreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: c.preset, hidden: c.mode !== 'preset', autocomplete: 'off' });
+      var loop = h('select', { class: 'text-input', id: 'autoloop', 'aria-label': 'Loop', hidden: c.mode === 'off' || c.mode === 'preset' },
+        [[true, 'Loop'], [false, 'Play once']].map(function (o) { return h('option', { value: String(o[0]), text: o[1], selected: o[0] === c.loop }); }));
+      var delay = h('input', { class: 'text-input mono', id: 'autodelay', type: 'number', min: 0, max: 120, 'aria-label': 'Wait after power-up, seconds', value: c.delay, hidden: c.mode === 'off' });
+      function remember() { autoForm = { mode: mode.value, file: file.value, preset: preset.value, loop: loop.value === 'true', delay: parseFloat(delay.value || '0') }; }
+      function show() { file.hidden = mode.value !== 'file'; preset.hidden = mode.value !== 'preset'; loop.hidden = mode.value === 'off' || mode.value === 'preset'; delay.hidden = mode.value === 'off'; }
+      [mode, file, preset, loop, delay].forEach(function (el) { el.addEventListener('input', remember); el.addEventListener('change', function () { remember(); show(); }); });
+      body.appendChild(mode); body.appendChild(file); body.appendChild(preset); body.appendChild(loop);
+      body.appendChild(h('label', { class: 'k', for: 'autodelay', text: 'Wait after power-up (seconds)', hidden: false })); body.appendChild(delay);
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn on small', id: 'autosave', text: 'Save', onclick: function () {
+          remember();
+          act('POST', '/api/autostart', autoForm, function (data) { autoForm = null; say(''); draw(data); });
+        } }),
+        h('button', { class: 'btn small', id: 'autotest', text: 'Run it now', disabled: !can('live'), onclick: function () {
+          act('POST', '/api/autostart/test', {}, function (data) { draw(data); });
+        } })));
+      body.appendChild(h('div', { class: 'k', text: 'Runs when the box starts, and again if the player is restarted after a crash. A Stop from the panel is not undone.' }));
+    }
+    api('GET', '/api/autostart').then(function (r) {
+      if (!document.getElementById('autocard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'automsg', text: r.data.error || 'Not available' })); return; }
       draw(r.data);
     });
     return card;
