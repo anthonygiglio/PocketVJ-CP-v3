@@ -279,6 +279,7 @@
     if (tp) { tp.textContent = pl.test_pattern ? 'Test pattern off' : 'Test pattern'; tp.className = 'btn small grow' + (pl.test_pattern ? ' on' : ''); }
     if (pl.test_pattern) np.textContent = 'Test pattern (colour bars)';
     if (pl.test_tone) np.textContent = 'Test tone (' + pl.test_tone + ')';
+    if (pl.capture) np.textContent = 'Live input' + (pl.capture.device ? ' (' + pl.capture.device + ', ' + pl.capture.mode + ')' : '');
     var temp = typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : '';
     document.getElementById('pill').textContent = [sys.board, temp, pl.running ? 'OK' : 'No player'].filter(Boolean).join(' · ');
     var f = document.getElementById('freeze'); if (f) f.textContent = pl.paused ? 'Resume' : 'Freeze';
@@ -403,6 +404,26 @@
   }
 
   // ---- media ----------------------------------------------------------
+  // Live input: an HDMI capture stick or a webcam on USB, shown like a clip (the old panel's camera livefeed).
+  function liveInputCard() {
+    if (!can('live')) return null;
+    var body = h('div', { class: 'list', id: 'inputbody' });
+    var card = h('div', { class: 'card', id: 'inputcard', hidden: true }, h('div', { class: 'k', text: 'Live input (USB capture or camera)' }), body);
+    api('GET', '/api/inputs').then(function (r) {
+      if (!document.getElementById('inputcard') || !r.ok || !r.data.devices.length) return;
+      card.hidden = false;
+      var d = r.data;
+      var dev = h('select', { class: 'text-input', id: 'inputdev', 'aria-label': 'Input' }, d.devices.map(function (x) { return h('option', { value: x.id, text: x.name + ' (' + x.id + ')' }); }));
+      var mode = h('select', { class: 'text-input', id: 'inputmode', 'aria-label': 'Picture size' }, d.modes.map(function (m) { return h('option', { value: m, text: m }); }));
+      body.appendChild(dev); body.appendChild(mode);
+      body.appendChild(h('button', { class: 'btn on small', id: 'inputshow', text: d.running ? 'Show again' : 'Show live input', onclick: function () {
+        say('Opening the input...');
+        act('POST', '/api/play', { capture: { device: dev.value, mode: mode.value } }, function () { say('Showing the live input'); poll(); });
+      } }));
+      body.appendChild(h('div', { class: 'k', text: 'Playing anything else, or Stop, ends it. No sound from the input yet.' }));
+    });
+    return card;
+  }
   function describeClip(name, i) {
     var parts = [];
     if (i.codec) parts.push(i.codec.toUpperCase() + (i.width ? ' ' + i.width + 'x' + i.height : '') + (i.fps ? ' ' + i.fps + ' fps' : ''));
@@ -523,6 +544,7 @@
     return h('div', { class: 'screen' },
       h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: refreshMedia })),
       quick,
+      liveInputCard(),
       slideshow,
       full ? h('div', { class: 'card' },
         h('div', { class: 'k', id: 'freeline', text: (info.free !== undefined ? megabytes(info.free) + ' free' : '') + (info.max_upload ? ' \u00b7 largest file ' + megabytes(info.max_upload) : '') }),

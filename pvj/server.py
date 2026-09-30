@@ -350,6 +350,8 @@ def build(env=None, player=None):
     api = Api(player, settings, auth, registry, themes, media, board,
               spawn=env.get("PVJ_DEV_SPAWN") == "1", on_pin=lambda pin: write_pin_file(rundir, pin))
     api.net = netd_mod.NetdClient(os.path.join(rundir, "netd.sock"))
+    from . import capture as capture_mod
+    api.capture = capture_mod.Capture(rundir, getattr(player, "mpv_bin", "mpv"))
     api.sysd = sysd_mod.SysdClient(os.path.join(os.environ.get("PVJ_SYSD_DIR", "/run/pvj-sysd"), "sysd.sock"))
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
@@ -395,6 +397,8 @@ def main(argv=None):
         api.scheduler.stop()
         api.autostart.stop()
         api.pinscreen.stop()
+        if api.capture:
+            api.capture.stop()
         api.dmx.stop()
         api.midi.stop()
         if api.osc:

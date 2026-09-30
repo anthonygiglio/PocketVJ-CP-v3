@@ -241,6 +241,18 @@ class Player:
         self.ipc.request("set_property", "loop-file", "inf" if (looping and single) else "no")
         self.ipc.request("set_property", "loop-playlist", "inf" if (looping and not single) else "no")
 
+    def play_pipe(self, path, width, height, fps):
+        """Play raw YUYV frames from a pipe (a live input read by a separate helper; see pvj/capture.py)."""
+        if not self.is_running():
+            raise PlayerError("player service is not running (systemctl start pvj-player)")
+        opts = ("demuxer=rawvideo,demuxer-rawvideo-w=%d,demuxer-rawvideo-h=%d,demuxer-rawvideo-mp-format=yuyv422,"
+                "demuxer-rawvideo-fps=%d,cache=no" % (int(width), int(height), int(fps)))
+        self.ipc.request("set_property", "keep-open", "no")
+        self.ipc.request("set_property", "loop-file", "no")
+        self.ipc.request("set_property", "loop-playlist", "no")
+        self.ipc.request("loadfile", path, "replace", -1, opts)
+        self.ipc.request("set_property", "pause", False)
+
     def shuffle(self):
         """Put the current playlist in a random order (the old panel's random player)."""
         self.ipc.request("playlist-shuffle")

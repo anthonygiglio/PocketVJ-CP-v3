@@ -66,6 +66,8 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Slideshow** (Media, like the old Presenter tab): the pictures of the media folder or of a USB drive, each for 0.1 second to a minute, then start again, keep the last picture, or go black; optionally in a random order. Prev and Next on Live step through them.
 
+**Live input** (Media): an HDMI capture stick or a webcam on USB, shown like a clip, at 720p or 1080p at 30 frames a second. Playing anything else, or Stop, ends it. On a Raspberry Pi 4 with a USB3 HDMI capture stick both sizes played without dropping frames (720p60 dropped frames and is not offered). The device is read by a separate helper so that a fault in the capture driver cannot stop the player. The input's sound is not played yet, and the delay from the source to the screen has not been measured.
+
 **Audio files** (mp3, wav, flac, ogg, m4a, aac, opus) can be uploaded and played like clips; the screen stays black while they play.
 
 **Overlay picture** (Mix): put a PNG from the media folder over the video, like the old panel's overlay.png: a logo, a watermark, or a mask that blacks out the parts of the picture that miss the screen. Make it transparent where the video should show. It is fitted to the screen once (about a second on a Pi 4), stays on top of the video, and comes back by itself if the player restarts. It cost no measurable playback on a Pi 4 with a 1080p film.

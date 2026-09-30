@@ -126,6 +126,14 @@ class SysdUnitTest(unittest.TestCase):
             self.assertIn("pvj-sysd.service", f.read())
 
 
+class WebUnitCaptureTest(unittest.TestCase):
+    def test_the_panel_may_read_capture_devices_and_only_those_besides_alsa(self):
+        web = load_units()["pvj-web.service"]
+        self.assertIn("video", words(web, "SupplementaryGroups"))
+        self.assertIn("char-video4linux rw", web["DeviceAllow"])
+        self.assertEqual(web["DevicePolicy"], ["closed"])
+
+
 class WebUnitTest(unittest.TestCase):
     def test_the_panel_may_read_the_boxs_addresses(self):
         # `ip -j addr` needs a netlink socket; the sandbox refused it and the Network card showed no addresses on a Pi 4
