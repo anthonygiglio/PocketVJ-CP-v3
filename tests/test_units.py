@@ -114,6 +114,10 @@ class SysdUnitTest(unittest.TestCase):
         self.assertEqual(u["NoNewPrivileges"], ["yes"])
         self.assertEqual(words(u, "RestrictAddressFamilies"), ["AF_UNIX"])
         self.assertEqual(u["ProtectSystem"], ["strict"])
+        for key, value in (("PrivateNetwork", "yes"), ("MemoryDenyWriteExecute", "yes"), ("RestrictSUIDSGID", "yes"),
+                           ("RuntimeDirectory", "pvj-sysd"), ("RuntimeDirectoryMode", "0750"), ("SystemCallFilter", "@system-service")):
+            self.assertEqual(u[key], [value], key)
+        self.assertNotIn("PrivateUsers", u)            # it would hide the caller's uid from the peer check
 
     def test_installer_and_image_enable_it(self):
         with open(os.path.join(REPO, "install", "install.sh")) as f:

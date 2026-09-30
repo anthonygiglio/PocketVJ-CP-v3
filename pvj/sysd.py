@@ -17,6 +17,7 @@ It holds no capabilities of its own (systemd and timedated do the work), and OSC
 
 import datetime
 import json
+import socket
 import os
 import subprocess
 import threading
@@ -25,14 +26,21 @@ import time
 from .netd import NetServer, peer_uid  # noqa: F401  (the same small, reviewed socket server)
 
 MIN_EPOCH = 1735689600      # 2025-01-01: anything earlier is a wrong clock, not a date to set
-MAX_EPOCH = 4102444800      # 2100-01-01
+MAX_EPOCH = 2082758400      # 2036-01-01: a phone set to a far future year would otherwise stick (timesyncd saves the
+                            # clock and never moves it back), so such a date is refused, not set
+MARKER = "ntp-was-on"       # left in the helper's own runtime folder while network time is switched off
+STATUS_CACHE = 5.0
 
 
 class SysService:
-    def __init__(self, runner=subprocess.run, schedule=None, log=print):
+    def __init__(self, runner=subprocess.run, schedule=None, log=print, rundir=None, clock=time.monotonic, now=time.time):
         self.runner, self.log = runner, log
         self._schedule = schedule or (lambda delay, fn: threading.Timer(delay, fn).start())
         self.lock = threading.Lock()
+        self.rundir = rundir
+        self._clock, self._now = clock, now
+        self._status = None            # (time, reply): a view device polling the panel must not make root spawn a process each time
+        self._power_requested = None
 
     def _run(self, argv, timeout=15):
         assert isinstance(argv, list) and argv[0] in ("systemctl", "timedatectl")
@@ -42,40 +50,101 @@ class SysService:
             return 1, str(e)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
 
+    def _show(self, prop):
+        code, out = self._run(["timedatectl", "show", "--property=" + prop, "--value"])
+        return None if code != 0 else out.strip() == "yes"
+
     def synchronized(self):
         """True if the clock has been set from the network, None if that cannot be read."""
-        code, out = self._run(["timedatectl", "show", "--property=NTPSynchronized", "--value"])
-        if code != 0:
-            return None
-        return out.strip() == "yes"
+        return self._show("NTPSynchronized")
 
     def status(self):
-        return {"ok": True, "clock_from_network": self.synchronized(), "now": int(time.time())}
+        t = self._clock()
+        if self._status and t - self._status[0] < STATUS_CACHE:
+            return dict(self._status[1], now=int(self._now()))
+        reply = {"ok": True, "clock_from_network": self.synchronized(), "now": int(self._now())}
+        self._status = (t, reply)
+        return reply
 
     def power(self, verb):
+        if self._power_requested:
+            return {"ok": True, verb: True, "already": self._power_requested}
+        # Ask systemd whether it would do it before saying yes: a refusal is reported, not logged and lost.
+        code, out = self._run(["systemctl", "--dry-run", verb])
+        if code != 0:
+            return {"ok": False, "error": "the system refused to %s: %s" % (verb, out.strip()[-160:])}
+        self._power_requested = verb
+
         def go():
             code, out = self._run(["systemctl", verb])
             if code != 0:
+                self._power_requested = None
                 self.log("pvj-sysd: systemctl %s failed: %s" % (verb, out.strip()[-200:]))
         self.log("pvj-sysd: %s requested by the panel" % verb)
         self._schedule(1.0, go)
         return {"ok": True, verb: True}
+
+    # --- the clock ----------------------------------------------------------
+    def _marker(self):
+        return os.path.join(self.rundir, MARKER) if self.rundir else None
+
+    def _ntp_on(self):
+        """Switch network time back on, check it, and clear the marker. True if it is on."""
+        for _ in range(2):
+            self._run(["timedatectl", "set-ntp", "true"])
+            if self._show("NTP"):
+                m = self._marker()
+                if m:
+                    try:
+                        os.unlink(m)
+                    except FileNotFoundError:
+                        pass
+                return True
+        return False
+
+    def recover(self):
+        """At start: if an earlier run switched network time off and died before switching it back, switch it on."""
+        m = self._marker()
+        if m and os.path.exists(m):
+            ok = self._ntp_on()
+            self.log("pvj-sysd: network time was left off by an interrupted clock change; %s"
+                     % ("switched it back on" if ok else "could NOT switch it back on"))
+            return ok
+        return None
 
     def set_time(self, epoch):
         if isinstance(epoch, bool) or not isinstance(epoch, int) or not MIN_EPOCH <= epoch <= MAX_EPOCH:
             return {"ok": False, "error": "that is not a sensible date"}
         with self.lock:
             synced = self.synchronized()
+            if synced is None:
+                return {"ok": False, "error": "cannot tell whether the clock is set from the network; not changing it"}
             if synced:
                 return {"ok": False, "error": "the clock is already set from the network"}
+            ntp_was_on = self._show("NTP")
             stamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            self._run(["timedatectl", "set-ntp", "false"])
+            if ntp_was_on:
+                m = self._marker()
+                if m:
+                    with open(m, "w") as f:
+                        f.write("1\n")
+                code, out = self._run(["timedatectl", "set-ntp", "false"])
+                if code != 0:
+                    self._ntp_on()
+                    return {"ok": False, "error": "could not pause network time: %s" % out.strip()[-160:]}
             code, out = self._run(["timedatectl", "--adjust-system-clock", "set-time", stamp + " UTC"])
-            self._run(["timedatectl", "set-ntp", "true"])       # a network that appears later still corrects it
+            back_on = self._ntp_on() if ntp_was_on else True
+            self._status = None
             if code != 0:
                 return {"ok": False, "error": "the clock could not be set: %s" % out.strip()[-160:]}
+            if not back_on:
+                return {"ok": False, "error": "the clock was set, but network time could not be switched back on"}
+            now = int(self._now())
             self.log("pvj-sysd: clock set to %s UTC by the panel" % stamp)
-            return {"ok": True, "now": int(time.time())}
+            if abs(now - epoch) > 120:
+                return {"ok": False, "error": "the clock was set but moved again (to %s UTC); a saved clock may be ahead"
+                        % datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")}
+            return {"ok": True, "now": now}
 
     def handle(self, message):
         if not isinstance(message, dict):
@@ -93,11 +162,10 @@ class SysService:
 class SysdClient:
     """Used by the panel: one request, one reply."""
 
-    def __init__(self, path, timeout=30):
+    def __init__(self, path, timeout=90):          # longer than the helper's worst case (four 15 s commands)
         self.path, self.timeout = path, timeout
 
     def request(self, message):
-        import socket
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(self.timeout)
         try:
@@ -109,27 +177,34 @@ class SysdClient:
                 if not chunk:
                     break
                 data += chunk
-            return json.loads(data)
+            reply = json.loads(data)
+        except socket.timeout:
+            raise OSError("the system helper (pvj-sysd) did not answer in time; the change may still be going on")
         except (OSError, ValueError):
             raise OSError("the system helper (pvj-sysd) is not running")
         finally:
             s.close()
-
+        if not isinstance(reply, dict):
+            raise OSError("the system helper (pvj-sysd) gave a bad answer")
+        return reply
 
 def main(argv=None):
     import grp
     import pwd
-    rundir = os.environ.get("PVJ_RUNTIME_DIR", "/run/pvj")
+    # Its own folder (root:pvj 0750): nobody but root can create or replace anything in it, so no member of group
+    # pvj can put a fake socket in its place. The shared /run/pvj is group-writable.
+    rundir = os.environ.get("PVJ_SYSD_DIR", "/run/pvj-sysd")
     os.makedirs(rundir, exist_ok=True)
     allowed = {0}
     try:
         allowed.add(pwd.getpwnam("pvj-web").pw_uid)
     except KeyError:
         pass
-    service = SysService(log=lambda m: print(m, flush=True))
+    service = SysService(log=lambda m: print(m, flush=True), rundir=rundir)
+    service.recover()
     server = NetServer(os.path.join(rundir, "sysd.sock"), service, lambda uid: uid in allowed)
     try:
-        os.chown(server.server_address, 0, grp.getgrnam("pvj").gr_gid)
+        os.chown(server.server_address, 0, grp.getgrnam("pvj").gr_gid, follow_symlinks=False)
     except (KeyError, OSError):
         pass
     print("pvj-sysd: ready", flush=True)

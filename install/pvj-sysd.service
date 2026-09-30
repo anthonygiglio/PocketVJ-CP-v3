@@ -9,11 +9,11 @@ StartLimitIntervalSec=0
 # (set the clock) over D-Bus, and answers only root and pvj-web on its socket.
 User=root
 Group=pvj
-UMask=0007
-RuntimeDirectory=pvj
-RuntimeDirectoryMode=0770
-RuntimeDirectoryPreserve=yes
-Environment=PVJ_RUNTIME_DIR=/run/pvj
+UMask=0027
+# Its own folder, root:pvj 0750: members of group pvj can reach the socket but cannot replace it.
+RuntimeDirectory=pvj-sysd
+RuntimeDirectoryMode=0750
+Environment=PVJ_SYSD_DIR=/run/pvj-sysd
 ExecStart=@PVJ_DIR@/bin/pvj-sysd
 Restart=always
 RestartSec=2
@@ -24,7 +24,18 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-ReadWritePaths=/run/pvj
+ReadWritePaths=/run/pvj-sysd
+PrivateNetwork=yes
+IPAddressDeny=any
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+RemoveIPC=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
