@@ -297,6 +297,22 @@ function startServer() {
     await page.waitForFunction(() => !document.querySelector('.map-entry'));
     await page.click('nav >> text=System');
     await page.waitForSelector('h1:has-text("System")');
+    // Remote support: off by default; settings saved and checked; allowing it shows the start controls
+    await page.waitForSelector('#supportcard #supportallow');
+    assert(/Remote support is off/.test(await page.textContent('#supportcard')), 'remote support starts off');
+    await page.fill('#support-endpoint', 'support.example.com:51820');
+    await page.fill('#support-server_key', 'a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=');
+    await page.fill('#support-address', '10.77.0.40');
+    await page.fill('#support-network', '10.77.0.0/24');
+    await page.click('#supportsave');
+    await page.click('#supportallow');
+    await page.waitForSelector('#supportstart');
+    await page.waitForSelector('#supportwhy');                       // no helper in the test harness: said plainly
+    await page.fill('#support-address', '10.99.0.40');
+    await page.click('#supportsave');
+    await page.waitForFunction(() => /inside the support network/.test(document.getElementById('msg').textContent));
+    await page.click('#supportallow');
+    await page.waitForFunction(() => /Remote support is off/.test(document.getElementById('supportcard').textContent));
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');
