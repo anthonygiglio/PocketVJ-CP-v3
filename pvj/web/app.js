@@ -466,32 +466,92 @@
     });
     return card;
   }
+  var MIDI_ACTIONS = [['pad', 'Play a pad'], ['stop', 'Stop'], ['pause', 'Pause / resume'], ['blackout', 'Blackout on / off'], ['fadeout', 'Fade out'],
+    ['reset', 'Reset mix'], ['opacity', 'Opacity (fader)'], ['size', 'Size (fader)'], ['position', 'Position X (fader)'], ['speed', 'Speed (fader)'],
+    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)']];
+  var midiForm = { action: 'opacity', bank: 0, index: 0 };  // survives redraws
+  var midiTimer = null;
   function midiCard() {
-    var card = h('div', { class: 'card', id: 'midicard' }, h('h2', { text: 'MIDI controller' }));
+    var card = h('div', { class: 'card', id: 'midicard' }, h('h2', { text: 'MIDI controllers' }));
     var body = h('div', { class: 'list', id: 'midibody' });
     card.appendChild(body);
     if (!moduleOn('control-midi')) {
       body.appendChild(h('div', { class: 'k', id: 'midimsg', text: 'Off. Switch on "MIDI controller (USB)" under Modules above (beta).' }));
       return card;
     }
+    function describe(e) {
+      var what = MIDI_ACTIONS.filter(function (a) { return a[0] === e.action; })[0];
+      var ctl = (e.kind === 'note' ? 'note ' : e.kind === 'cc' ? 'CC ' : 'program ') + e.number + (e.channel ? ' ch ' + e.channel : '');
+      var pad = e.action === 'pad' ? ' ' + 'ABC'[e.bank] + (e.index + 1) : '';
+      return (e.source === '*' ? 'any controller' : e.source) + ' · ' + ctl + ' → ' + (what ? what[1] : e.action) + pad;
+    }
+    function poll() {
+      clearTimeout(midiTimer);
+      midiTimer = setTimeout(function () {
+        if (!document.getElementById('midicard')) return;
+        api('GET', '/api/midi').then(function (r) {
+          if (!r.ok || !document.getElementById('midicard')) return;
+          var l = r.data.learn;
+          if (l.captured) return save(l.captured);
+          if (l.active) {   // only the countdown changes: do not rebuild the card under the user's finger
+            var el = document.getElementById('midilearning');
+            if (el) el.textContent = 'Move or press a control on any controller now (' + l.seconds_left + ' s)...';
+            return poll();
+          }
+          draw(r.data); say('Learning stopped: nothing was moved or pressed.', true);
+        });
+      }, 600);
+    }
+    function save(c) {
+      var entry = { source: c.source, kind: c.kind, channel: 0, number: c.number, action: midiForm.action };
+      if (midiForm.action === 'pad') { entry.bank = midiForm.bank; entry.index = midiForm.index; }
+      act('POST', '/api/midi/map', { add: entry }, function (data) { say('Mapped: ' + describe(entry)); draw(data); });
+    }
     function draw(d) {
       body.textContent = '';
-      body.appendChild(h('div', { class: 'k', id: 'midiline', text: !d.enabled ? 'Off' : (d.connected ? 'Connected' + (d.last ? '. Last message: ' + d.last : '') : 'Waiting for the controller') }));
-      var dev = h('select', { class: 'text-input', id: 'midi-device', 'aria-label': 'MIDI device' },
-        [h('option', { value: '', text: d.devices.length ? 'Choose a device' : 'No MIDI devices found' })].concat(d.devices.map(function (p) {
-          return h('option', { value: p, text: p, selected: p === d.device });
-        })));
-      var chan = h('select', { class: 'text-input', id: 'midichan', 'aria-label': 'MIDI channel' },
-        [h('option', { value: 0, text: 'All channels', selected: d.channel === 0 })].concat(Array.apply(null, Array(16)).map(function (_, i) {
-          return h('option', { value: i + 1, text: 'Channel ' + (i + 1), selected: d.channel === i + 1 });
-        })));
-      function send(patch) { act('POST', '/api/midi', patch, function (data) { say(''); draw(data); }); }
-      function fields() { return { device: dev.value, channel: parseInt(chan.value, 10) }; }
-      body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'miditoggle', text: d.enabled ? 'MIDI is on. Turn off' : 'Turn MIDI on',
-        onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
-      body.appendChild(dev); body.appendChild(chan);
-      body.appendChild(h('button', { class: 'btn small', id: 'midisave', text: 'Save', onclick: function () { send(fields()); } }));
-      body.appendChild(h('div', { class: 'k', text: 'Notes 36 to 71 play pads 1 to 36. See MIDI.md for the rest.' }));
+      var names = d.devices.map(function (x) { return x.name + (x.connected ? '' : ' (not reading)'); });
+      body.appendChild(h('div', { class: 'k', id: 'midiline', text: !d.enabled ? 'Off' : (d.devices.length ? d.devices.length + ' controller' + (d.devices.length > 1 ? 's' : '') + ': ' + names.join(', ') + (d.last ? '. Last: ' + d.last : '') : 'On, waiting for a controller to be plugged in') }));
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'miditoggle', text: d.enabled ? 'MIDI is on. Turn off' : 'Turn MIDI on',
+          onclick: function () { act('POST', '/api/midi', { enabled: !d.enabled }, function (data) { say(''); draw(data); }); } }),
+        h('button', { class: 'btn small' + (d.builtin ? ' on' : ''), id: 'midibuiltin', 'aria-pressed': d.builtin ? 'true' : 'false',
+          text: 'Built-in map: ' + (d.builtin ? 'on' : 'off'),
+          onclick: function () { act('POST', '/api/midi', { builtin: !d.builtin }, function (data) { draw(data); }); } })));
+      body.appendChild(h('div', { class: 'k', text: 'Your own mappings win over the built-in map (notes 36 to 71 are pads, CC 20 to 25 are levels; see MIDI.md).' }));
+      body.appendChild(h('div', { class: 'k', text: 'Mappings' }));
+      if (!d.map.length) body.appendChild(h('div', { class: 'k', id: 'midinomap', text: 'None yet. Choose an action below, tap Learn, then move or press a control.' }));
+      d.map.forEach(function (e) {
+        body.appendChild(h('div', { class: 'item midi-entry' }, h('span', { text: describe(e) }),
+          h('button', { class: 'btn small', text: 'Remove', 'aria-label': 'Remove ' + describe(e), onclick: function () {
+            act('POST', '/api/midi/map', { remove: e.id }, function (data) { draw(data); });
+          } })));
+      });
+      if (d.map.length) body.appendChild(h('button', { class: 'btn small', id: 'midiclear', text: 'Remove all mappings', onclick: function () {
+        if (window.confirm('Remove all mappings?')) act('POST', '/api/midi/map', { clear: true }, function (data) { draw(data); });
+      } }));
+      if (!d.enabled) return;
+      var action = h('select', { class: 'text-input', id: 'midiaction', 'aria-label': 'Action to assign' },
+        MIDI_ACTIONS.map(function (a) { return h('option', { value: a[0], text: a[1], selected: a[0] === midiForm.action }); }));
+      var bank = h('select', { class: 'text-input', id: 'midibank', 'aria-label': 'Bank', hidden: midiForm.action !== 'pad' },
+        ['A', 'B', 'C'].map(function (n, i) { return h('option', { value: i, text: 'Bank ' + n, selected: i === midiForm.bank }); }));
+      var index = h('select', { class: 'text-input', id: 'midiindex', 'aria-label': 'Pad', hidden: midiForm.action !== 'pad' },
+        Array.apply(null, Array(12)).map(function (_, i) { return h('option', { value: i, text: 'Pad ' + (i + 1), selected: i === midiForm.index }); }));
+      function remember() { midiForm = { action: action.value, bank: parseInt(bank.value, 10), index: parseInt(index.value, 10) }; bank.hidden = index.hidden = action.value !== 'pad'; }
+      [action, bank, index].forEach(function (el) { el.addEventListener('change', remember); });
+      body.appendChild(h('div', { class: 'k', text: 'Add a mapping' }));
+      body.appendChild(action); body.appendChild(bank); body.appendChild(index);
+      if (d.learn.active) {
+        body.appendChild(h('div', { class: 'msg', id: 'midilearning', role: 'status', text: 'Move or press a control on any controller now (' + d.learn.seconds_left + ' s)...' }));
+        body.appendChild(h('button', { class: 'btn small', id: 'midicancel', text: 'Cancel', onclick: function () {
+          clearTimeout(midiTimer); act('POST', '/api/midi/learn', { start: false }, function (data) { draw(data); });
+        } }));
+        poll();
+      } else {
+        body.appendChild(h('button', { class: 'btn on small', id: 'midilearn', text: 'Learn a control', onclick: function () {
+          remember();
+          act('POST', '/api/midi/learn', { start: true }, function (data) { draw(data); });
+        } }));
+      }
     }
     api('GET', '/api/midi').then(function (r) {
       if (!document.getElementById('midicard')) return;
@@ -902,6 +962,7 @@
   // ---- shell ----------------------------------------------------------
   function render() {
     clearTimeout(netTimer);
+    clearTimeout(midiTimer);
     keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }

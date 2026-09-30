@@ -295,7 +295,7 @@ def build(env=None, player=None):
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
     api.autostart = autostart_mod.Autostart(api, settings)
     api.dmx = dmx_mod.DmxManager(api, settings)
-    api.midi = midi_mod.MidiManager(api, settings)
+    api.midi = midi_mod.MidiHub(api, settings)
     write_pin_file(rundir, auth.current_pin)
     try:
         api.osc.apply()

@@ -83,6 +83,9 @@ function startServer() {
 
     // Turn the beta modules on and give them something to show.
     for (const id of ['scheduler', 'control-dmx', 'control-midi', 'inputs-srt', 'network']) await api('POST', '/api/modules/' + id, { enabled: true });
+    await api('POST', '/api/midi', { enabled: true });
+    for (const m of [{ source: 'nanoKONTROL2', kind: 'cc', number: 0, action: 'opacity' }, { source: 'nanoKONTROL2', kind: 'cc', number: 16, action: 'volume' },
+      { source: 'Mini', kind: 'note', number: 11, action: 'pad', bank: 0, index: 0 }, { source: 'Mini', kind: 'cc', number: 104, action: 'blackout' }]) await api('POST', '/api/midi/map', { add: m });
     await api('POST', '/api/autostart', { mode: 'file', file: 'intro.mkv', loop: true, delay: 5 });
     await api('POST', '/api/schedule', { enabled: true, entries: [
       { label: 'Doors', time: '18:30', days: [4, 5], action: 'play', file: 'intro.mkv', loop: true },

@@ -184,11 +184,22 @@ function startServer() {
     await page.fill('#dmxuni', '2');
     await page.click('#dmxsave');
     await page.waitForFunction(() => document.getElementById('dmxuni').value === '2');
-    // MIDI: switch the module on; turning it on needs a device
+    // MIDI: switch the module on; nothing is plugged in here, so check the card and the learn flow, then turn it off
     await page.click('.item:has-text("MIDI controller") >> button');
     await page.waitForSelector('#midiline:has-text("Off")');
     await page.click('#miditoggle');
-    await page.waitForFunction(() => /choose a MIDI device/i.test(document.getElementById('msg').textContent));
+    await page.waitForFunction(() => /waiting for a controller/.test(document.getElementById('midiline').textContent));
+    await page.waitForSelector('#midinomap');
+    await page.selectOption('#midiaction', 'pad');
+    await page.selectOption('#midibank', '1');
+    await page.click('#midilearn');
+    await page.waitForSelector('#midilearning');
+    await page.click('#midicancel');
+    await page.waitForSelector('#midilearn');
+    await page.click('#midibuiltin');
+    await page.waitForFunction(() => /Built-in map: off/.test(document.getElementById('midibuiltin').textContent));
+    await page.click('#miditoggle');
+    await page.waitForFunction(() => document.getElementById('midiline').textContent === 'Off');
     // Streams: switch the module on, reject a bad address, save one with a login (hidden), remove it
     await page.click('.item:has-text("Streams: SRT") >> button');
     await page.waitForSelector('#streamempty');

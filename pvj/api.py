@@ -853,6 +853,40 @@ class Api:
     def set_midi(self, body, device, client):
         return self._set_control("midi", "control-midi", self.midi, midi_mod.validate, midi_mod.MidiError, body)
 
+    def midi_learn(self, body, device, client):
+        """Start (or cancel) waiting for the next control the owner moves or presses on any controller."""
+        self._need_control("control-midi", self.midi)
+        if not self.settings.data["control"]["midi"]["enabled"]:
+            raise ApiError(409, "turn MIDI on first")
+        start = body.get("start")
+        if not isinstance(start, bool):
+            raise bad("start must be true or false")
+        (self.midi.start_learn if start else self.midi.cancel_learn)()
+        return self.midi.status()
+
+    def midi_map(self, body, device, client):
+        """Add, remove or clear mappings. {"add": {kind, number, channel, source, action, ...}}, {"remove": id}, {"clear": true}."""
+        self._need_control("control-midi", self.midi)
+        with self.settings.lock:
+            current = list(self.settings.data["control"]["midi"]["map"])
+            try:
+                if "add" in body:
+                    current = midi_mod.add_entry(current, body["add"])
+                elif "remove" in body:
+                    if not any(e["id"] == body["remove"] for e in current):
+                        raise ApiError(404, "no such mapping")
+                    current = [e for e in current if e["id"] != body["remove"]]
+                elif body.get("clear") is True:
+                    current = []
+                else:
+                    raise bad("send add, remove or clear")
+            except midi_mod.MidiError as e:
+                raise bad(str(e))
+            self.settings.data["control"]["midi"]["map"] = current
+            self.settings.save()
+        self.midi.cancel_learn()
+        return self.midi.status()
+
     # --- schedule ------------------------------------------------------
     def _need_scheduler(self):
         if self.scheduler is None or not self.registry.enabled("scheduler"):
@@ -993,6 +1027,8 @@ class Api:
             ("POST", "/api/dmx"): ("full", self.set_dmx),
             ("GET", "/api/midi"): ("full", self.get_midi),
             ("POST", "/api/midi"): ("full", self.set_midi),
+            ("POST", "/api/midi/learn"): ("full", self.midi_learn),
+            ("POST", "/api/midi/map"): ("full", self.midi_map),
             ("GET", "/api/streams"): ("view", self.get_streams),
             ("POST", "/api/streams"): ("full", self.set_streams),
             ("GET", "/api/schedule"): ("view", self.get_schedule),
