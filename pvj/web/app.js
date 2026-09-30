@@ -484,7 +484,7 @@
       if (!d.streams.length) body.appendChild(h('div', { class: 'k', id: 'streamempty', text: 'No streams saved yet.' }));
       d.streams.forEach(function (st) {
         body.appendChild(h('div', { class: 'item stream-entry' },
-          h('span', {}, st.name, h('br'), h('span', { class: 'k mono', text: st.url })),
+          h('span', {}, st.name, h('br'), h('span', { class: 'addr', text: st.url })),
           h('span', { class: 'row' },
             h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + st.name, disabled: !can('live'),
               onclick: function () { act('POST', '/api/play', { stream: st.id }, function () { say('Playing ' + st.name); poll(); }); } }),
@@ -671,7 +671,7 @@
         });
       }
       out.secs = h('select', { class: 'text-input', id: 'netsecs', 'aria-label': 'Revert automatically after' },
-        [30, 60, 120, 300].map(function (n) { return h('option', { value: n, text: 'Revert by itself after ' + n + ' s unless confirmed', selected: n === 60 }); }));
+        [30, 60, 120, 300].map(function (n) { return h('option', { value: n, text: 'Revert after ' + n + ' s unless confirmed', selected: n === 60 }); }));
       out.preview = h('pre', { class: 'mono', id: 'netplan', hidden: true });
       out.msg = h('div', { class: 'msg', id: 'netresult', role: 'status' });
       drawModes(); drawFields();

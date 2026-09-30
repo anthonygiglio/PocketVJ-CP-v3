@@ -49,3 +49,12 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Drive the real panel in a browser (CSP violations fail the test)
         run: NODE_PATH=/tmp/pw/node_modules node tests/ui/panel.test.js
+      - name: Take the cropped screenshots (docs/images/ui)
+        continue-on-error: true   # documentation only: never blocks a merge
+        run: SHOTS="$RUNNER_TEMP/ui-shots" NODE_PATH=/tmp/pw/node_modules node tests/ui/screenshots.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: ${{ runner.temp }}/ui-shots/*.png
+          if-no-files-found: warn

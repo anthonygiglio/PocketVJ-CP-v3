@@ -107,10 +107,22 @@ function startServer() {
     await page.fill('#netgw', '192.168.50.1');
     // A redraw of the screen must not wipe what was typed
     await page.click('nav >> text=System');
-    await page.waitForFunction(() => {
-      const a = document.getElementById('netaddr'), g = document.getElementById('netgw');
-      return a && g && a.value === '192.168.50.20' && g.value === '192.168.50.1';
-    }, null, { timeout: 8000 });  // typed values survive the redraw (polls until the card is rebuilt)
+    try {
+      await page.waitForFunction(() => {
+        const a = document.getElementById('netaddr'), g = document.getElementById('netgw');
+        return a && g && a.value === '192.168.50.20' && g.value === '192.168.50.1';
+      }, null, { timeout: 8000 });  // typed values survive the redraw (polls until the card is rebuilt)
+    } catch (e) {
+      // Say what the card looked like, so a failure that only happens on a slow runner can be understood.
+      const seen = await page.evaluate(() => {
+        const card = document.getElementById('netcard');
+        const v = (id) => { const el = document.getElementById(id); return el ? el.value : '(missing)'; };
+        return JSON.stringify({ cards: document.querySelectorAll('#netcard').length, addr: v('netaddr'), prefix: v('netprefix'), gw: v('netgw'),
+          mode: document.querySelector('#netmodes .on') && document.querySelector('#netmodes .on').textContent,
+          text: card ? card.textContent.slice(0, 300) : '(no card)' });
+      }).catch((x) => 'evaluate failed: ' + x.message);
+      throw new Error(e.message.split('\n')[0] + ' | card state: ' + seen);
+    }
     // The card can still be redrawn once more after loading (which clears the preview), so press again until it sticks
     for (let tries = 0; ; tries++) {
       await page.click('#netpreview');

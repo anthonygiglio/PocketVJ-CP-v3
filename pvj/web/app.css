@@ -83,3 +83,9 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 /* Command previews and other long unbroken text must wrap, never widen the page. */
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .list .item > span, .list .item > div { min-width: 0; overflow-wrap: anywhere; }
+/* Buttons in a list row keep their words whole; a long address or name wraps in its own column instead. */
+.list .item .btn { white-space: nowrap; flex: none; }
+.list .item > span:first-child { flex: 1 1 0; }
+/* Stream and other addresses keep their case (the small-caps label style would mangle them). */
+.addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
+
