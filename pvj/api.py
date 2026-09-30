@@ -151,6 +151,8 @@ class Api:
         self.capture = None       # Capture or None (live input from a USB capture device)
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
+        from . import support as support_mod
+        self.support = support_mod.SupportManager(settings, auth, None)      # the helper client is set by server.build
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -237,7 +239,8 @@ class Api:
 
     # --- handlers ------------------------------------------------------
     def hello(self, body, device, client):
-        return {"name": "nxlx.mastercontrol", "paired": bool(device), "board": self.board["kind"]}
+        return {"name": "nxlx.mastercontrol", "paired": bool(device), "board": self.board["kind"],
+                "remote": self.support.is_remote(client)}
 
     def pair(self, body, device, client):
         try:
@@ -258,7 +261,7 @@ class Api:
         return {"player": self._public_player_status(), "mix": dict(self.mix, **self.settings.data["mix"]),
                 "system": {"board": self.board["kind"], "model": self.board["model"],
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
-                "device": device}
+                "device": device, "support": self.support.banner()}
 
     def access_on_screen(self):
         """True while the PIN or join codes are drawn on the display (on request, or the first-run screen)."""
@@ -1113,6 +1116,32 @@ class Api:
             self.settings.save()
         return state
 
+    # --- remote support (see support.py) --------------------------------------------------
+    def _support(self, fn, body, device, client):
+        from . import support as support_mod
+        try:
+            return fn(body, device, client)
+        except support_mod.SupportApiError as e:
+            raise ApiError(e.status, e.message)
+
+    def get_support(self, body, device, client):
+        return self._support(lambda b, d, c: self.support.status(d, c), body, device, client)
+
+    def set_support(self, body, device, client):
+        return self._support(self.support.set_config, body, device, client)
+
+    def start_support(self, body, device, client):
+        return self._support(self.support.start, body, device, client)
+
+    def extend_support(self, body, device, client):
+        return self._support(self.support.extend, body, device, client)
+
+    def stop_support(self, body, device, client):
+        return self._support(self.support.stop, body, device, client)
+
+    def support_login(self, body, device, client):
+        return self._support(lambda b, d, c: self.support.login(b, c), body, device, client)
+
     # --- projection mapping ------------------------------------------------------------
     def get_mapper(self, body, device, client):
         return self.mapper.state()
@@ -1641,6 +1670,12 @@ class Api:
             ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
+            ("GET", "/api/support"): ("view", self.get_support),
+            ("POST", "/api/support/config"): ("full", self.set_support),
+            ("POST", "/api/support/start"): ("full", self.start_support),
+            ("POST", "/api/support/extend"): ("full", self.extend_support),
+            ("POST", "/api/support/stop"): ("live", self.stop_support),
+            ("POST", "/api/support/login"): (None, self.support_login),
             ("GET", "/api/mapper"): ("view", self.get_mapper),
             ("POST", "/api/mapper"): ("full", self.set_mapper),
             ("GET", "/api/projectors"): ("view", self.get_projectors),
@@ -1696,6 +1731,11 @@ class Api:
                     known = any(p == path for (_, p) in self.routes()) or bool(m)
                     raise ApiError(405 if known else 404, "method not allowed" if known else "not found")
                 need, handler = route
+            from . import support as support_mod
+            try:                      # requests through the support tunnel: only support's login, never some things
+                self.support.guard(method, path, device, client)
+            except support_mod.SupportApiError as e:
+                raise ApiError(e.status, e.message)
             if need is not None:
                 if device is None:
                     raise ApiError(401, "pair this device first")

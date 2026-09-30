@@ -95,12 +95,21 @@
   function poll() {
     if (!S.device || document.visibilityState === 'hidden') return;
     api('GET', '/api/status').then(function (r) {
-      if (r.ok) { S.status = r.data; patchLive(); }
+      if (r.ok) {
+        var was = !!(S.status && S.status.support && S.status.support.active);
+        S.status = r.data;
+        var now = !!(r.data.support && r.data.support.active);
+        if (was !== now) return render();          // a session started or ended: show or hide the banner
+        var left = document.getElementById('supportleft');
+        if (left && now) left.textContent = (S.device && S.device.remote ? 'You are connected as remote support' : 'Remote support session is open') + ' · ' + mins(r.data.support.seconds_left) + ' left';
+        patchLive();
+      }
     });
   }
 
   // ---- connect --------------------------------------------------------
   function connect() {
+    if (S.remote) return supportConnect();
     var pins = [0, 1, 2, 3].map(function (i) {
       return h('input', { class: 'pin', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 1, 'aria-label': 'PIN digit ' + (i + 1), pattern: '[0-9]' });
     });
@@ -167,6 +176,112 @@
         h('div', { class: 'grow' }),
         h('div', { class: 'k', text: 'Connection lost? The box keeps playing. Reconnect any time.' })));
   }
+  // ---- remote support --------------------------------------------------
+  // Support arriving through the support tunnel sees only this: the code the studio reads to them.
+  function supportConnect() {
+    var code = h('input', { class: 'text-input mono', id: 'supportcode', autocomplete: 'one-time-code', maxlength: 9, 'aria-label': 'Support code', placeholder: 'ABCD-2345' });
+    code.addEventListener('input', function () { code.value = code.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 9); });
+    var go = h('button', { class: 'btn on big', id: 'supportlogin', text: 'Sign in' });
+    go.addEventListener('click', function () {
+      if (code.value.replace(/-/g, '').length !== 8) return say('Type the 8 character code the studio reads to you.', true);
+      go.disabled = true;
+      api('POST', '/api/support/login', { code: code.value }).then(function (r) {
+        go.disabled = false;
+        if (!r.ok) return say(r.data.error || 'Could not sign in.', true);
+        S.device = r.data.device; start();
+      });
+    });
+    return h('div', { class: 'shell' }, h('div', { class: 'screen' },
+      h('h1', { text: 'Remote support' }),
+      h('p', { text: 'You reached this box through its support tunnel. Ask the studio for the support code shown in their panel (System > Remote support) and type it here. It works only during their session.' }),
+      h('label', { class: 'k', for: 'supportcode', text: 'Support code' }), code, go,
+      h('div', { id: 'msg', class: 'msg', role: 'status' })));
+  }
+  function mins(sec) { return sec >= 120 ? Math.round(sec / 60) + ' min' : Math.max(0, sec) + ' s'; }
+  function supportBanner() {
+    var s = S.status && S.status.support;
+    if (!s || !s.active) return null;
+    var mine = S.device && S.device.remote;
+    return h('div', { class: 'support-banner', id: 'supportbanner', role: 'status' },
+      h('span', { id: 'supportleft', text: (mine ? 'You are connected as remote support' : 'Remote support session is open') + ' · ' + mins(s.seconds_left) + ' left' }),
+      can('live') ? h('button', { class: 'btn small', id: 'supportstopbar', text: mine ? 'End session' : 'Stop',
+        onclick: function () { act('POST', '/api/support/stop', {}, function () { poll(); setTimeout(render, 300); }); } }) : null);
+  }
+  var supportForm = null;   // survives redraws while typing the settings
+  function supportCard() {
+    var body = h('div', { class: 'list', id: 'supportbody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'supportcard' }, h('h2', { text: 'Remote support' }), body);
+    var timer = null;
+    function refresh() { api('GET', '/api/support').then(function (r) { if (document.getElementById('supportcard') && r.ok) draw(r.data); }); }
+    function post(path, b) { return act('POST', path, b, function (data) { say(''); draw(data); poll(); }); }
+    function draw(d) {
+      clearTimeout(timer);
+      body.textContent = '';
+      if (d.active) timer = setTimeout(refresh, 5000);
+      if (!d.config) {        // support itself, or a device without full access
+        body.appendChild(h('div', { class: 'k', text: d.active ? 'A support session is open, ' + mins(d.seconds_left) + ' left.' : 'No support session.' }));
+        return;
+      }
+      var c = d.config;
+      if (d.available === false) body.appendChild(h('div', { class: 'k', id: 'supportwhy', text: 'Not available on this box: ' + (d.why || '') }));
+      if (d.active) {
+        body.appendChild(h('div', { class: 'k', text: 'Read this code to your support contact. They open http://' + d.address + '/ through the support connection and type it.' }));
+        body.appendChild(h('div', { class: 'support-code', id: 'supportcodeshow', text: d.code }));
+        body.appendChild(h('div', { class: 'k', id: 'supportstate', text: (d.connected ? 'Connected to the support server' : 'Waiting for the support server...') +
+          ' · ' + mins(d.seconds_left) + ' left · support signed in ' + d.logins + ' of ' + d.max_logins + ' times · ' +
+          ({ full: 'full access', live: 'play and mix', view: 'watch only' })[d.role] }));
+        var ext = h('select', { class: 'text-input', id: 'supportextend', 'aria-label': 'New time left' }, d.durations.map(function (m) { return h('option', { value: String(m), text: m + ' minutes from now', selected: m === 60 }); }));
+        body.appendChild(h('div', { class: 'row' }, ext,
+          h('button', { class: 'btn small', id: 'supportextendbtn', text: 'Set time', onclick: function () { post('/api/support/extend', { minutes: +ext.value }); } })));
+        body.appendChild(h('button', { class: 'btn on', id: 'supportstop', text: 'Stop the session now', onclick: function () { post('/api/support/stop', {}); } }));
+      } else if (c.allowed && d.configured) {
+        var dur = h('select', { class: 'text-input', id: 'supportminutes', 'aria-label': 'How long' }, d.durations.map(function (m) { return h('option', { value: String(m), text: m < 60 ? m + ' minutes' : (m / 60) + ' hour' + (m > 60 ? 's' : ''), selected: m === 60 }); }));
+        var role = h('select', { class: 'text-input', id: 'supportrole', 'aria-label': 'What support may do' },
+          [['full', 'Full: support can check and change settings'], ['live', 'Play and mix only'], ['view', 'Watch only']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+        body.appendChild(h('div', { class: 'k', text: 'Start a session when support asks for one. The box connects out to the support server; it closes by itself when the time is up, and you can stop it any time.' }));
+        body.appendChild(dur); body.appendChild(role);
+        body.appendChild(h('button', { class: 'btn on', id: 'supportstart', text: 'Start support session', onclick: function (e) {
+          e.target.disabled = true; e.target.textContent = 'Connecting...';
+          post('/api/support/start', { confirm: 'start', minutes: +dur.value, role: role.value }).then(function (r) { if (!r.ok) draw(d); });
+        } }));
+      }
+      if (d.active) return;
+      // Settings (only here, at the studio)
+      var f = supportForm || { endpoint: c.endpoint, server_key: c.server_key, address: c.address, network: c.network };
+      body.appendChild(h('div', { class: 'k', text: c.allowed ? 'Remote support is allowed on this box.' : 'Remote support is off. Nothing can reach this box from outside until you allow it and start a session.' }));
+      body.appendChild(h('button', { class: 'btn small' + (c.allowed ? ' on' : ''), id: 'supportallow', 'aria-pressed': c.allowed ? 'true' : 'false',
+        text: c.allowed ? 'Allowed. Turn off' : 'Allow remote support', onclick: function () { post('/api/support/config', { allowed: !c.allowed }); } }));
+      var fields = [['endpoint', 'Support server (host:port)', 'support.example.com:51820'], ['server_key', 'Support server key', '44 characters'],
+        ['address', 'This box on the support network', '10.77.0.5'], ['network', 'Support network', '10.77.0.0/24']];
+      var inputs = {};
+      fields.forEach(function (x) {
+        inputs[x[0]] = h('input', { class: 'text-input mono', id: 'support-' + x[0], 'aria-label': x[1], placeholder: x[2], value: f[x[0]] || '', autocomplete: 'off' });
+        inputs[x[0]].addEventListener('input', function () { supportForm = supportForm || Object.assign({}, f); supportForm[x[0]] = inputs[x[0]].value; });
+        body.appendChild(h('label', { class: 'k', for: 'support-' + x[0], text: x[1] })); body.appendChild(inputs[x[0]]);
+      });
+      body.appendChild(h('button', { class: 'btn small', id: 'supportsave', text: 'Save support settings', onclick: function () {
+        var b = {}; fields.forEach(function (x) { b[x[0]] = inputs[x[0]].value.trim(); });
+        post('/api/support/config', b).then(function (r) { if (r.ok) supportForm = null; });
+      } }));
+      if (d.public_key) {
+        var key = h('input', { class: 'text-input mono', id: 'supportkey', readonly: true, value: d.public_key, 'aria-label': 'This box\'s key' });
+        body.appendChild(h('div', { class: 'k', text: 'This box\'s key: give it to your support team once, so their server knows this box.' }));
+        body.appendChild(h('div', { class: 'row' }, key, h('button', { class: 'btn small', text: 'Copy', onclick: function () {
+          key.select(); (navigator.clipboard ? navigator.clipboard.writeText(d.public_key) : Promise.reject()).then(function () { say('Key copied.'); }, function () { say('Select the key and copy it.'); });
+        } })));
+      }
+      if (d.log && d.log.length) {
+        body.appendChild(h('div', { class: 'k', text: 'Recent sessions' }));
+        d.log.slice(0, 5).forEach(function (e) {
+          body.appendChild(h('div', { class: 'item' }, h('span', { text: new Date(e.started * 1000).toLocaleString() + ' · ' + e.by + ' · ' + e.minutes + ' min · ' + e.role +
+            (e.ended ? ' · ' + (e.reason || 'ended') + ' · ' + (e.logins || 0) + ' sign-ins' : '') })));
+        });
+      }
+    }
+    refresh();
+    return card;
+  }
+
   // ---- live -----------------------------------------------------------
   function padButton(bank, index, pad) {
     var playing = S.status && S.status.player && S.status.player.path && pad.file && base(S.status.player.path) === pad.file;
@@ -810,6 +925,7 @@
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals, boxCard()];
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full));
+    if (full || (S.device && S.device.remote)) cards.push(supportCard());
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -1594,7 +1710,7 @@
       return h('button', { class: 'btn' + (S.tab === t[0] ? ' on' : ''), text: t[1], 'aria-current': S.tab === t[0] ? 'page' : false,
         onclick: function () { S.tab = t[0]; S.msg = ''; loadAll().then(render); } });
     }));
-    app.appendChild(h('div', { class: 'shell' }, screens[S.tab](), tabs));
+    app.appendChild(h('div', { class: 'shell' }, supportBanner(), screens[S.tab](), tabs));
     if (S.sheet) app.appendChild(sheet());
     patchLive();
   }
@@ -1610,7 +1726,7 @@
     var first = m ? api('POST', '/api/session', { token: m[1] }).then(function () { history.replaceState(null, '', location.pathname); }) : Promise.resolve();
     first.then(function () { return api('GET', '/api/status'); }).then(function (r) {
       if (r.ok) { S.device = r.data.device; S.status = r.data; return loadAll().then(render); }
-      render();
+      return api('GET', '/api/hello').then(function (h2) { S.remote = !!(h2.ok && h2.data.remote); render(); });
     });
     setInterval(poll, 1000);
   }

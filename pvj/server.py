@@ -180,7 +180,7 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
         def _preview(self):
             """GET /api/preview.jpg: what the screen is showing (any paired device, even view-only)."""
             try:
-                device = auth.authenticate(self._token())
+                device = self._who("GET", "/api/preview.jpg")
                 api.require(device, "view")
                 self._send(200, api.preview_jpeg(device), "image/jpeg")
             except ApiError as e:
@@ -189,7 +189,7 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
         def _qr(self):
             """GET /api/qr.svg?for=panel|view|live (full access): a QR code to print or show."""
             try:
-                api.require(auth.authenticate(self._token()), "full")
+                api.require(self._who("GET", "/api/qr.svg"), "full")
                 target = (parse_qs(urlsplit(self.path).query).get("for") or [""])[0]
                 self._send(200, api.access_qr(target, self.headers.get("Host", "")), "image/svg+xml")
             except ApiError as e:
@@ -226,7 +226,7 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
             parts = urlsplit(self.path)
             query = parse_qs(parts.query)
             try:
-                device = auth.authenticate(self._token())
+                device = self._who("POST", "/api/media/upload")
                 api.require(device, "full")
                 if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/octet-stream":
                     raise ApiError(415, "send application/octet-stream")
@@ -243,7 +243,7 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
                 token = self._token()
 
                 def still_paired():
-                    if auth.authenticate(token) is None:  # revoked while the upload runs: stop at once
+                    if (auth.authenticate(token) or api.support.authenticate(token)) is None:  # revoked or ended: stop at once
                         raise ApiError(403, "this device was removed")
                 self._reaper.cancel()
                 self.connection.settimeout(30)
@@ -280,8 +280,21 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
 
         do_PUT = do_DELETE = do_PATCH = _method_not_allowed
 
+        def _who(self, method, path):
+            """The device behind this request (a paired device, or support during a session), after the support tunnel's
+            rules: through the tunnel only support's login works, and some things are never allowed there."""
+            from . import support as support_mod
+            token = self._token()
+            device = auth.authenticate(token) or api.support.authenticate(token)
+            try:
+                api.support.guard(method, path, device, self.client_address[0])
+            except support_mod.SupportApiError as e:
+                raise ApiError(e.status, e.message)
+            return device
+
         def _api(self, method, path, body):
-            device = auth.authenticate(self._token())
+            token = self._token()
+            device = auth.authenticate(token) or api.support.authenticate(token)
             try:
                 status, payload = api.handle(method, path, body, device, self.client_address[0])
             except Exception:
@@ -292,6 +305,10 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
             if status == 200 and path in ("/api/pair", "/api/session") and payload.get("token"):
                 extra.append(("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
                               % (COOKIE, payload["token"])))
+            if status == 200 and path == "/api/support/login" and payload.get("token"):
+                # support's login lasts only as long as the session
+                extra.append(("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d"
+                              % (COOKIE, payload["token"], max(60, int(payload.get("seconds_left") or 60)))))
             if payload.get("retry_after"):
                 extra.append(("Retry-After", str(payload["retry_after"])))
             self._json(status, payload, extra)
@@ -353,6 +370,8 @@ def build(env=None, player=None):
     from . import capture as capture_mod
     api.capture = capture_mod.Capture(rundir, getattr(player, "mpv_bin", "mpv"))
     api.sysd = sysd_mod.SysdClient(os.path.join(os.environ.get("PVJ_SYSD_DIR", "/run/pvj-sysd"), "sysd.sock"))
+    from . import supportd as supportd_mod
+    api.support.client = supportd_mod.SupportdClient(os.path.join(os.environ.get("PVJ_SUPPORTD_DIR", "/run/pvj-supportd"), "supportd.sock"))
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
