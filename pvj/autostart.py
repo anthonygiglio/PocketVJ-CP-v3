@@ -138,6 +138,12 @@ class Autostart:
                 apply_overlay()
             except Exception as e:
                 self.log("pvj-web: could not put the overlay back: %s" % e)
+        apply_mapper = getattr(self.api, "apply_mapper", None)
+        if apply_mapper and self.settings.data.get("mapper", {}).get("surfaces"):   # it lost the mapping too
+            try:
+                apply_mapper()
+            except Exception as e:
+                self.log("pvj-web: could not put the mapping back: %s" % e)
         cfg = self.settings.data["autostart"]
         if cfg["mode"] == "off":
             return False

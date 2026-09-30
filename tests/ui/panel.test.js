@@ -120,7 +120,7 @@ function startServer() {
 
     // System: modules, appearance, guest link
     await page.click('nav >> text=System');
-    await page.waitForSelector('text=Modules');
+    await page.waitForSelector('h1:has-text("System")');
     assert(await page.isVisible('text=NDI'), 'NDI module listed');
     assert(await page.isVisible('text=Not built yet'), 'planned modules are labelled');
     // Network: switch the module on, preview, apply, watch the countdown, confirm
@@ -264,6 +264,39 @@ function startServer() {
     if ((await page.content()).includes('secret1')) problems.push('the projector password came back to the page');
     await page.click('.proj-entry >> button:has-text("Remove")');
     await page.waitForFunction(() => !document.querySelector('.proj-entry'));
+    // Projection mapping: switch the module on, add a quad on Mix, drag and nudge a corner, save, switch it on
+    await page.click('.item:has-text("Projection mapper") >> button');
+    await page.waitForFunction(() => /Projection mapper/.test(document.body.textContent));
+    await page.click('nav >> text=Mix');
+    await page.waitForSelector('#mapadd-quad');
+    await page.click('#mapadd-quad');
+    await page.waitForSelector('.map-entry:has-text("Quad")');
+    await page.waitForSelector('#mapsel:has-text("corner 1 of 4")');
+    const box = await page.locator('#mapcanvas').boundingBox();
+    assert(box && box.width > 200 && box.height > 100, 'the mapping canvas is drawn');
+    const before = await page.evaluate(() => fetch('/api/mapper').then((r) => r.json()).then((d) => d.surfaces[0].vertices[0]));
+    // the new quad's first corner is at a quarter of the screen: drag it towards the top left
+    await page.mouse.move(box.x + box.width / 4, box.y + box.height / 4);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 8, box.y + box.height / 8, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction((b) => fetch('/api/mapper').then((r) => r.json()).then((d) => d.surfaces[0].vertices[0][0] < b[0] - 100), before);
+    await page.selectOption('#mapstep', '50');
+    const x0 = await page.evaluate(() => fetch('/api/mapper').then((r) => r.json()).then((d) => d.surfaces[0].vertices[0][0]));
+    await page.click('#mapright');
+    await page.waitForFunction((x) => fetch('/api/mapper').then((r) => r.json()).then((d) => Math.abs(d.surfaces[0].vertices[0][0] - (x + 50)) < 0.01), x0);
+    await page.fill('#mapsetname', 'Main stage');
+    await page.click('#mapsave');
+    await page.waitForSelector('#mapsets >> option:has-text("Main stage")', { state: 'attached' });
+    await page.click('#mapon');
+    await page.waitForSelector('#mapstatus:has-text("Mapping is on")', { timeout: 20000 });
+    if (shots) await page.screenshot({ path: path.join(shots, '7-mapper.png'), fullPage: true });
+    await page.click('#mapon');
+    await page.waitForSelector('#mapstatus:has-text("Mapping is off")');
+    await page.click('.map-entry >> button:has-text("Remove")');
+    await page.waitForFunction(() => !document.querySelector('.map-entry'));
+    await page.click('nav >> text=System');
+    await page.waitForSelector('h1:has-text("System")');
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');

@@ -128,6 +128,13 @@ class SettingsTest(unittest.TestCase):
         data = Settings(self.path).load()
         self.assertEqual((data["schema"], data["projectors"]), (settings.SCHEMA, []))
 
+    def test_real_migration_from_schema_10_adds_an_empty_mapping(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 10, "projectors": []}, f)
+        data = Settings(self.path).load()
+        self.assertEqual(data["schema"], settings.SCHEMA)
+        self.assertEqual(data["mapper"], {"on": False, "screen": None, "surfaces": [], "sets": {}})
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)

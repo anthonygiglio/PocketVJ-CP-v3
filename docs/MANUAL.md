@@ -92,6 +92,7 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | --- | --- |
 | **Autostart**: what plays at power-up and after a crash | [pvj/AUTOSTART.md](../pvj/AUTOSTART.md) |
 | **Weekly schedule**: play, start scripts, stop, blackout, show and projector power at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
+| **Projection mapper**: quads, triangles and grids, lined up from the phone (card on Mix) | [pvj/MAPPER.md](../pvj/MAPPER.md) |
 | **Projector control**: on, off and picture mute over PJLink | [pvj/PROJECTORS.md](../pvj/PROJECTORS.md) |
 | **Streams**: SRT, RTSP, RTMP | [pvj/STREAMS.md](../pvj/STREAMS.md) |
 | **DMX over the network**: Art-Net and sACN | [pvj/DMX.md](../pvj/DMX.md) |
@@ -122,8 +123,9 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 | Nothing shows on the projector | `pvj-selftest --play` on the box; check `journalctl -u pvj-player` |
 | DMX or MIDI does nothing | The module must be on **and** the card turned on; read the card's status line and `journalctl -u pvj-web` |
 | A projector does not answer | PJLink must be switched on in the projector's network menu; check its address and password; a projector that is warming up or cooling down answers "busy" |
+| The mapped picture stutters | Map at 1920x1080 or less on a Pi 4, and leave Edit on the display when you are done (editing costs more) |
 | Schedule fires at the wrong time | Check the box clock shown on the Schedule card and the time zone |
 
 ## 8. Not built yet
 
-Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, ST 2110, the mapper, the presenter, the video wall and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, ST 2110, the presenter, the video wall, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).

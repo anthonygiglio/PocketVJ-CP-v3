@@ -3,7 +3,7 @@
   "name": "Projection mapper",
   "version": "0.1.0",
   "type": "optional",
-  "channel": "stable",
+  "channel": "beta",
   "requires": [
     "core"
   ],
@@ -12,7 +12,7 @@
     "pi5",
     "x86"
   ],
-  "status": "planned",
+  "status": "ready",
   "default_enabled": false,
-  "description": "Warp and blend video onto surfaces. Approach chosen after the Phase 6 spike."
+  "description": "Warp the picture onto surfaces: quads with perspective, triangles and grids (a coarse mesh for curved screens), up to 16 surfaces, drawn by the player's GPU. Edit from the panel with outlines on the display; save up to 8 mappings. Masks are the PNG overlay."
 }

@@ -149,6 +149,8 @@ class Api:
         self.pinscreen = None     # PinScreen or None
         self.sysd = None          # SysdClient or None (reboot, power off, set the clock)
         self.capture = None       # Capture or None (live input from a USB capture device)
+        from . import mapper as mapper_mod
+        self.mapper = mapper_mod.Engine(self)
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -947,6 +949,8 @@ class Api:
             self.registry.set_enabled(module_id, body.get("enabled"))
         except ModuleError as e:
             raise ApiError(409, str(e))
+        if module_id == "mapper":          # switching it off takes the mapping off the screen
+            self.mapper.apply()
         for mid, manager in (("control-dmx", self.dmx), ("control-midi", self.midi)):
             if module_id == mid and manager is not None:   # switching the module off stops the receiver
                 try:
@@ -1108,6 +1112,23 @@ class Api:
         with self.settings.lock:
             self.settings.save()
         return state
+
+    # --- projection mapping ------------------------------------------------------------
+    def get_mapper(self, body, device, client):
+        return self.mapper.state()
+
+    def set_mapper(self, body, device, client):
+        from . import mapper as mapper_mod
+        if not self.registry.enabled("mapper"):
+            raise ApiError(409, "turn on the Projection mapper module in System first")
+        try:
+            return self.mapper.handle(body)
+        except mapper_mod.MapperError as e:
+            raise bad(str(e))
+
+    def apply_mapper(self):
+        """Put the mapping back on a player that restarted (it lost its shaders)."""
+        self.mapper.apply()
 
     # --- projectors (PJLink) -------------------------------------------------------
     def _pjlink(self, entry):
@@ -1620,6 +1641,8 @@ class Api:
             ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
+            ("GET", "/api/mapper"): ("view", self.get_mapper),
+            ("POST", "/api/mapper"): ("full", self.set_mapper),
             ("GET", "/api/projectors"): ("view", self.get_projectors),
             ("POST", "/api/projectors"): ("full", self.set_projectors),
             ("POST", "/api/projector"): ("live", self.projector_action),

@@ -4,6 +4,21 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (projection mapper)
+
+Done:
+- Projection mapping, a beta module off by default (`pvj/mapper.py`, the Mapping card on Mix, `/api/mapper`, settings schema 11), replacing the old ofxPiMapper tab: quads with perspective, triangles and grids (bilinear, up to 8x8), up to 16 surfaces; drag or nudge corners from the phone, screen and picture corners, layer order, hide, rename, 8 saved mappings that follow a change of screen size. Outlines on the display while editing. See D28 and `pvj/MAPPER.md`.
+- While a mapping is shown, the player uses 8-bit GPU buffers and stretches the picture to the screen; both go back to normal when it is off.
+- Naming: multi-box sync will use server and client (the owner's choice).
+
+Verified on the Pi 4 (screenshots of the player's output and mpv's error log; nobody watched the monitor): edit and show views of a quad, a 2x2 grid over a quad and a 64-cell grid; edges and overlaps smooth; picture corners; saved mapping; no stale shader files. Dropped frames: 0 at 1920x1080 with any mapping, about 3 a second at 2560x1440. The table takes 1.3 s (1080p, 64 cells) to 1.8 s (1440p) to build.
+
+Found and fixed on the way (see LESSONS): mpv silently refused a half-float table, which made the first benchmark meaningless; per-cell perspective broke grids at inner lines; an osd-overlay did not show in screenshots.
+
+Independent review: one high (a build thread per change: 25 at once in a drag), two medium (an older switch could delete a newer shader file; letterboxed clips moved every surface, confirmed on the Pi with a 720x576 test pattern), and small ones. All fixed with tests: one coalescing build worker that stops early when overtaken, cleanup that never touches newer files, the picture stretched while mapping, statuses that an older change cannot overwrite, folded grids refused, non-finite numbers refused, saved mappings that stay editable on a much larger screen, drag positions sent one at a time. The browser test failed first because its wait for the word "Modules" now also matched the Mix card; it waits for the System heading now.
+
+Not verified: a projector, the owner at the screen, Pi 5 and x86.
+
 ## 2026-09-30 (projectors and a broader schedule)
 
 Done:
