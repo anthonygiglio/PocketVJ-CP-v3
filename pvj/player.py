@@ -18,6 +18,8 @@ import time
 
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".ts", ".wmv")
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
+AUDIO_EXTENSIONS = (".mp3", ".wav", ".flac", ".ogg", ".oga", ".m4a", ".aac", ".opus")
+ENDINGS = ("loop", "stop", "next", "hold")      # what happens when a clip (or the list) ends
 
 
 class PlayerError(Exception):
@@ -204,7 +206,15 @@ class Player:
         proc.terminate()
         raise PlayerError("mpv did not become ready")
 
-    def play(self, paths, loop=True, audio_device=None, windowed=False, spawn=True):
+    def play(self, paths, loop=True, audio_device=None, windowed=False, spawn=True, ending=None, image_seconds=None):
+        """Play `paths` (a list plays as a playlist). `ending` says what happens at the end: "loop" (the clip, or the
+        whole list), "stop" (black, player idle), "next" (a list goes on and stops after the last clip) or "hold"
+        (the last frame stays on screen). Without `ending`, `loop` picks "loop" or "stop" as before.
+        `image_seconds` is how long each image stays up in a list of images (a slideshow); a single image stays until
+        something else is played."""
+        ending = ending or ("loop" if loop else "stop")
+        if ending not in ENDINGS:
+            raise PlayerError("ending must be one of " + ", ".join(ENDINGS))
         files = expand_media(paths)
         if not files:
             raise PlayerError("no playable files found")
@@ -214,6 +224,11 @@ class Player:
             self._spawn(audio_device, windowed)
         elif audio_device:
             self.ipc.request("set_property", "audio-device", audio_device)
+        single = len(files) == 1
+        # Set before loading: a new file picks these up as it starts.
+        self.ipc.request("set_property", "keep-open", "yes" if ending == "hold" else "no")
+        self.ipc.request("set_property", "image-display-duration",
+                         "inf" if single or image_seconds is None else max(0.1, min(3600.0, float(image_seconds))))
         first = True
         for f in files:
             # "--" style option injection is impossible here: the path is a
@@ -222,9 +237,13 @@ class Player:
             first = False
         self._wait_for_path(files[0])
         self.ipc.request("set_property", "pause", False)
-        single = len(files) == 1
-        self.ipc.request("set_property", "loop-file", "inf" if (loop and single) else "no")
-        self.ipc.request("set_property", "loop-playlist", "inf" if (loop and not single) else "no")
+        looping = ending == "loop"
+        self.ipc.request("set_property", "loop-file", "inf" if (looping and single) else "no")
+        self.ipc.request("set_property", "loop-playlist", "inf" if (looping and not single) else "no")
+
+    def shuffle(self):
+        """Put the current playlist in a random order (the old panel's random player)."""
+        self.ipc.request("playlist-shuffle")
 
     def _wait_for_path(self, path, timeout=3.0):
         """loadfile returns before mpv switches; wait so status() is truthful."""

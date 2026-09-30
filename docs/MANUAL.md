@@ -60,7 +60,13 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Now playing** (Live) has the controls of a normal player: a **position slider** (drag and release to jump), **Prev** and **Next** (when several clips are playing as a list, for example Play all), **- 10 s** and **+ 10 s**, **Fade in** (from a blackout or a fade out, over 2 s) and **Test pattern** (SMPTE colour bars from the player itself, for lining up a projector; tap again to stop).
 
-**Quick play** (Media) plays the whole folder, looping or once, or the clips whose names start with a number (`01_intro.mp4` is clip 01), like the old Video tab.
+**Quick play** (Media) plays the whole folder, looping or once, or in a random order (**Shuffle all**), or the clips whose names start with a number (`01_intro.mp4` is clip 01), like the old Video tab. Play all leaves audio files out.
+
+**When a clip ends.** Each pad has its own ending (Edit pads, then the pad): **Loop**, **Play once, then black**, or **Play once, hold the last frame** (for a sting that should stay on screen).
+
+**Slideshow** (Media, like the old Presenter tab): the pictures of the media folder or of a USB drive, each for 0.1 second to a minute, then start again, keep the last picture, or go black; optionally in a random order. Prev and Next on Live step through them.
+
+**Audio files** (mp3, wav, flac, ogg, m4a, aac, opus) can be uploaded and played like clips; the screen stays black while they play.
 
 **Mix** has opacity, volume, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 

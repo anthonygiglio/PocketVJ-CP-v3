@@ -22,6 +22,7 @@ class FakePlayer:
     def __init__(self, rundir):
         self.rundir = rundir
         self.calls = []
+        self.plays = []
         self.running = False
 
     TEST_PATTERN = "av://lavfi:smptehdbars=size=1920x1080:rate=25"
@@ -29,12 +30,13 @@ class FakePlayer:
     def status(self):
         return {"running": self.running, "path": None}
 
-    def play(self, paths, loop=True, audio_device=None, windowed=False, spawn=True):
+    def play(self, paths, loop=True, audio_device=None, windowed=False, spawn=True, ending=None, image_seconds=None):
         self.calls.append(("play", paths, loop, spawn))
+        self.plays.append({"paths": paths, "loop": loop, "ending": ending or ("loop" if loop else "stop"), "image_seconds": image_seconds})
         self.running = True
 
     def __getattr__(self, name):
-        if name in ("pause", "seek", "seek_to", "playlist_step", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
+        if name in ("pause", "seek", "seek_to", "playlist_step", "shuffle", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
             def call(*args):
                 self.calls.append((name,) + args)
                 return True if name in ("pause", "playlist_step") else None

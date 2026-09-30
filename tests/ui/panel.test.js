@@ -80,6 +80,14 @@ function startServer() {
     await page.click('#stop');
     await page.waitForFunction(() => /Player idle/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
 
+    // Pad endings: the pad editor offers loop, once, and hold
+    await page.click('text=Edit pads');
+    await page.click('.pad >> nth=1');
+    await page.waitForSelector('#padending');
+    assert.deepStrictEqual(await page.$$eval('#padending option', (os) => os.map((o) => o.value)), ['loop', 'stop', 'hold']);
+    await page.selectOption('#padending', 'hold');
+    await page.click('.sheet >> text=tunnel.mkv');
+    await page.click('text=Done editing');
     // Media: upload a file, see it listed, rename it, delete it
     await page.click('nav >> text=Media');
     await page.waitForSelector('#uploadbtn');
