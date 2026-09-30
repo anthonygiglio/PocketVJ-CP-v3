@@ -85,6 +85,44 @@ class JoinCodeTest(unittest.TestCase):
         self.assertEqual(self.a.list_joins(), [])
 
 
+class ReviewFindingsTest(unittest.TestCase):
+    def setUp(self):
+        self.settings = Settings(os.path.join(tempfile.mkdtemp(), "s.json"))
+        self.settings.load()
+        self.a = Auth(self.settings, rotate_on_start=True)
+
+    def test_non_ascii_digits_are_a_counted_failure_not_a_crash(self):
+        self.a.create_join("view")
+        with self.assertRaises(AuthError):
+            self.a.pair("\u0661\u0662\u0663\u0664\u0665\u0666", "x", "c")        # Arabic-Indic digits
+        self.assertEqual(len(self.a._fails.get("c", [])), 1)
+
+    def test_a_real_code_does_not_reset_the_pin_guess_counter(self):
+        code = self.a.create_join("view", uses=10)
+        for _ in range(auth_mod.PER_CLIENT_FAILS - 1):
+            with self.assertRaises(AuthError):
+                self.a.pair("0000" if self.a.current_pin != "0000" else "1111", "x", "c")
+        self.a.pair(code, "guest", "c")
+        with self.assertRaises(AuthError):
+            self.a.pair("0000" if self.a.current_pin != "0000" else "1111", "x", "c")
+        with self.assertRaises(AuthError) as cm:
+            self.a.pair(self.a.current_pin, "x", "c")                                  # now locked out
+        self.assertTrue(cm.exception.retry_after)
+
+    def test_unblock_lifts_a_lockout_without_changing_the_pin(self):
+        pin = self.a.current_pin
+        for i in range(auth_mod.GLOBAL_FAILS):
+            try:
+                self.a.pair("0000" if pin != "0000" else "1111", "x", "c%d" % i)
+            except AuthError:
+                pass
+        with self.assertRaises(AuthError):
+            self.a.pair(pin, "x", "someone-else")
+        self.a.clear_lockout()
+        self.assertEqual(self.a.pair(pin, "x", "someone-else")[1]["role"], "full")
+        self.assertEqual(self.a.current_pin, pin)
+
+
 class ManualDisplayTest(unittest.TestCase):
     def setUp(self):
         self.settings = Settings(os.path.join(tempfile.mkdtemp(), "s.json"))
@@ -131,6 +169,42 @@ class ManualDisplayTest(unittest.TestCase):
         self.p.hide()
         self.assertFalse(self.p.status()["showing"])
         self.assertEqual(self.api.player.shown[-1][:2], ("show-text", ""))
+
+    def test_a_hide_in_the_middle_of_a_tick_can_never_leave_the_pin_qr_on_screen(self):
+        self.auth._add_device("owner", "full")
+        drawn = []
+        self.api.player.osd_size = lambda: (1920, 1080)
+        self.api.player.overlay = lambda oid, *a: drawn.append(oid)
+        self.api.player.overlay_remove = lambda oid: None
+        self.p.show(["view", "pin"], 60)
+        real = self.p.manual_lines
+
+        def slow(m):
+            self.p.manual = None                      # a Hide lands while the text is being built
+            return real(m)
+        self.p.manual_lines = slow
+        self.p.tick()
+        self.assertNotIn(pinscreen.QR_IDS["pin"], drawn)
+        self.assertEqual(self.p._qr_targets(None, {}), [])                    # with a device paired, never a PIN QR
+
+    def test_on_request_the_full_pin_is_text_only(self):
+        targets = self.p._qr_targets({"items": ["pin", "view"], "until": 1e9}, {"view": "123456"})
+        self.assertEqual([t[0] for t in targets], [pinscreen.QR_IDS["view"]])
+
+    def test_the_qr_bitmap_size_is_bounded_whatever_the_player_reports(self):
+        sizes = []
+        self.api.player.osd_size = lambda: (10 ** 6, 10 ** 6)
+        self.api.player.overlay = lambda oid, x, y, w, h, px: sizes.append(w)
+        self.api.player.overlay_remove = lambda oid: None
+        self.p.show(["view"], 30)
+        self.assertTrue(sizes and max(sizes) <= (41 + 8) * pinscreen.QR_MAX_SCALE)
+
+    def test_start_and_stop_take_leftover_codes_off_the_screen(self):
+        removed = []
+        self.api.player.overlay_remove = lambda oid: removed.append(oid)
+        self.p.start()
+        self.p.stop()
+        self.assertEqual(sorted(set(removed)), sorted(pinscreen.QR_IDS.values()))
 
     def test_bad_requests(self):
         for items in ([], None, "pin", ["full"], ["pin", "pin"], ["pin", "view", "live", "pin"], [1]):
@@ -193,6 +267,27 @@ class AccessApiTest(ServerBase):
         self.assertEqual(self.call("GET", "/api/access")[0], 401)
 
 
+class HostCheckTest(ServerBase):
+    def test_only_ip_addresses_and_our_own_names_are_answered(self):
+        from pvj import server
+        names = {"localhost", "box", "box.local", "studio.example"}
+        for good in ("192.168.0.169", "192.168.0.169:80", "[fe80::1]", "[::1]:8080", "localhost:8080", "box.local", "BOX.LOCAL", "studio.example", "box."):
+            self.assertTrue(server.host_allowed(good, names), good)
+        for bad in ("evil.example", "evil.example:80", "box.local.evil.example", "", "[::1", "[::1]x", "192.168.0.1:abc", "a" * 300):
+            self.assertFalse(server.host_allowed(bad, names), bad)
+        self.assertTrue(server.host_allowed(None, names))                           # no header at all: not a browser
+
+    def test_a_rebinding_page_is_refused_before_it_reaches_the_api(self):
+        st, body, _ = self.call("POST", "/api/pair", {"pin": "0000", "name": "x"}, headers={"Host": "attacker.example", "Origin": "http://attacker.example"})
+        self.assertEqual(st, 421)
+        self.assertEqual(self.auth._fails, {})                                      # it did not even count as a guess
+        self.assertEqual(self.call("GET", "/api/hello", headers={"Host": "attacker.example"})[0], 421)
+
+    def test_extra_names_from_the_environment(self):
+        from pvj import server
+        self.assertIn("screen.studio", server.allowed_names({"PVJ_ALLOWED_HOSTS": " Screen.Studio , ,other"}))
+
+
 class QrEndpointTest(ServerBase):
     def setUp(self):
         super().setUp()
@@ -213,7 +308,7 @@ class QrEndpointTest(ServerBase):
 
     def test_a_bad_host_header_cannot_be_put_into_a_qr_code(self):
         st, _, _ = self.call("GET", "/api/qr.svg?for=panel", token=self.full, headers={"Host": "evil.example/<script>"})
-        self.assertEqual(st, 400)
+        self.assertEqual(st, 421)                                          # refused before it reaches the QR code
 
     @unittest.skipUnless(__import__("shutil").which("zbarimg"), "needs zbar")
     def test_the_code_qr_decodes_to_the_join_link(self):

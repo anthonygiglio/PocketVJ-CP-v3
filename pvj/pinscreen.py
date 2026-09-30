@@ -7,11 +7,15 @@ while (System > Access), for people who need to join.
 The panel and the manual say the PIN is on the projector; until this existed it was only in a file in RAM, so a
 box with no keyboard could not be paired. It is drawn by mpv on its own idle screen (its on-screen text), and:
 
-* only while NO device is paired, so it stays off once the box is set up. If every device is later removed it comes
-  back, which is the way back in for a box with no keyboard (a paired full-access device can make a new PIN, or
-  guest links, in System);
-* only while nothing is playing, so it can never draw over a show;
+* the automatic first-run screen (PIN plus a QR code with it): only while NO device is paired and nothing is playing,
+  so it never draws over a show. If every device is later removed it comes back, which is the way back in for a box
+  with no keyboard;
+* on request (System > Access): the chosen items, for a chosen time, even over a playing clip; the full PIN is then
+  shown as text only, never as a QR code;
 * only characters from a short safe set, because mpv would expand `${...}` in the text.
+
+One lock serialises show, hide and each tick, and a tick reads the state once, so a Hide can never be followed by a
+stale draw. Snapshots for devices without full access leave the on-screen text out while any of this is shown.
 """
 
 import re
@@ -39,7 +43,8 @@ def lines(pin, hostname, addresses):
 
 
 QR_IDS = {"view": 1, "live": 2, "pin": 3}       # overlay ids on the player
-QR_REFRESH = 15.0                                # a player that restarted has lost its overlays: draw them again after this long
+QR_REFRESH = 15.0
+QR_MAX_SCALE = 16                                # pixels per module; bounds the bitmap whatever size the player reports                                # a player that restarted has lost its overlays: draw them again after this long
 MANUAL_ITEMS = ("pin", "view", "live")
 MANUAL_MIN_SECONDS, MANUAL_MAX_SECONDS, MANUAL_DEFAULT_SECONDS = 10, 3600, 60
 LABELS = {"pin": "Full access PIN", "view": "Guest, watch only, code", "live": "Presenter, play and mix, code"}
@@ -51,6 +56,7 @@ class PinScreen:
         self.api, self.auth, self.log = api, auth, log
         self._clock = clock or time.monotonic
         self.manual = None       # {"until": t, "items": [...]} while shown on request
+        self._lock = threading.RLock()
         self._qr_sig = None      # what the QR overlays currently show (so they are only redrawn when it changes)
         self._qr_at = 0.0
         self.interval = interval
@@ -81,30 +87,32 @@ class PinScreen:
             raise ValueError("choose what to show: pin, view and/or live")
         if isinstance(seconds, bool) or not isinstance(seconds, int) or not MANUAL_MIN_SECONDS <= seconds <= MANUAL_MAX_SECONDS:
             raise ValueError("seconds must be %d to %d" % (MANUAL_MIN_SECONDS, MANUAL_MAX_SECONDS))
-        have = {j["role"] for j in self.auth.list_joins()}
-        for role in items:
-            if role in ("view", "live") and role not in have:
-                self.auth.create_join(role, minutes=min(120, max(15, -(-seconds // 60))))
-        self.manual = {"until": self._clock() + seconds, "items": list(items)}
-        self.tick()
-        return self.status()
+        with self._lock:
+            have = {j["role"] for j in self.auth.list_joins()}
+            for role in items:
+                if role in ("view", "live") and role not in have:
+                    self.auth.create_join(role, minutes=min(120, max(15, -(-seconds // 60))))
+            self.manual = {"until": self._clock() + seconds, "items": list(items)}
+            self.tick()
+            return self.status()
 
     def hide(self):
-        was = self.manual is not None
-        self.manual = None
-        if was:
+        with self._lock:
+            self.manual = None
             self.clear()
-        return self.status()
+            return self.status()
+
+    def _current(self):
+        """The request being shown, or None (an expired one counts as None). Reads only; tick() does the clearing."""
+        m = self.manual
+        return m if m and self._clock() < m["until"] else None
 
     def status(self):
-        m = self.manual
-        if m and self._clock() >= m["until"]:
-            self.manual = m = None
+        m = self._current()
         return {"showing": bool(m), "items": list(m["items"]) if m else [],
                 "seconds_left": max(0, int(m["until"] - self._clock())) if m else 0}
 
-    def manual_lines(self):
-        m = self.manual
+    def manual_lines(self, m):
         joins = {j["role"]: j["code"] for j in self.auth.list_joins()}
         addr = ["http://%s.local/" % clean(self.hostname)] if self.hostname else []
         addr += ["http://%s/" % clean(a) for a in self.addresses()[:1]]
@@ -120,10 +128,8 @@ class PinScreen:
         out.append("Hides in %d s" % max(0, int(m["until"] - self._clock())))
         return out
 
-    def wanted(self):
-        """True when the PIN should be on the screen right now."""
-        if self.status()["showing"]:
-            return True
+    def auto_wanted(self):
+        """True when the first-run screen (PIN and its QR code) should be up: no device paired, player idle."""
         if self.auth.list_devices():
             return False
         try:
@@ -132,6 +138,10 @@ class PinScreen:
             return False
         return bool(status.get("running")) and not status.get("path")
 
+    def wanted(self):
+        """True when anything should be on the screen right now."""
+        return bool(self._current()) or self.auto_wanted()
+
     def base_url(self):
         """Where a phone should go: the first real IPv4 address (works on every phone), else the .local name."""
         ips = self.addresses()
@@ -139,15 +149,17 @@ class PinScreen:
             return "http://%s/" % clean(ips[0])
         return "http://%s.local/" % clean(self.hostname) if self.hostname else None
 
-    def _qr_targets(self, codes):
-        """[(overlay id, url)] for what is being shown: guest and presenter links carry their code in the address
-        fragment (which a browser never sends anywhere), the automatic first-run screen carries the PIN."""
+    def _qr_targets(self, m, codes):
+        """[(overlay id, url)] for what is being shown. `m` is the request being shown (read once by the caller) or
+        None for the first-run screen. Guest and presenter links carry their code in the address fragment; only the
+        first-run screen, with no device paired, carries the PIN."""
         base = self.base_url()
         if not base:
             return []
-        m = self.manual
         if m:
             return [(QR_IDS[r], "%s#code=%s" % (base, clean(codes[r]))) for r in ("view", "live") if r in m["items"] and r in codes]
+        if self.auth.list_devices():
+            return []
         return [(QR_IDS["pin"], "%s#pin=%s" % (base, clean(str(self.auth.current_pin))))]
 
     def draw_qr(self, targets):
@@ -173,7 +185,7 @@ class PinScreen:
             x = width - 40
             for oid, url in sorted(targets, key=lambda t: -t[0]):
                 matrix = qr.encode(url)
-                scale = max(2, int(0.30 * height) // (len(matrix) + 8))
+                scale = min(QR_MAX_SCALE, max(2, int(0.30 * min(height, 4320)) // (len(matrix) + 8)))
                 w, h, pixels = qr.bgra(matrix, scale)
                 x -= w
                 player.overlay(oid, x, 40, w, h, pixels)
@@ -201,29 +213,32 @@ class PinScreen:
         self.clear_qr()
 
     def tick(self):
-        was_manual = self.manual is not None
-        if was_manual and not self.status()["showing"]:      # it just ran out: take the text off the screen
-            self.clear()
-        if not self.wanted():
-            if self._qr_sig is not None:          # e.g. the first device just paired: the codes must come off the screen
-                self.clear_qr()
-            return False
-        if self.manual:
-            text = "\n".join(self.manual_lines())
-            self.draw_qr(self._qr_targets({j["role"]: j["code"] for j in self.auth.list_joins()}))
-        else:
-            text = "\n".join(lines(self.auth.current_pin, self.hostname, self.addresses()))
-            self.draw_qr(self._qr_targets({}))
-        try:
-            self.api.player.ipc.request("show-text", text, SHOW_MS)
-        except PlayerError:
-            return False
-        self.shown += 1
-        return True
+        with self._lock:
+            m = self._current()
+            if self.manual is not None and m is None:        # a request just ran out: take it off the screen
+                self.manual = None
+                self.clear()
+            if not (m or self.auto_wanted()):
+                if self._qr_sig is not None:                  # e.g. the first device just paired
+                    self.clear_qr()
+                return False
+            if m:
+                text = "\n".join(self.manual_lines(m))
+                self.draw_qr(self._qr_targets(m, {j["role"]: j["code"] for j in self.auth.list_joins()}))
+            else:
+                text = "\n".join(lines(self.auth.current_pin, self.hostname, self.addresses()))
+                self.draw_qr(self._qr_targets(None, {}))
+            try:
+                self.api.player.ipc.request("show-text", text, SHOW_MS)
+            except PlayerError:
+                return False
+            self.shown += 1
+            return True
 
     def start(self):
         if self._thread:
             return
+        self.clear_qr()           # codes drawn by an earlier run of the service (it crashed or restarted) come off
         self._stop.clear()
 
         def loop():
@@ -240,3 +255,6 @@ class PinScreen:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
+        with self._lock:
+            self.manual = None
+            self.clear()

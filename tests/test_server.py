@@ -516,7 +516,7 @@ class MediaTest(MediaBase):
         import socket
         token, _ = self.pair()
         c = socket.create_connection(("127.0.0.1", self.port), timeout=5)
-        c.sendall(("POST /api/media/upload?name=cut.mp4 HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+        c.sendall(("POST /api/media/upload?name=cut.mp4 HTTP/1.1\r\nHost: 127.0.0.1\r\nX-PVJ-Request: 1\r\n"
                    "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n"
                    "Content-Length: 5000000\r\n\r\n" % token).encode() + b"x" * 1000)
         time.sleep(0.3)
@@ -531,7 +531,7 @@ class MediaTest(MediaBase):
         token, _ = self.pair()
         slow = socket.create_connection(("127.0.0.1", self.port), timeout=5)
         self.addCleanup(slow.close)
-        slow.sendall(("POST /api/media/upload?name=slow.mp4 HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+        slow.sendall(("POST /api/media/upload?name=slow.mp4 HTTP/1.1\r\nHost: 127.0.0.1\r\nX-PVJ-Request: 1\r\n"
                       "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n"
                       "Content-Length: 2000\r\n\r\n" % token).encode() + b"x" * 100)
         time.sleep(0.3)
@@ -568,7 +568,7 @@ class MediaHardeningTest(MediaBase):
         import socket
         c = socket.create_connection(("127.0.0.1", self.port), timeout=5)
         self.addCleanup(c.close)
-        c.sendall(("POST /api/media/upload?name=%s HTTP/1.1\r\nHost: x\r\nX-PVJ-Request: 1\r\n"
+        c.sendall(("POST /api/media/upload?name=%s HTTP/1.1\r\nHost: 127.0.0.1\r\nX-PVJ-Request: 1\r\n"
                    "Authorization: Bearer %s\r\nContent-Type: application/octet-stream\r\n%s"
                    "Content-Length: %d\r\n\r\n" % (name, token, extra_headers, length)).encode() + sent)
         time.sleep(0.3)

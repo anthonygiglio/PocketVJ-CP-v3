@@ -1000,7 +1000,7 @@
         live.appendChild(h('div', { class: 'item join-code', 'data-role': c.role },
           h('span', {}, roleName(c.role), h('br'), h('span', { class: 'mono big-code', text: c.code }), h('br'),
             h('span', { class: 'k', text: 'expires in ' + clock(c.seconds_left) + ' · ' + c.uses_left + ' uses left' })),
-          h('img', { class: 'qr', alt: 'QR code for the ' + roleName(c.role).toLowerCase() + ' code', src: '/api/qr.svg?for=' + c.role + '&c=' + c.code }),
+          h('img', { class: 'qr', alt: 'QR code for the ' + roleName(c.role).toLowerCase() + ' code', src: '/api/qr.svg?for=' + c.role + '&t=' + Date.now() }),
           h('button', { class: 'btn small', text: 'Cancel', onclick: function () { act('POST', '/api/access/cancel', { code: c.code }, drawLive); } })));
       });
       live.appendChild(h('div', { class: 'row' },
@@ -1008,11 +1008,15 @@
         h('button', { class: 'btn small', id: 'newpresenter', text: 'New presenter code', onclick: function () { act('POST', '/api/access/code', { role: 'live', minutes: 60 }, drawLive); } }),
         h('button', { class: 'btn small', id: 'printsheet', text: 'Print access sheet', onclick: function () { printSheet(d); } })));
       clearTimeout(accessTimer);
-      if (scr.showing || d.codes.length) accessTimer = setTimeout(refresh, 5000);
+      if (scr.showing || d.codes.length) accessTimer = setTimeout(function () { if (document.getElementById('accesscard')) refresh(); }, 5000);
     }
     function refresh() {
-      if (!document.getElementById('accesscard')) return;
-      api('GET', '/api/access').then(function (r) { if (r.ok && document.getElementById('accesscard')) drawLive(r.data); });
+      // The check is after the answer arrives: on the first call the card is not on the page yet.
+      api('GET', '/api/access').then(function (r) {
+        if (!document.getElementById('accesscard')) return;
+        if (r.ok) drawLive(r.data);
+        else { live.textContent = ''; live.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' })); }
+      });
     }
     var link = h('input', { class: 'text-input mono', readonly: true, 'aria-label': 'Guest link', hidden: true });
     var linkQr = h('img', { class: 'qr', id: 'linkqr', alt: 'QR code for the guest link', hidden: true });
@@ -1033,6 +1037,9 @@
     card.appendChild(link);
     card.appendChild(linkQr);
     card.appendChild(h('button', { class: 'btn', text: 'New PIN', onclick: function () { act('POST', '/api/pin/rotate', {}, function (d) { pinOut.textContent = 'New PIN: ' + d.pin; }); } }));
+    card.appendChild(h('button', { class: 'btn', id: 'unlockpair', text: 'Unblock joining', onclick: function () {
+      act('POST', '/api/pin/unlock', {}, function () { pinOut.textContent = 'Joining is open again (the PIN is unchanged).'; });
+    } }));
     card.appendChild(pinOut);
     refresh();
     return card;
@@ -1046,7 +1053,7 @@
       h('div', { class: 'sheet-row' },
         h('figure', {}, h('img', { class: 'qr-big', alt: 'QR code for the control panel', src: '/api/qr.svg?for=panel' }), h('figcaption', { text: location.origin + '/' }))),
       d.codes.length ? h('div', { class: 'sheet-row' }, d.codes.map(function (c) {
-        return h('figure', {}, h('img', { class: 'qr-big', alt: 'QR code for the ' + c.role + ' code', src: '/api/qr.svg?for=' + c.role + '&c=' + c.code }),
+        return h('figure', {}, h('img', { class: 'qr-big', alt: 'QR code for the ' + c.role + ' code', src: '/api/qr.svg?for=' + c.role + '&t=' + Date.now() }),
           h('figcaption', { text: (c.role === 'view' ? 'Guest (watch only)' : 'Presenter (play and mix)') + ': ' + c.code + ' (expires)' }));
       })) : null,
       h('p', { class: 'k', text: 'Codes shown here expire. The panel address above does not.' }));

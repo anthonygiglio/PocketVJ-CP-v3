@@ -77,6 +77,13 @@ class Auth:
             raise AuthError("PIN must be %d digits" % PIN_LENGTH)
         return self._new_pin(pin)
 
+    def clear_lockout(self):
+        """Lift a lockout someone provoked by guessing, without changing the PIN (guests are waiting at the door)."""
+        with self._pair_lock:
+            self._fails.clear()
+            self._global_fails = []
+            self._locked_until.clear()
+
     def rotate_pin(self):
         """New PIN. A paired owner uses this to get past a lockout someone else provoked."""
         with self.settings.lock, self._pair_lock:
@@ -121,10 +128,9 @@ class Auth:
             if wait:
                 raise AuthError("too many attempts", retry_after=int(wait) + 1)
             given = pin if isinstance(pin, str) else ""
-            if len(given) == JOIN_LENGTH and given.isdigit():
+            if len(given) == JOIN_LENGTH and given.isascii() and given.isdigit():
                 role = self._use_join(given)
-                if role:
-                    self._fails.pop(client, None)
+                if role:          # the failure count is NOT reset: a real code must not buy more PIN guesses
                     return self._add_device(name, role)
                 self._record_fail(client)
                 raise AuthError("wrong or expired code")

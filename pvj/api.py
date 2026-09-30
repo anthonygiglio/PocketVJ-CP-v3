@@ -253,23 +253,37 @@ class Api:
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
                 "device": device}
 
-    def preview_jpeg(self):
+    def access_on_screen(self):
+        """True while the PIN or join codes are drawn on the display (on request, or the first-run screen)."""
+        ps = self.pinscreen
+        if ps is None:
+            return False
+        try:
+            return bool(ps.status()["showing"]) or ps.auto_wanted()
+        except Exception:
+            return True                           # when unsure, treat it as shown: a snapshot then leaves the text out
+
+    def preview_jpeg(self, device=None):
         """A JPEG of what the player is showing on the screen. One screenshot at a time; viewers who ask within
         PREVIEW_MIN_INTERVAL of the last one get the same frame, so ten phones cost no more than one. A failure
-        (no picture yet) is remembered for a few seconds too, so requests cannot queue up behind a slow player."""
+        (no picture yet) is remembered for a few seconds too, so requests cannot queue up behind a slow player.
+        While the PIN or join codes are on the display, a device without full access gets the video only (no
+        on-screen text or QR codes): otherwise a guest could read the full PIN or a presenter code off a snapshot."""
+        with_text = not self.access_on_screen() or Auth.allows(device, "full")
         with self._preview_lock:
             now = time.monotonic()
-            if self._preview and now - self._preview[0] < PREVIEW_MIN_INTERVAL:
-                if isinstance(self._preview[1], ApiError):
-                    raise ApiError(self._preview[1].status, self._preview[1].message)
-                return self._preview[1]
+            cached = self._preview if self._preview and self._preview[2] == with_text else None
+            if cached and now - cached[0] < PREVIEW_MIN_INTERVAL:
+                if isinstance(cached[1], ApiError):
+                    raise ApiError(cached[1].status, cached[1].message)
+                return cached[1]
             path = os.path.join(self.player.rundir, "preview.jpg")
             try:
                 try:
                     os.unlink(path)               # never write through a link someone left there
                 except FileNotFoundError:
                     pass
-                self._player_call(self.player.screenshot, path)
+                self._player_call(self.player.screenshot, path, 60, with_text)
                 fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
                 try:
                     if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -281,13 +295,13 @@ class Api:
                 if not data.startswith(b"\xff\xd8") or len(data) > PREVIEW_MAX_BYTES:
                     raise ApiError(503, "the player did not produce a picture")
             except ApiError as e:
-                self._preview = (time.monotonic(), e)
+                self._preview = (time.monotonic(), e, with_text)
                 raise
             except OSError as e:
                 err = ApiError(503, "no picture to show: %s" % (e.strerror or e))
-                self._preview = (time.monotonic(), err)
+                self._preview = (time.monotonic(), err, with_text)
                 raise err
-            self._preview = (time.monotonic(), data)
+            self._preview = (time.monotonic(), data, with_text)
             return data
 
     def _public_player_status(self):
@@ -754,6 +768,11 @@ class Api:
             raise ApiError(404, "no such device")
         return {"ok": True}
 
+    def unlock_pairing(self, body, device, client):
+        """Lift a guessing lockout without changing the PIN, so waiting guests can join with their codes."""
+        self.auth.clear_lockout()
+        return {"ok": True}
+
     def rotate_pin(self, body, device, client):
         pin = self.auth.rotate_pin()
         if self.on_pin:
@@ -1183,6 +1202,7 @@ class Api:
             ("POST", "/api/devices/invite"): ("full", self.invite),
             ("POST", "/api/devices/revoke"): ("full", self.revoke),
             ("POST", "/api/pin/rotate"): ("full", self.rotate_pin),
+            ("POST", "/api/pin/unlock"): ("full", self.unlock_pairing),
             ("POST", "/api/player/restart"): ("full", self.stop_player),
         }
 
