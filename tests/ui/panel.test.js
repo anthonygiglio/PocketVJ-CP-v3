@@ -104,7 +104,8 @@ function startServer() {
     await page.click('#netmodes >> text=Fixed address');
     await page.fill('#netaddr', '192.168.50.20');
     await page.fill('#netprefix', '24');
-    await page.fill('#netgw', '192.168.50.1');
+    // The gateway is set without any input event (as a lost or late event would): the redraw must still keep it.
+    await page.evaluate(() => { document.getElementById('netgw').value = '192.168.50.1'; });
     // A redraw of the screen must not wipe what was typed
     await page.click('nav >> text=System');
     try {

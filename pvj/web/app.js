@@ -633,6 +633,19 @@
   // ---- network (wired) ------------------------------------------------
   var netTimer = null;
   var netForm = { mode: 'dhcp', vals: {} };  // survives redraws of the System screen, so typing is never wiped
+  var NET_FIELDS = ['netaddr', 'netprefix', 'netgw', 'netdns'];
+  // Copy what is on screen into netForm just before anything is rebuilt. Relying on each field's input event
+  // alone lost a value on a slow runner; reading the page at the moment of the redraw cannot miss one.
+  function keepNetForm() {
+    NET_FIELDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && typeof el.value === 'string') { if (el.value) netForm.vals[id] = el.value; else delete netForm.vals[id]; }
+    });
+  }
+  function clearNetForm() {
+    netForm.vals = {};
+    NET_FIELDS.forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+  }
   var NET_MODES = [
     ['dhcp', 'Automatic (DHCP)', 'Take an address from a router.'],
     ['static', 'Fixed address', 'You choose the address. Use a range your other gear is on.'],
@@ -672,6 +685,7 @@
       return c;
     }
     function draw(d) {
+      keepNetForm();
       body.textContent = '';
       d.interfaces.forEach(function (i) {
         body.appendChild(h('div', { class: 'item' },
@@ -735,7 +749,7 @@
             var where = (c.mode === 'static' || c.mode === 'share') ? ' If this page stops responding, open http://' + (c.address || '10.42.0.1') + ' and press Confirm before the timer runs out.'
               : ' If this page stops responding, find the box at its new address and press Confirm before the timer runs out.';
             S.netNote = 'Applied.' + where;
-            netForm.vals = {};
+            clearNetForm();
             refresh();
           });
         } })));
@@ -833,6 +847,7 @@
   // ---- shell ----------------------------------------------------------
   function render() {
     clearTimeout(netTimer);
+    keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
     var screens = { live: live, mix: mix, media: media, system: system };
