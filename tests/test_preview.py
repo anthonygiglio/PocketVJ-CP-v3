@@ -41,6 +41,10 @@ class PreviewTest(ServerBase):
         self.assertEqual(st, 401)
         self.assertEqual(self.shots, [])
 
+    def test_the_minimum_interval_is_slow_enough_to_protect_playback(self):
+        # measured on a Pi 4: a snapshot stalls playback for about a quarter of a second
+        self.assertGreaterEqual(api_mod.PREVIEW_MIN_INTERVAL, 2.0)
+
     def test_viewers_within_the_interval_share_one_frame(self):
         token = self.invite("view")
         for _ in range(5):

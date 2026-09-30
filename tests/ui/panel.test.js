@@ -58,13 +58,14 @@ function startServer() {
     await page.waitForFunction(() => /intro/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
     await page.waitForSelector('.pad.on');
     if (shots) await page.screenshot({ path: path.join(shots, '2-live.png') });
-    // Screen preview: switch it on and off. The harness player has no real window (--vo=null), so no picture
-    // can be made here; the panel must say so instead of showing a broken image, and stop when switched off.
+    // Screen snapshot: one picture on request. The harness player has no real window (--vo=null), so no picture can be
+    // made here; the panel must say so instead of showing a broken image, and must not keep asking by itself.
+    let previewRequests = 0;
+    page.on('request', (r) => { if (r.url().includes('/api/preview.jpg')) previewRequests++; });
     await page.click('#previewbtn');
-    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Hide screen');
-    await page.waitForFunction(() => { const m = document.getElementById('previewmsg'), i = document.getElementById('preview'); return (m && !m.hidden) || (i && !i.hidden); }, null, { timeout: 8000 });
-    await page.click('#previewbtn');
-    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Show screen' && document.getElementById('preview').hidden);
+    await page.waitForFunction(() => { const m = document.getElementById('previewmsg'); return m && !m.hidden && /No picture/.test(m.textContent); }, null, { timeout: 8000 });
+    await page.waitForTimeout(1500);
+    assert.strictEqual(previewRequests, 1, 'a snapshot is taken once per tap, never repeated by itself (' + previewRequests + ' requests)');
     await page.click('#black');
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Show');
     await page.click('#black');

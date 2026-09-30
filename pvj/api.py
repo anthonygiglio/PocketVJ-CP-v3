@@ -25,6 +25,7 @@ from .themes import ThemeError
 
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
 _NAME = re.compile(r"[^\x00-\x1f/\\]{1,120}")
+_USB_LABEL = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _MODULE_ID = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
 
@@ -58,7 +59,7 @@ def number(body, key, lo, hi, integer=False):
     return int(v) if integer else float(v)
 
 
-PREVIEW_MIN_INTERVAL = 0.7    # seconds: a screenshot costs the Pi real work, so viewers share one frame
+PREVIEW_MIN_INTERVAL = 3.0    # seconds: a snapshot stalls playback for about a quarter second on a Pi 4, so viewers share one frame
 PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 MAX_UPLOAD_BYTES = int(os.environ.get("PVJ_MAX_UPLOAD_MB", "8192")) * 1024 * 1024
 FREE_SPACE_RESERVE = 200 * 1024 * 1024  # never fill the disk completely: the system needs room to work
@@ -103,13 +104,16 @@ class Fader:
 
 class Api:
     def __init__(self, player, settings, auth, registry, themes, media_dir, board, addons_dir=None,
-                 spawn=False, on_pin=None, osc=None, free_space=None, net=None, ip_json=None, net_sysfs="/sys/class/net"):
+                 spawn=False, on_pin=None, osc=None, free_space=None, net=None, ip_json=None, net_sysfs="/sys/class/net",
+                 usb_root=None, usb_link=None):
         self.player = player
         self.settings = settings
         self.auth = auth
         self.registry = registry
         self.themes = themes
         self.media_dir = media_dir
+        self.usb_root = usb_root or os.environ.get("PVJ_USB_BASE", "/media/pvj")     # one folder per mounted drive
+        self.usb_link = usb_link or os.environ.get("PVJ_USB_DIR", "/media/usb")      # the newest drive, for the old presets
         self.board = board
         self.addons_dir = addons_dir
         self.spawn = spawn        # True only for development: start mpv ourselves
@@ -147,6 +151,43 @@ class Api:
         path = os.path.realpath(os.path.join(root, name))
         if os.path.dirname(path) != root or not os.path.isfile(path):
             raise ApiError(404, "file not found")
+        return path
+
+    def usb_drives(self):
+        """Media files at the top level of each mounted USB drive: [{"drive": label, "files": [{"name", "size"}]}]."""
+        out = []
+        try:
+            labels = sorted(os.listdir(self.usb_root))
+        except OSError:
+            return out
+        for label in labels:
+            base = os.path.join(self.usb_root, label)
+            if not _USB_LABEL.fullmatch(label) or os.path.islink(base) or not os.path.isdir(base):
+                continue
+            files = []
+            try:
+                with os.scandir(base) as it:
+                    for e in it:
+                        if (e.name.startswith(".") or not e.name.lower().endswith(MEDIA_EXTENSIONS) or not valid_name(e.name)
+                                or e.is_symlink() or not e.is_file()):
+                            continue
+                        files.append({"name": e.name, "size": e.stat().st_size})
+            except OSError:
+                continue
+            files.sort(key=lambda f: f["name"].lower())
+            out.append({"drive": label, "files": files[:200]})
+        return out
+
+    def resolve_usb(self, ref):
+        """A media file on a mounted USB drive, given as 'LABEL/name.mp4'; never a path outside that drive's folder."""
+        parts = ref.split("/") if isinstance(ref, str) else []
+        if len(parts) != 2 or not _USB_LABEL.fullmatch(parts[0]) or not valid_name(parts[1]) or not parts[1].lower().endswith(MEDIA_EXTENSIONS):
+            raise bad("invalid USB file")
+        root = os.path.realpath(self.usb_root)
+        base = os.path.join(root, parts[0])
+        path = os.path.join(base, parts[1])
+        if os.path.islink(base) or os.path.islink(path) or os.path.dirname(os.path.realpath(path)) != base or not os.path.isfile(path):
+            raise ApiError(404, "file not found on the USB drive")
         return path
 
     def media_list(self):
@@ -260,7 +301,7 @@ class Api:
             except OSError:
                 pass
         return {"files": [d["name"] for d in details], "details": details, "free": self._free_space(),
-                "max_upload": MAX_UPLOAD_BYTES}
+                "max_upload": MAX_UPLOAD_BYTES, "usb": self.usb_drives()}
 
     def _safe_new_name(self, name):
         if not valid_name(name):
@@ -412,10 +453,12 @@ class Api:
         """A legacy start script name (startlessonce05 ...) played from the media folder."""
         try:
             preset = presets.parse_legacy_name(name if isinstance(name, str) else "")
-            files = presets.resolve_files(preset, self.media_dir)
+            files = presets.resolve_files(preset, self.media_dir, self.usb_link)
         except PlayerError as e:
             raise bad(str(e))
-        root = os.path.realpath(self.media_dir)
+        root = os.path.realpath(self.usb_link if preset["usb"] else self.media_dir)
+        if preset["usb"] and os.path.dirname(root) != os.path.realpath(self.usb_root):
+            raise ApiError(404, "no USB drive is mounted")     # the link must point at a mounted drive, nowhere else
         paths = [f for f in (os.path.realpath(f) for f in files)
                  if os.path.dirname(f) == root and f.lower().endswith(MEDIA_EXTENSIONS)]
         if not paths:
@@ -439,9 +482,11 @@ class Api:
             name = banks[pad[0]]["pads"][pad[1]]["file"]
             if not name:
                 raise bad("pad is empty")
+        elif "usb" in body:
+            name = body["usb"]
         else:
             name = body.get("file")
-        path = self.resolve_media(name)
+        path = self.resolve_usb(name) if "usb" in body and "pad" not in body else self.resolve_media(name)
         loop = body.get("loop", True)
         if not isinstance(loop, bool):
             raise bad("loop must be true or false")
@@ -700,6 +745,48 @@ class Api:
         self.settings.save()
         return self.osc.status()
 
+    # --- audio output --------------------------------------------------
+    def _audio_devices(self):
+        """mpv's list of sound outputs, [{"name", "description"}]; raises ApiError 503 if the player is down."""
+        lst = self._player_call(self.player.ipc.request, "get_property", "audio-device-list")
+        return [{"name": d["name"], "description": str(d.get("description", ""))[:120]}
+                for d in (lst or []) if isinstance(d, dict) and isinstance(d.get("name"), str)]
+
+    def _auto_audio(self, names):
+        """The sound output "automatic" means: on a Pi, HDMI on the connected port (the picture and the sound go to
+        the same screen); otherwise mpv's own choice, which on a Pi is the headphone jack (found on a real Pi 4)."""
+        for c in hardware.drm_connectors():
+            m = re.fullmatch(r"HDMI-A-([0-9])", c["connector"])
+            if m and c["status"] == "connected":
+                want = "alsa/sysdefault:CARD=vc4hdmi%d" % (int(m.group(1)) - 1)
+                if want in names:
+                    return want
+        return "auto"
+
+    def apply_audio(self):
+        """Point the player at the chosen output. Called when the setting changes and whenever the player restarts."""
+        names = {d["name"] for d in self._audio_devices()}
+        chosen = self.settings.data["audio"]["device"]
+        target = chosen if chosen != "auto" and chosen in names else self._auto_audio(names)
+        self._player_call(self.player.ipc.request, "set_property", "audio-device", target)
+        return target
+
+    def get_audio(self, body, device, client):
+        devices = self._audio_devices()
+        names = {d["name"] for d in devices}
+        return {"device": self.settings.data["audio"]["device"], "devices": devices, "automatic_is": self._auto_audio(names)}
+
+    def set_audio(self, body, device, client):
+        chosen = body.get("device")
+        names = {d["name"] for d in self._audio_devices()}
+        if not isinstance(chosen, str) or (chosen != "auto" and chosen not in names):
+            raise bad("choose one of the listed sound outputs")
+        with self.settings.lock:
+            self.settings.data["audio"]["device"] = chosen
+            self.settings.save()
+        target = self.apply_audio()
+        return dict(self.get_audio({}, device, client), in_use=target)
+
     # --- autostart -----------------------------------------------------
     def get_autostart(self, body, device, client):
         if self.autostart is None:
@@ -897,6 +984,8 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/audio"): ("view", self.get_audio),
+            ("POST", "/api/audio"): ("full", self.set_audio),
             ("GET", "/api/autostart"): ("view", self.get_autostart),
             ("POST", "/api/autostart"): ("full", self.set_autostart),
             ("POST", "/api/autostart/test"): ("live", self.test_autostart),

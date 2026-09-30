@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 6
+SCHEMA = 7
 
 
 class SettingsError(Exception):
@@ -44,6 +44,7 @@ def default_settings():
         "streams": [],
         "control": default_control(),
         "autostart": {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0},
+        "audio": {"device": "auto"},
     }
 
 
@@ -73,7 +74,12 @@ def _v5_to_v6(data):
     data.setdefault("autostart", {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0})
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6}
+def _v6_to_v7(data):
+    """7: audio output. "auto" means HDMI on the connected port (else mpv's own choice)."""
+    data.setdefault("audio", {"device": "auto"})
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

@@ -6,7 +6,7 @@
   var RANK = { view: 1, live: 2, full: 3 };
   var ACCENTS = ['#f59e0b', '#c2410c', '#22d3ee', '#e879f9', '#a3e635', '#ffffff'];
   var S = {
-    tab: 'live', preview: false, device: null, status: null, banks: [], bank: 0, media: [], modules: [], theme: null,
+    tab: 'live', device: null, status: null, banks: [], bank: 0, media: [], modules: [], theme: null,
     themes: [], devices: [], editing: false, sheet: null, msg: '', msgErr: false, token: null, failures: 0
   };
   var app = document.getElementById('app');
@@ -194,31 +194,25 @@
           act('POST', '/api/blackout', { on: on }, poll);
         } })));
   }
-  // ---- screen preview -----------------------------------------------------
-  // What the box is showing, about once a second. Off until asked for: each frame costs the Pi a screenshot.
-  var previewRun = 0;
+  // ---- screen snapshot ----------------------------------------------------
+  // One picture of what the box is showing, on request. Not a live view: on a Pi 4 each snapshot stalls playback
+  // for about a quarter of a second (measured: a continuous preview dropped 4.7 frames a second, one every five
+  // seconds still dropped 1.3), so nothing here repeats by itself.
   function previewBlock() {
-    var img = h('img', { id: 'preview', alt: 'What the screen is showing', hidden: !S.preview });
+    var img = h('img', { id: 'preview', alt: 'What the screen was showing', hidden: true });
     var note = h('div', { class: 'k', id: 'previewmsg', hidden: true });
-    var btn = h('button', { class: 'btn small', id: 'previewbtn', text: S.preview ? 'Hide screen' : 'Show screen', 'aria-pressed': S.preview ? 'true' : 'false' });
-    var token = ++previewRun;   // a newer draw (or turning it off) stops this loop
-    function next(delay) {
-      setTimeout(function () {
-        if (token !== previewRun || !S.preview || !document.getElementById('preview')) return;   // turned off, redrawn or left this screen
-        if (document.visibilityState === 'hidden') return next(1000);
-        img.src = '/api/preview.jpg?t=' + Date.now();
-      }, delay);
-    }
-    img.addEventListener('load', function () { note.hidden = true; img.hidden = false; if (token === previewRun && S.preview) next(300); });
-    img.addEventListener('error', function () { img.hidden = true; note.hidden = false; note.textContent = 'No picture yet: the player may be idle or not running.'; if (token === previewRun && S.preview) next(2000); });
+    var btn = h('button', { class: 'btn small', id: 'previewbtn', text: 'Take snapshot' });
+    function done() { btn.disabled = false; }
+    img.addEventListener('load', function () { note.hidden = true; img.hidden = false; done(); });
+    img.addEventListener('error', function () { img.hidden = true; note.hidden = false; note.textContent = 'No picture: the player may be idle or not running.'; done(); });
     btn.addEventListener('click', function () {
-      S.preview = !S.preview;
-      btn.textContent = S.preview ? 'Hide screen' : 'Show screen';
-      btn.setAttribute('aria-pressed', S.preview ? 'true' : 'false');
-      if (S.preview) { previewRun++; token = previewRun; next(0); } else { previewRun++; img.hidden = true; note.hidden = true; }
+      btn.disabled = true; note.hidden = false; note.textContent = 'Taking a snapshot...';
+      img.src = '/api/preview.jpg?t=' + Date.now();
     });
-    if (S.preview) next(0);
-    return h('div', { class: 'card', id: 'previewcard' }, h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Screen' }), btn), img, note);
+    return h('div', { class: 'card', id: 'previewcard' },
+      h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Screen' }), btn),
+      h('div', { class: 'k', text: 'A snapshot briefly stalls playback, so it only happens when you tap.' }),
+      img, note);
   }
   function patchLive() {
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};
@@ -379,7 +373,17 @@
       full ? h('div', { class: 'card' },
         h('div', { class: 'k', id: 'freeline', text: (info.free !== undefined ? megabytes(info.free) + ' free' : '') + (info.max_upload ? ' \u00b7 largest file ' + megabytes(info.max_upload) : '') }),
         picker, h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { picker.click(); } }), uploads) : null,
-      h('div', { class: 'card' }, h('div', { class: 'list' }, items.length ? items : h('div', { class: 'k', text: 'No clips yet. Upload some, or plug in a USB drive.' }))),
+      h('div', { class: 'card' }, h('div', { class: 'list' }, items.length ? items : h('div', { class: 'k', text: 'No clips yet. Upload some, or play them straight from a USB drive.' }))),
+      (info.usb || []).map(function (drive) {
+        return h('div', { class: 'card usb-drive', 'data-drive': drive.drive },
+          h('div', { class: 'k', text: 'USB drive: ' + drive.drive + ' (read only, plays straight from the drive)' }),
+          h('div', { class: 'list' }, drive.files.length ? drive.files.map(function (f) {
+            return h('div', { class: 'item' },
+              h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) })),
+              h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + f.name + ' from USB', disabled: !can('live'),
+                onclick: function () { act('POST', '/api/play', { usb: drive.drive + '/' + f.name }, function () { say('Playing ' + f.name); poll(); }); } }));
+          }) : h('div', { class: 'k', text: 'No video or image files at the top of this drive.' })));
+      }),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }));
   }
 
@@ -393,7 +397,7 @@
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals];
-    cards.push(modulesCard(full), autostartCard(full), streamsCard(full));
+    cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full));
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -492,6 +496,30 @@
     api('GET', '/api/midi').then(function (r) {
       if (!document.getElementById('midicard')) return;
       if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'midimsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
+  }
+  // ---- audio output -----------------------------------------------------
+  function audioCard(full) {
+    var body = h('div', { class: 'list', id: 'audiobody' });
+    var card = h('div', { class: 'card', id: 'audiocard' }, h('h2', { text: 'Sound output' }), body);
+    function label(d) { return d.description ? d.description + ' (' + d.name.replace(/^alsa\//, '') + ')' : d.name; }
+    function draw(d) {
+      body.textContent = '';
+      var auto = d.devices.filter(function (x) { return x.name === d.automatic_is; })[0];
+      var sel = h('select', { class: 'text-input', id: 'audiodev', 'aria-label': 'Sound output', disabled: !full },
+        [h('option', { value: 'auto', text: 'Automatic: ' + (auto ? auto.description : 'the player\'s own choice'), selected: d.device === 'auto' })].concat(
+          d.devices.filter(function (x) { return x.name !== 'auto'; }).map(function (x) { return h('option', { value: x.name, text: label(x), selected: x.name === d.device }); })));
+      body.appendChild(h('div', { class: 'k', id: 'audioline', text: d.device === 'auto' ? 'Automatic: on a Pi this is the HDMI port with the screen on it.' : 'Fixed to the output below.' }));
+      body.appendChild(sel);
+      if (full) body.appendChild(h('button', { class: 'btn on small', id: 'audiosave', text: 'Save', onclick: function () {
+        act('POST', '/api/audio', { device: sel.value }, function (data) { say(''); draw(data); });
+      } }));
+    }
+    api('GET', '/api/audio').then(function (r) {
+      if (!document.getElementById('audiocard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'audiomsg', text: r.data.error || 'Not available' })); return; }
       draw(r.data);
     });
     return card;

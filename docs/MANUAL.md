@@ -28,7 +28,7 @@ There are three access levels: **view** (look only), **live** (play and mix) and
 
 ## 3. Put clips on it
 
-Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/usb` (and `/media/pvj/<label>`).
+Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/pvj/<label>` (and `/media/usb` for the newest one), and its video and image files at the top level of the drive appear on the Media screen under "USB drive" with a **Play** button, so you can play straight from the stick without copying (a 3 GB film played fine this way on a Pi 4). Files in folders on the drive are not listed yet; put the clips at the top.
 
 ![Media screen](images/ui/media.png)
 
@@ -40,7 +40,9 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 ![Live screen](images/ui/live.png)
 
-**Screen** (Live, under Now playing): tap **Show screen** to see what the box is putting on the display, about once a second. It is a screenshot of the player's own output, so a blackout, brightness or size change shows up, but it is not a live video stream and the frame rate is about 1 per second. It stays off until you ask, costs the box a little work while it is on, and is available to every paired device, including view-only guests. For real-time video you would need an HDMI capture device.
+**Screen** (Live, under Now playing): tap **Take snapshot** to see what the box is putting on the display. It is a screenshot of the player's own output, so a blackout, brightness or size change shows up. It is a single picture on request, not a live view, and it is deliberately not automatic: on a Raspberry Pi 4 each snapshot stalls playback for about a quarter of a second (measured: a continuous preview made video visibly choppy). Any paired device may take one, including view-only guests. For a real-time picture use an HDMI capture device on the display's output.
+
+**Sound output** (System): on a Raspberry Pi "Automatic" sends the sound to the HDMI port that has the screen on it (the player's own default is the 3.5 mm headphone jack, which is silent on a monitor). Pick another output, such as the headphones or a USB sound device, in System > Sound output. The choice is remembered and re-applied if the player restarts.
 
 **Mix** has opacity, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 

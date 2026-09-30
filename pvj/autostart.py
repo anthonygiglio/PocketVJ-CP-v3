@@ -119,6 +119,12 @@ class Autostart:
             return False
         first_sight = self.seen_pid is None
         self.seen_pid = pid
+        apply_audio = getattr(self.api, "apply_audio", None)
+        if apply_audio:                 # a new player starts on mpv's own sound output: put it on the chosen one first
+            try:
+                apply_audio()
+            except Exception as e:
+                self.log("pvj-web: could not set the sound output: %s" % e)
         cfg = self.settings.data["autostart"]
         if cfg["mode"] == "off":
             return False
