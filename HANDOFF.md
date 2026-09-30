@@ -51,7 +51,7 @@ One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 25
 
 Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, shutdown and reboot buttons, a display-mode (resolution and refresh) setting, NDI, AES67/Dante, ST 2110, mapper, presenter, wall, controller profiles and lights/feedback for MIDI, custom DMX layouts, Art-Net discovery.
 
-Known limits: the panel cannot restart a wedged mpv (it is unprivileged by design). GitHub Pages deploy of the old manual fails on every push because Pages is not enabled or not set to build from Actions (a repository setting, not code). Merged branches on GitHub have not been deleted (the tool that tried was blocked; delete them on github.com). The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub.
+Known limits: the panel cannot restart a wedged mpv (it is unprivileged by design). The old manual is published to GitHub Pages by the "Deploy manual to Pages" workflow (it failed until Pages was enabled for the repository; it has passed since 2026-09-30). Merged branches on GitHub have not been deleted (the tool that tried was blocked; delete them on github.com). The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub.
 
 ## Testing
 
