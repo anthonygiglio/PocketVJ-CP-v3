@@ -41,11 +41,11 @@ function startServer() {
     // wrong PIN first
     const wrong = info.pin === '0000' ? '1111' : '0000';
     for (let i = 0; i < 4; i++) await page.fill(`input[aria-label="PIN digit ${i + 1}"]`, wrong[i]);
-    await page.click('text=Pair this device');
+    await page.click('#pairbtn');
     await page.waitForFunction(() => /Wrong PIN/.test(document.getElementById('msg').textContent));
     // right PIN
     for (let i = 0; i < 4; i++) await page.fill(`input[aria-label="PIN digit ${i + 1}"]`, info.pin[i]);
-    await page.click('text=Pair this device');
+    await page.click('#pairbtn');
     await page.waitForSelector('.pads');
 
     // Live: assign a pad, then play it
@@ -252,6 +252,30 @@ function startServer() {
     assert(await guest.isDisabled('#stop'), 'view-only guest cannot stop');
     assert(!(await guest.isVisible('text=Edit pads')), 'view-only guest cannot edit pads');
     assert.strictEqual(await guest.evaluate(() => location.hash), '', 'token removed from the URL');
+
+    // Scan-to-join: the owner makes a guest code; a phone opens the QR code's link and joins with one tap as view only
+    await page.click('nav >> text=System');
+    await page.waitForSelector('#newguest');
+    await page.click('#newguest');
+    await page.waitForSelector('.join-code[data-role="view"]');
+    const joinCode = await page.evaluate(() => document.querySelector('.join-code[data-role="view"] .big-code').textContent);
+    assert(/^[0-9]{6}$/.test(joinCode), 'a 6 digit guest code: ' + joinCode);
+    await page.waitForFunction(() => { const i = document.querySelector('.join-code[data-role="view"] img.qr'); return i && i.complete && i.naturalWidth > 0; });
+    await page.click('#showaccess');
+    await page.waitForFunction(() => /On the display now/.test(document.getElementById('accessscreenline').textContent));
+    await page.click('#hideaccess');
+    await page.waitForFunction(() => /Nothing on the display/.test(document.getElementById('accessscreenline').textContent));
+    const scanCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const scanner = await scanCtx.newPage();
+    scanner.on('console', (m) => { if (['error'].includes(m.type()) && !expected.test(m.text())) problems.push('scanner: ' + m.text()); });
+    await scanner.goto(base + '/#code=' + joinCode);
+    await scanner.waitForSelector('#scannednote');
+    assert.strictEqual(await scanner.evaluate(() => location.hash), '', 'the code is removed from the address bar');
+    assert.strictEqual(await scanner.inputValue('#joincode'), joinCode, 'the scanned code is filled in');
+    await scanner.click('#joinbtn');
+    await scanner.waitForSelector('.pads');
+    assert(await scanner.isDisabled('#black'), 'a guest code gives view-only access');
+    await scanCtx.close();
 
     // Desktop width
     await page.setViewportSize({ width: 1280, height: 800 });

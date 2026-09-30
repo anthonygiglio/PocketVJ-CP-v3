@@ -24,7 +24,21 @@ Open `http://<address of the box>/` in a browser. The box makes a new four digit
 
 A paired phone is remembered until you remove it. A wrong PIN is throttled. If someone locks new pairing by guessing, a paired full-access device clears it with **New PIN** in System.
 
-There are three access levels: **view** (look only), **live** (play and mix) and **full** (change pads, modules, files and settings). Make a guest link for a friend in System > Access; it shows once.
+There are three access levels: **view** (look only), **live** (play and mix) and **full** (change pads, modules, files and settings).
+
+### Letting other people in: codes and QR codes on the display
+
+For a studio or a gig, the person running the show (a full-access device) opens System > Access:
+
+- **New guest code** (watch only) or **New presenter code** (play and mix) makes a 6 digit code. Codes expire (15 minutes by default, up to 2 hours), work a limited number of times, and a new code for the same role replaces the old one. They are never written to disk, so a restart clears them.
+- **Show on display** puts the chosen codes on the box's screen, each with a big **QR code** in the top right corner (guest on the left, presenter on the right), together with the panel address, for 1 minute to 1 hour, even over a playing clip. **Hide from display** takes them off at once. A phone camera that scans a code opens the panel with the code filled in; one tap on **Join with code** and it is in, with exactly that access. The code travels in the part of the address after `#`, which a browser does not send to the box or anyone else, and the panel removes it from the address bar straight away (a phone's camera or scanner app may still remember what it scanned).
+- The full access PIN can be shown too (as text, never as a QR code), but the panel asks first: everyone who can see the screen can then take over the box. While anything is on the display, a snapshot taken by a guest or presenter shows only the video, never the text or the QR codes, so nobody can read the PIN or a presenter code remotely.
+- If someone blocks joining by guessing wrong codes, **Unblock joining** opens it again without changing the PIN.
+- The panel answers only to its IP addresses, `localhost`, its own name and `<name>.local`. To use another name (a studio DNS name), add it to `PVJ_ALLOWED_HOSTS` in `/etc/pvj/pvj.env` (comma separated). This stops a web page elsewhere from driving the panel through a visitor's browser (DNS rebinding).
+- **Print access sheet** prints a page to pin up: a QR code for the panel address (no access in it; people still need a code), and the current guest and presenter codes.
+- **Create guest link** makes a link that does not expire (until you remove the device), with its QR code; hand it to a resident operator.
+
+Tested on a Raspberry Pi 4: the codes and QR codes were drawn on the display, decoded off a snapshot of the screen by a real QR scanner (zbar), and a join with each code gave exactly guest or presenter access.
 
 ## 3. Put clips on it
 

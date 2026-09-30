@@ -83,5 +83,13 @@ class PlayerUnitTest(unittest.TestCase):
         self.assertEqual(load_units()["pvj-web.service"]["Group"], ["pvj"])
 
 
+class WebUnitTest(unittest.TestCase):
+    def test_the_panel_may_read_the_boxs_addresses(self):
+        # `ip -j addr` needs a netlink socket; the sandbox refused it and the Network card showed no addresses on a Pi 4
+        families = words(load_units()["pvj-web.service"], "RestrictAddressFamilies")
+        self.assertIn("AF_NETLINK", families)
+        self.assertNotIn("AF_PACKET", families)
+
+
 if __name__ == "__main__":
     unittest.main()
