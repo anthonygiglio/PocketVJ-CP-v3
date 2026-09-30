@@ -193,8 +193,19 @@
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Now playing' }),
         h('div', { id: 'np', style: false, text: '' }),
-        h('div', { class: 'progress', 'aria-hidden': 'true' }, h('div', { id: 'bar' })),
-        h('div', { class: 'k', id: 'time' })),
+        seekBar(canLive),
+        h('div', { class: 'row between' }, h('div', { class: 'k', id: 'time' }), h('div', { class: 'k', id: 'plpos' })),
+        h('div', { class: 'row transport' },
+          h('button', { class: 'btn small grow', id: 'prev', text: '\u23ee Prev', 'aria-label': 'Previous clip', disabled: !canLive, onclick: function () { act('POST', '/api/control', { action: 'prev' }, poll); } }),
+          h('button', { class: 'btn small grow', id: 'back10', text: '\u2212 10 s', 'aria-label': 'Back 10 seconds', disabled: !canLive, onclick: function () { act('POST', '/api/control', { action: 'seek', value: -10 }, poll); } }),
+          h('button', { class: 'btn small grow', id: 'fwd10', text: '+ 10 s', 'aria-label': 'Forward 10 seconds', disabled: !canLive, onclick: function () { act('POST', '/api/control', { action: 'seek', value: 10 }, poll); } }),
+          h('button', { class: 'btn small grow', id: 'next', text: 'Next \u23ed', 'aria-label': 'Next clip', disabled: !canLive, onclick: function () { act('POST', '/api/control', { action: 'next' }, poll); } })),
+        h('div', { class: 'row transport' },
+          h('button', { class: 'btn small grow', id: 'fadein', text: 'Fade in', disabled: !canLive, onclick: function () { act('POST', '/api/fadein', { seconds: 2 }, poll); } }),
+          h('button', { class: 'btn small grow', id: 'testpattern', text: 'Test pattern', disabled: !canLive, onclick: function () {
+            var on = !(S.status && S.status.player && S.status.player.test_pattern);
+            act('POST', '/api/testpattern', { on: on }, poll);
+          } }))),
       previewBlock(),
       h('div', { class: 'banks' }, S.banks.map(function (b, i) {
         return h('button', { class: 'btn' + (i === S.bank ? ' on' : ''), text: b.name.replace('Bank ', 'Bank '), 'aria-pressed': i === S.bank ? 'true' : 'false',
@@ -233,15 +244,40 @@
       h('div', { class: 'k', text: 'A snapshot briefly stalls playback, so it only happens when you tap.' }),
       img, note);
   }
+  // Position: a slider that follows the clip, and jumps where it is released. While a finger is on it, the
+  // once-a-second status update must not move it.
+  var seeking = false;
+  function seekBar(canLive) {
+    var bar = h('input', { type: 'range', id: 'seek', class: 'seek', min: 0, max: 1000, step: 1, value: 0, 'aria-label': 'Position in the clip', disabled: !canLive });
+    bar.addEventListener('pointerdown', function () { seeking = true; });
+    bar.addEventListener('input', function () {
+      seeking = true;
+      var pl = (S.status && S.status.player) || {};
+      if (pl.duration > 0) document.getElementById('time').textContent = clock(pl.duration * bar.value / 1000) + ' / ' + clock(pl.duration);
+    });
+    bar.addEventListener('change', function () {
+      var pl = (S.status && S.status.player) || {};
+      if (pl.duration > 0) act('POST', '/api/control', { action: 'seek_to', value: Math.round(pl.duration * bar.value / 10) / 100 }, function () { seeking = false; poll(); });
+      else seeking = false;
+    });
+    bar.addEventListener('pointerup', function () { setTimeout(function () { seeking = false; }, 1500); });
+    return bar;
+  }
   function patchLive() {
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};
     var np = document.getElementById('np');
     if (!np) return;
     np.textContent = pl.running && pl.path ? (pl.stream || base(pl.path)) : (pl.running ? 'Player idle' : 'Player not running');
-    var bar = document.getElementById('bar');
+    var seekEl = document.getElementById('seek');
     var frac = pl.duration > 0 && pl.position >= 0 ? Math.min(1, pl.position / pl.duration) : 0;
-    bar.style.width = Math.round(frac * 100) + '%';
-    document.getElementById('time').textContent = clock(pl.position) + ' / ' + clock(pl.duration);
+    if (seekEl && !seeking) { seekEl.value = Math.round(frac * 1000); seekEl.disabled = !can('live') || !(pl.duration > 0); }
+    if (!seeking) document.getElementById('time').textContent = clock(pl.position) + ' / ' + clock(pl.duration);
+    var plpos = document.getElementById('plpos');
+    if (plpos) plpos.textContent = pl.playlist_count > 1 && pl.playlist_pos >= 0 ? 'Clip ' + (pl.playlist_pos + 1) + ' of ' + pl.playlist_count : '';
+    ['prev', 'next'].forEach(function (id) { var el = document.getElementById(id); if (el) el.disabled = !can('live') || !(pl.playlist_count > 1); });
+    var tp = document.getElementById('testpattern');
+    if (tp) { tp.textContent = pl.test_pattern ? 'Test pattern off' : 'Test pattern'; tp.className = 'btn small grow' + (pl.test_pattern ? ' on' : ''); }
+    if (pl.test_pattern) np.textContent = 'Test pattern (colour bars)';
     var temp = typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : '';
     document.getElementById('pill').textContent = [sys.board, temp, pl.running ? 'OK' : 'No player'].filter(Boolean).join(' · ');
     var f = document.getElementById('freeze'); if (f) f.textContent = pl.paused ? 'Resume' : 'Freeze';
@@ -305,7 +341,8 @@
         slider('ms', 'Size', 1, 200, 1, m.size === undefined ? 100 : m.size, function (v) { return v + '%'; }, ctl('size')),
         slider('mp', 'Position X', -100, 100, 1, m.position === undefined ? 0 : m.position, function (v) { return String(v); }, ctl('position')),
         slider('mv', 'Speed', 25, 200, 5, Math.round((pl.speed || 1) * 100), function (v) { return (v / 100).toFixed(2) + 'x'; },
-          function (v) { ctl('speed')(v / 100); })),
+          function (v) { ctl('speed')(v / 100); }),
+        slider('mvol', 'Volume', 0, 130, 1, Math.round(pl.volume === undefined || pl.volume === null ? 100 : pl.volume), function (v) { return v + '%'; }, ctl('volume'))),
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Transition between clips' }),
         choice([{ label: 'Cut', value: 'cut' }, { label: 'Dip to black', value: 'dip' }, { label: 'Crossfade (soon)', value: 'x', disabled: true }],
@@ -387,8 +424,25 @@
             if (window.confirm('Delete ' + d.name + '?')) act('POST', '/api/media/delete', { name: d.name }, refreshMedia);
           } }) : null));
     });
+    // Quick play (the old Video tab): everything in the folder, or the clips whose names start with a number
+    // ("01_intro.mp4" is clip 01), looping or once. Uses the same presets as OSC and autostart.
+    var numbers = [];
+    S.media.forEach(function (n) { var m = /^([0-9]{2})/.exec(n); if (m && numbers.indexOf(m[1]) < 0) numbers.push(m[1]); });
+    numbers.sort();
+    var preset = function (name, label) { act('POST', '/api/play', { preset: name }, function (d) { say('Playing ' + label + ' (' + d.files + ' clip' + (d.files === 1 ? '' : 's') + ')'); poll(); }); };
+    var numSel = numbers.length ? h('select', { class: 'text-input', id: 'numsel', 'aria-label': 'Clip number' }, numbers.map(function (n) { return h('option', { value: n, text: n + '_' }); })) : null;
+    var quick = can('live') && S.media.length ? h('div', { class: 'card', id: 'quickplay' },
+      h('div', { class: 'k', text: 'Play the whole folder' }),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small grow', id: 'playall', text: 'Play all, loop', onclick: function () { preset('startless', 'all clips'); } }),
+        h('button', { class: 'btn small grow', id: 'playallonce', text: 'Play all once', onclick: function () { preset('startlessonce', 'all clips once'); } })),
+      numbers.length ? h('div', { class: 'k', text: 'Play by number (files named 01_..., 02_...)' }) : null,
+      numbers.length ? h('div', { class: 'row' }, numSel,
+        h('button', { class: 'btn small grow', id: 'playnum', text: 'Loop', onclick: function () { preset('startless' + numSel.value, numSel.value + '_'); } }),
+        h('button', { class: 'btn small grow', id: 'playnumonce', text: 'Once', onclick: function () { preset('startlessonce' + numSel.value, numSel.value + '_ once'); } })) : null) : null;
     return h('div', { class: 'screen' },
       h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: refreshMedia })),
+      quick,
       full ? h('div', { class: 'card' },
         h('div', { class: 'k', id: 'freeline', text: (info.free !== undefined ? megabytes(info.free) + ' free' : '') + (info.max_upload ? ' \u00b7 largest file ' + megabytes(info.max_upload) : '') }),
         picker, h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { picker.click(); } }), uploads) : null,

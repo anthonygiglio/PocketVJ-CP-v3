@@ -103,4 +103,8 @@ img.qr { width: 96px; height: 96px; background: #fff; border-radius: 4px; flex: 
   #printsheet .qr-big { width: 60mm; height: 60mm; }
   #printsheet figcaption { font-size: 14px; margin-top: 6px; }
 }
+/* Transport: the position slider is the full card width and easy to hit with a thumb */
+input.seek { width: 100%; margin: 10px 0 4px; accent-color: var(--ac); height: 28px; }
+.row.transport { margin-top: 8px; }
+.row.transport .btn { min-height: 44px; }
 
