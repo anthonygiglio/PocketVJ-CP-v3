@@ -70,6 +70,12 @@ function startServer() {
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Show');
     await page.click('#black');
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Blackout');
+    // Transport: the position slider is there, and the test pattern switches on and off
+    await page.waitForSelector('#seek');
+    await page.click('#testpattern');
+    await page.waitForFunction(() => /Test pattern off/.test(document.getElementById('testpattern').textContent), null, { timeout: 8000 });
+    await page.click('#testpattern');
+    await page.waitForFunction(() => document.getElementById('testpattern').textContent === 'Test pattern', null, { timeout: 8000 });
     // Stop ends the clip and leaves the player running (a view-only guest gets a disabled button, checked below)
     await page.click('#stop');
     await page.waitForFunction(() => /Player idle/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
