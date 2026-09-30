@@ -12,7 +12,7 @@ The panel is made for a phone in one hand at a gig: big pads, one screen for wha
 | --- | --- | --- |
 | ![Live: pads, now playing, fade, freeze and blackout](docs/images/ui/live.png) | ![Mix: opacity, size, position, speed, transitions](docs/images/ui/mix.png) | ![Media: upload, play, rename, delete](docs/images/ui/media.png) |
 
-More screens, with the beta modules (schedule, streams, DMX, MIDI, network), are in [docs/UI.md](docs/UI.md).
+More screens, with the beta modules (autostart, schedule, streams, DMX, MIDI, network), are in [docs/UI.md](docs/UI.md). The user manual is [docs/MANUAL.md](docs/MANUAL.md).
 
 ## Goals
 

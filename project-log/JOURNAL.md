@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (manual)
+
+Done:
+- Merged autostart (#20). Wrote the user manual `docs/MANUAL.md` (get it running, pair, clips, play, modules, keeping it safe, troubleshooting, what is not built), added the autostart picture to `docs/UI.md`, and brought the stale panel section of `pvj/README.md` up to date (screens, API table, built and not-built lists).
+- The manual says at the top that nothing has been booted on a real board.
+
 ## 2026-09-30 (autostart)
 
 Done:

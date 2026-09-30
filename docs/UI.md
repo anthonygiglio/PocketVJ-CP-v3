@@ -45,6 +45,10 @@ Modules are switched on here. Beta modules are off until you turn them on; modul
 
 ![Modules card](images/ui/system-modules.png)
 
+### Autostart
+
+![Autostart card](images/ui/autostart.png)
+
 ### Beta modules
 
 | Weekly schedule (see [SCHEDULE.md](../pvj/SCHEDULE.md)) | Streams (see [STREAMS.md](../pvj/STREAMS.md)) |
