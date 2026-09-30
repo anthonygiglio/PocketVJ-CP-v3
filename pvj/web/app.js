@@ -6,7 +6,7 @@
   var RANK = { view: 1, live: 2, full: 3 };
   var ACCENTS = ['#f59e0b', '#c2410c', '#22d3ee', '#e879f9', '#a3e635', '#ffffff'];
   var S = {
-    tab: 'live', device: null, status: null, banks: [], bank: 0, media: [], modules: [], theme: null,
+    tab: 'live', preview: false, device: null, status: null, banks: [], bank: 0, media: [], modules: [], theme: null,
     themes: [], devices: [], editing: false, sheet: null, msg: '', msgErr: false, token: null, failures: 0
   };
   var app = document.getElementById('app');
@@ -177,6 +177,7 @@
         h('div', { id: 'np', style: false, text: '' }),
         h('div', { class: 'progress', 'aria-hidden': 'true' }, h('div', { id: 'bar' })),
         h('div', { class: 'k', id: 'time' })),
+      previewBlock(),
       h('div', { class: 'banks' }, S.banks.map(function (b, i) {
         return h('button', { class: 'btn' + (i === S.bank ? ' on' : ''), text: b.name.replace('Bank ', 'Bank '), 'aria-pressed': i === S.bank ? 'true' : 'false',
           onclick: function () { S.bank = i; render(); } });
@@ -192,6 +193,32 @@
           var on = !(S.status && S.status.mix && S.status.mix.blackout);
           act('POST', '/api/blackout', { on: on }, poll);
         } })));
+  }
+  // ---- screen preview -----------------------------------------------------
+  // What the box is showing, about once a second. Off until asked for: each frame costs the Pi a screenshot.
+  var previewRun = 0;
+  function previewBlock() {
+    var img = h('img', { id: 'preview', alt: 'What the screen is showing', hidden: !S.preview });
+    var note = h('div', { class: 'k', id: 'previewmsg', hidden: true });
+    var btn = h('button', { class: 'btn small', id: 'previewbtn', text: S.preview ? 'Hide screen' : 'Show screen', 'aria-pressed': S.preview ? 'true' : 'false' });
+    var token = ++previewRun;   // a newer draw (or turning it off) stops this loop
+    function next(delay) {
+      setTimeout(function () {
+        if (token !== previewRun || !S.preview || !document.getElementById('preview')) return;   // turned off, redrawn or left this screen
+        if (document.visibilityState === 'hidden') return next(1000);
+        img.src = '/api/preview.jpg?t=' + Date.now();
+      }, delay);
+    }
+    img.addEventListener('load', function () { note.hidden = true; img.hidden = false; if (token === previewRun && S.preview) next(300); });
+    img.addEventListener('error', function () { img.hidden = true; note.hidden = false; note.textContent = 'No picture yet: the player may be idle or not running.'; if (token === previewRun && S.preview) next(2000); });
+    btn.addEventListener('click', function () {
+      S.preview = !S.preview;
+      btn.textContent = S.preview ? 'Hide screen' : 'Show screen';
+      btn.setAttribute('aria-pressed', S.preview ? 'true' : 'false');
+      if (S.preview) { previewRun++; token = previewRun; next(0); } else { previewRun++; img.hidden = true; note.hidden = true; }
+    });
+    if (S.preview) next(0);
+    return h('div', { class: 'card', id: 'previewcard' }, h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Screen' }), btn), img, note);
   }
   function patchLive() {
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};

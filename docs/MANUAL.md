@@ -40,6 +40,8 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 ![Live screen](images/ui/live.png)
 
+**Screen** (Live, under Now playing): tap **Show screen** to see what the box is putting on the display, about once a second. It is a screenshot of the player's own output, so a blackout, brightness or size change shows up, but it is not a live video stream and the frame rate is about 1 per second. It stays off until you ask, costs the box a little work while it is on, and is available to every paired device, including view-only guests. For real-time video you would need an HDMI capture device.
+
 **Mix** has opacity, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 
 ![Mix screen](images/ui/mix.png)

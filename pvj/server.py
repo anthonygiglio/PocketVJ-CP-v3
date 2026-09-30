@@ -140,8 +140,18 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
         def do_HEAD(self):
             self.do_GET()
 
+        def _preview(self):
+            """GET /api/preview.jpg: what the screen is showing (any paired device, even view-only)."""
+            try:
+                api.require(auth.authenticate(self._token()), "view")
+                self._send(200, api.preview_jpeg(), "image/jpeg")
+            except ApiError as e:
+                self._json(e.status, {"error": e.message})
+
         def do_GET(self):
             path = urlsplit(self.path).path
+            if path == "/api/preview.jpg":
+                return self._preview()
             if path.startswith("/api/"):
                 return self._api("GET", path, {})
             if path == "/theme.css":

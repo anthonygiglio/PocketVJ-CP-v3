@@ -57,6 +57,13 @@ function startServer() {
     await page.waitForFunction(() => /intro/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
     await page.waitForSelector('.pad.on');
     if (shots) await page.screenshot({ path: path.join(shots, '2-live.png') });
+    // Screen preview: switch it on and off. The harness player has no real window (--vo=null), so no picture
+    // can be made here; the panel must say so instead of showing a broken image, and stop when switched off.
+    await page.click('#previewbtn');
+    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Hide screen');
+    await page.waitForFunction(() => { const m = document.getElementById('previewmsg'), i = document.getElementById('preview'); return (m && !m.hidden) || (i && !i.hidden); }, null, { timeout: 8000 });
+    await page.click('#previewbtn');
+    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Show screen' && document.getElementById('preview').hidden);
     await page.click('#black');
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Show');
     await page.click('#black');
