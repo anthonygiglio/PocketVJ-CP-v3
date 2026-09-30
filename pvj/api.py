@@ -22,10 +22,12 @@ from . import dmx as dmx_mod, hardware, midi as midi_mod, netcfg, osc as osc_mod
 from . import auth as auth_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
-from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
+from .player import AUDIO_EXTENSIONS, ENDINGS, IMAGE_EXTENSIONS, PlayerError, VIDEO_EXTENSIONS
 from .themes import ThemeError
 
-MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
+MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS + AUDIO_EXTENSIONS
+PLAYLIST_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS      # what "play all" picks up: the old panel played pictures, not songs
+SLIDE_MIN, SLIDE_MAX = 0.1, 3600
 _NAME = re.compile(r"[^\x00-\x1f/\\]{1,120}")
 _USB_LABEL = re.compile(r"[A-Za-z0-9._-]{1,64}")
 USB_SCAN_LIMIT = 2000          # directory entries looked at per drive; a hostile drive can hold millions
@@ -363,7 +365,7 @@ class Api:
         if not valid_name(name):
             raise bad("invalid file name")
         if not name.lower().endswith(MEDIA_EXTENSIONS):
-            raise bad("only video and image files: " + ", ".join(MEDIA_EXTENSIONS))
+            raise bad("only video, image and audio files: " + ", ".join(MEDIA_EXTENSIONS))
         return name
 
     def upload(self, name, length, read, replace=False, check=None, clock=time.monotonic):
@@ -497,13 +499,81 @@ class Api:
         label, file = body.get("label", ""), body.get("file", "")
         if not isinstance(label, str) or len(label) > 40 or re.search(r"[\x00-\x1f]", label):
             raise bad("invalid label")
+        ending = body.get("ending", "loop")
+        if ending not in ("loop", "stop", "hold"):
+            raise bad("a pad ends with loop, stop or hold")
         if file != "":
             if not valid_name(file) or not file.lower().endswith(MEDIA_EXTENSIONS):
                 raise bad("invalid file name")
         with self.settings.lock:
-            self.settings.data["pads"]["banks"][bank]["pads"][index] = {"label": label, "file": file}
+            self.settings.data["pads"]["banks"][bank]["pads"][index] = {"label": label, "file": file, "ending": ending}
             self.settings.save()
         return {"banks": self.settings.data["pads"]["banks"]}
+
+    @staticmethod
+    def _ending(body, default):
+        """What happens at the end: body["ending"] (loop, stop, next, hold), else the legacy body["loop"], else `default`."""
+        if "ending" in body:
+            if body["ending"] not in ENDINGS:
+                raise bad("ending must be one of " + ", ".join(ENDINGS))
+            return body["ending"]
+        if "loop" in body:
+            if not isinstance(body["loop"], bool):
+                raise bad("loop must be true or false")
+            return "loop" if body["loop"] else "stop"
+        return default
+
+    @staticmethod
+    def _shuffle_flag(body):
+        v = body.get("shuffle", False)
+        if not isinstance(v, bool):
+            raise bad("shuffle must be true or false")
+        return v
+
+    def _start_list(self, paths, ending, shuffle, image_seconds=None):
+        if shuffle:
+            import random
+            paths = list(paths)
+            random.SystemRandom().shuffle(paths)
+        self.fader.cancel()
+        self._player_call(self.player.play, paths, ending == "loop", None, False, self.spawn, ending, image_seconds)
+        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        self._started_playing()
+        return paths
+
+    def play_slideshow(self, body):
+        """The images of the media folder, or of a USB drive, one after another: {"slideshow": {"source": "media" or a
+        drive label, "seconds": 0.1 to 3600, "ending": ..., "shuffle": ...}}. The old Presenter tab's Slide Show."""
+        spec = body.get("slideshow")
+        if not isinstance(spec, dict):
+            raise bad("slideshow must be an object")
+        seconds = number(spec, "seconds", SLIDE_MIN, SLIDE_MAX)
+        ending = self._ending(spec, "loop")
+        shuffle = self._shuffle_flag(spec)
+        source = spec.get("source", "media")
+        if source == "media":
+            root = os.path.realpath(self.media_dir)
+        else:
+            if not isinstance(source, str) or not _usb_label_ok(source):
+                raise bad("unknown source")
+            root = os.path.join(os.path.realpath(self.usb_root), source)
+            if os.path.islink(root) or os.path.realpath(root) != root or not os.path.isdir(root):
+                raise ApiError(404, "that USB drive is not mounted")
+        names = []
+        try:
+            with os.scandir(root) as it:
+                for _, e in zip(range(USB_SCAN_LIMIT), it):
+                    if (not e.name.startswith(".") and e.name.lower().endswith(IMAGE_EXTENSIONS) and valid_name(e.name)
+                            and not e.is_symlink() and e.is_file()):
+                        names.append(e.name)
+        except OSError:
+            raise ApiError(404, "cannot read that folder")
+        if not names:
+            raise ApiError(404, "no images there")
+        names.sort(key=str.lower)
+        paths = [os.path.join(root, n) for n in names[:PRESET_MAX_FILES]]
+        self._start_list(paths, ending, shuffle, seconds)
+        return {"playing": "slideshow", "images": len(paths), "seconds": seconds}
 
     def play_preset(self, body, name):
         """A legacy start script name (startlessonce05 ...) played from the media folder or, for the usb ones, the USB drive."""
@@ -520,12 +590,11 @@ class Api:
         else:
             root = os.path.realpath(self.media_dir)
         paths = [f for f in (os.path.realpath(f) for f in files)
-                 if os.path.dirname(f) == root and f.lower().endswith(MEDIA_EXTENSIONS) and valid_name(os.path.basename(f))]
+                 if os.path.dirname(f) == root and f.lower().endswith(PLAYLIST_EXTENSIONS) and valid_name(os.path.basename(f))]
         if not paths:
             raise ApiError(404, "no playable files for that preset")
-        self._player_call(self.player.play, paths[:PRESET_MAX_FILES], preset["loop"], None, False, self.spawn)
-        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
-        self._started_playing()
+        ending = self._ending(body, "loop" if preset["loop"] else "stop")
+        self._start_list(paths[:PRESET_MAX_FILES], ending, self._shuffle_flag(body))
         return {"playing": name, "files": len(paths[:PRESET_MAX_FILES])}
 
     def play(self, body, device, client):
@@ -533,6 +602,8 @@ class Api:
             return self.play_preset(body, body["preset"])
         if "stream" in body:
             return self.play_stream(body)
+        if "slideshow" in body:
+            return self.play_slideshow(body)
         if "pad" in body:
             pad = body["pad"]
             if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in pad)):
@@ -543,14 +614,17 @@ class Api:
             name = banks[pad[0]]["pads"][pad[1]]["file"]
             if not name:
                 raise bad("pad is empty")
+            if "ending" not in body and "loop" not in body:
+                body = dict(body, ending=banks[pad[0]]["pads"][pad[1]].get("ending", "loop"))
         elif "usb" in body:
             name = body["usb"]
         else:
             name = body.get("file")
         path = self.resolve_usb(name) if "usb" in body and "pad" not in body else self.resolve_media(name)
-        loop = body.get("loop", True)
-        if not isinstance(loop, bool):
-            raise bad("loop must be true or false")
+        ending = self._ending(body, "loop")
+        if ending == "next":
+            ending = "stop"            # one clip: there is no next
+        loop = ending == "loop"
         transition = self.settings.data["mix"]
         playing = self._player_call(self.player.status).get("running")
         self.fader.cancel()  # a fade still running from an earlier action must not darken the new clip
@@ -558,7 +632,7 @@ class Api:
         dip = transition["transition"] == "dip" and not self.mix["blackout"]
 
         def start():
-            self._player_call(self.player.play, [path], loop, None, False, self.spawn)
+            self._player_call(self.player.play, [path], loop, None, False, self.spawn, ending)
             if self.mix["blackout"]:
                 return
             if dip:
@@ -664,6 +738,8 @@ class Api:
             self._player_call(p.clear)
         elif action == "seek_to":
             self._player_call(p.seek_to, number(body, "value", 0, 24 * 3600))
+        elif action == "shuffle":
+            self._player_call(p.shuffle)
         elif action in ("next", "prev"):
             if not self._player_call(p.playlist_step, action == "next"):
                 raise ApiError(409, "no %s clip in the playlist" % ("next" if action == "next" else "previous"))

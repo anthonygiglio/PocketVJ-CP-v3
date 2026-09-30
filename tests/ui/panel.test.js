@@ -80,6 +80,14 @@ function startServer() {
     await page.click('#stop');
     await page.waitForFunction(() => /Player idle/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
 
+    // Pad endings: the pad editor offers loop, once, and hold
+    await page.click('text=Edit pads');
+    await page.click('.pad >> nth=1');
+    await page.waitForSelector('#padending');
+    assert.deepStrictEqual(await page.$$eval('#padending option', (os) => os.map((o) => o.value)), ['loop', 'stop', 'hold']);
+    await page.selectOption('#padending', 'hold');
+    await page.click('.sheet >> text=tunnel.mkv');
+    await page.click('text=Done editing');
     // Media: upload a file, see it listed, rename it, delete it
     await page.click('nav >> text=Media');
     await page.waitForSelector('#uploadbtn');
@@ -92,7 +100,7 @@ function startServer() {
     await page.click('.item:has-text("renamed-on-phone.mp4") >> text=Delete');
     await page.waitForFunction(() => !/renamed-on-phone/.test(document.body.textContent));
     await page.setInputFiles('#filepick', { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100, 1) });
-    await page.waitForFunction(() => /only video and image files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => /only video, image and audio files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
 
     // Mix: drag a slider and check the throttle keeps request count sane
     await page.click('nav >> text=Mix');

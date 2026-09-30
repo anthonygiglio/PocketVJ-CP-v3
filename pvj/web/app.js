@@ -294,16 +294,21 @@
     }
   }
   function openSheet(bank, index) { S.sheet = { bank: bank, index: index }; render(); }
+  var ENDINGS = [['loop', 'Loop'], ['stop', 'Play once, then black'], ['hold', 'Play once, hold the last frame']];
   function sheet() {
     var s = S.sheet;
     var close = function () { S.sheet = null; render(); };
+    var current = (S.banks[s.bank] && S.banks[s.bank].pads[s.index]) || {};
+    var ending = h('select', { class: 'text-input', id: 'padending', 'aria-label': 'When the clip ends' },
+      ENDINGS.map(function (e) { return h('option', { value: e[0], text: e[1], selected: e[0] === (current.ending || 'loop') }); }));
     var pick = function (file) {
       var label = file ? file.replace(/\.[^.]+$/, '').slice(0, 40) : '';
-      act('POST', '/api/pads', { bank: s.bank, index: s.index, label: label, file: file }, function (d) { S.banks = d.banks; close(); });
+      act('POST', '/api/pads', { bank: s.bank, index: s.index, label: label, file: file, ending: ending.value }, function (d) { S.banks = d.banks; close(); });
     };
     return h('div', { class: 'picker', onclick: function (e) { if (e.target.className === 'picker') close(); } },
       h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Choose a clip for this pad' },
         h('h2', { text: 'Pad ' + (s.index + 1) }),
+        h('label', { class: 'k', for: 'padending', text: 'When the clip ends' }), ending,
         h('div', { class: 'list' }, S.media.length ? S.media.map(function (f) {
           return h('button', { class: 'btn', text: f, onclick: function () { pick(f); } });
         }) : h('div', { class: 'k', text: 'No clips in the media folder yet.' })),
@@ -400,7 +405,7 @@
     var uploads = h('div', { class: 'list', id: 'uploads' });
     (S.uploadNotes || []).forEach(function (t) { uploads.appendChild(h('div', { class: 'item' }, h('div', { class: 'k', text: t }))); });
     var picker = h('input', { type: 'file', id: 'filepick', multiple: true, hidden: true, 'aria-label': 'Choose video or image files',
-      accept: 'video/*,image/*,.mkv,.mov,.mp4,.avi,.webm,.m4v,.mpg,.mpeg,.ts,.wmv' });
+      accept: 'video/*,image/*,audio/*,.mkv,.mov,.mp4,.avi,.webm,.m4v,.mpg,.mpeg,.ts,.wmv,.mp3,.wav,.flac,.ogg,.m4a,.aac,.opus' });
     picker.addEventListener('change', function () {
       var files = Array.prototype.slice.call(picker.files);
       picker.value = '';
@@ -435,14 +440,43 @@
       h('div', { class: 'k', text: 'Play the whole folder' }),
       h('div', { class: 'row' },
         h('button', { class: 'btn small grow', id: 'playall', text: 'Play all, loop', onclick: function () { preset('startless', 'all clips'); } }),
-        h('button', { class: 'btn small grow', id: 'playallonce', text: 'Play all once', onclick: function () { preset('startlessonce', 'all clips once'); } })),
+        h('button', { class: 'btn small grow', id: 'playallonce', text: 'Play all once', onclick: function () { preset('startlessonce', 'all clips once'); } }),
+        h('button', { class: 'btn small grow', id: 'shuffleall', text: 'Shuffle all', onclick: function () {
+          act('POST', '/api/play', { preset: 'startless', shuffle: true }, function (d) { say('Playing all clips in a random order (' + d.files + ')'); poll(); });
+        } })),
       numbers.length ? h('div', { class: 'k', text: 'Play by number (files named 01_..., 02_...)' }) : null,
       numbers.length ? h('div', { class: 'row' }, numSel,
         h('button', { class: 'btn small grow', id: 'playnum', text: 'Loop', onclick: function () { preset('startless' + numSel.value, numSel.value + '_'); } }),
         h('button', { class: 'btn small grow', id: 'playnumonce', text: 'Once', onclick: function () { preset('startlessonce' + numSel.value, numSel.value + '_ once'); } })) : null) : null;
+    // Slideshow (the old Presenter tab): the pictures of the media folder or of a USB drive, one after another.
+    var imagesHere = S.media.filter(function (n) { return /\.(png|jpe?g|bmp|gif)$/i.test(n); }).length;
+    var drives = (info.usb || []).filter(function (d) { return d.files.some(function (f) { return /\.(png|jpe?g|bmp|gif)$/i.test(f.name); }); });
+    var slideshow = null;
+    if (can('live') && (imagesHere || drives.length)) {
+      var src = h('select', { class: 'text-input', id: 'slidesrc', 'aria-label': 'Pictures from' },
+        (imagesHere ? [h('option', { value: 'media', text: 'Media folder (' + imagesHere + ' pictures)' })] : []).concat(
+          drives.map(function (d) { return h('option', { value: d.drive, text: 'USB drive ' + d.drive }); })));
+      var secs = h('select', { class: 'text-input', id: 'slidesecs', 'aria-label': 'Each picture for' },
+        [[0.1, 'fastest (0.1 s)'], [1, '1 second'], [2, '2 seconds'], [5, '5 seconds'], [10, '10 seconds'], [15, '15 seconds'], [30, '30 seconds'], [60, '1 minute']].map(function (o) {
+          return h('option', { value: o[0], text: 'Each picture for ' + o[1], selected: o[0] === 5 });
+        }));
+      var end = h('select', { class: 'text-input', id: 'slideend', 'aria-label': 'After the last picture' },
+        [['loop', 'Then start again'], ['hold', 'Then keep the last picture'], ['stop', 'Then black']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+      var mix = h('input', { type: 'checkbox', id: 'slideshuffle' });
+      slideshow = h('div', { class: 'card', id: 'slideshow' },
+        h('div', { class: 'k', text: 'Slideshow' }), src, secs, end,
+        h('label', { class: 'row', for: 'slideshuffle' }, mix, h('span', { text: 'Random order' })),
+        h('button', { class: 'btn on small', id: 'slidestart', text: 'Start slideshow', onclick: function () {
+          act('POST', '/api/play', { slideshow: { source: src.value, seconds: parseFloat(secs.value), ending: end.value, shuffle: mix.checked } }, function (d) {
+            say('Slideshow: ' + d.images + ' pictures'); poll();
+          });
+        } }),
+        h('div', { class: 'k', text: 'Prev and Next on the Live screen step through the pictures.' }));
+    }
     return h('div', { class: 'screen' },
       h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: refreshMedia })),
       quick,
+      slideshow,
       full ? h('div', { class: 'card' },
         h('div', { class: 'k', id: 'freeline', text: (info.free !== undefined ? megabytes(info.free) + ' free' : '') + (info.max_upload ? ' \u00b7 largest file ' + megabytes(info.max_upload) : '') }),
         picker, h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { picker.click(); } }), uploads) : null,
