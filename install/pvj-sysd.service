@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=nxlx.mastercontrol system helper (reboot, power off, set the clock)
+StartLimitIntervalSec=0
+
+[Service]
+# Root, but with no capabilities of its own: it only asks systemd (reboot, poweroff) and systemd-timedated
+# (set the clock) over D-Bus, and answers only root and pvj-web on its socket.
+User=root
+Group=pvj
+UMask=0027
+# Its own folder, root:pvj 0750: members of group pvj can reach the socket but cannot replace it.
+RuntimeDirectory=pvj-sysd
+RuntimeDirectoryMode=0750
+Environment=PVJ_SYSD_DIR=/run/pvj-sysd
+ExecStart=@PVJ_DIR@/bin/pvj-sysd
+Restart=always
+RestartSec=2
+
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/run/pvj-sysd
+PrivateNetwork=yes
+IPAddressDeny=any
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectProc=invisible
+RemoveIPC=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

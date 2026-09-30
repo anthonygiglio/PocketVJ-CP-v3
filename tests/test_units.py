@@ -107,6 +107,25 @@ class InstallerOwnershipTest(unittest.TestCase):
         self.assertIn("chmod 2750 /var/lib/pvj", self.sh)
         self.assertNotIn("chmod 2775 /var/lib/pvj;", self.sh)
 
+class SysdUnitTest(unittest.TestCase):
+    def test_the_system_helper_has_no_capabilities_and_only_unix_sockets(self):
+        u = load_units()["pvj-sysd.service"]
+        self.assertEqual(u["CapabilityBoundingSet"], [""])
+        self.assertEqual(u["NoNewPrivileges"], ["yes"])
+        self.assertEqual(words(u, "RestrictAddressFamilies"), ["AF_UNIX"])
+        self.assertEqual(u["ProtectSystem"], ["strict"])
+        for key, value in (("PrivateNetwork", "yes"), ("MemoryDenyWriteExecute", "yes"), ("RestrictSUIDSGID", "yes"),
+                           ("RuntimeDirectory", "pvj-sysd"), ("RuntimeDirectoryMode", "0750"), ("SystemCallFilter", "@system-service")):
+            self.assertEqual(u[key], [value], key)
+        self.assertNotIn("PrivateUsers", u)            # it would hide the caller's uid from the peer check
+
+    def test_installer_and_image_enable_it(self):
+        with open(os.path.join(REPO, "install", "install.sh")) as f:
+            self.assertIn("pvj-sysd.service", f.read())
+        with open(os.path.join(REPO, "image", "stage-pvj", "00-install-pvj", "01-run.sh")) as f:
+            self.assertIn("pvj-sysd.service", f.read())
+
+
 class WebUnitTest(unittest.TestCase):
     def test_the_panel_may_read_the_boxs_addresses(self):
         # `ip -j addr` needs a netlink socket; the sandbox refused it and the Network card showed no addresses on a Pi 4

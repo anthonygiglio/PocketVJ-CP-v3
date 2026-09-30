@@ -147,6 +147,7 @@ class Api:
         self.scheduler = None     # Scheduler or None
         self.autostart = None     # Autostart or None
         self.pinscreen = None     # PinScreen or None
+        self.sysd = None          # SysdClient or None (reboot, power off, set the clock)
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -830,6 +831,8 @@ class Api:
             disk = None
         screens = []
         for c in hardware.drm_connectors():
+            if c["connector"].lower().startswith("writeback"):
+                continue                      # an internal capture path of the display chip, not a socket on the box
             modes = []
             for m in c["modes"]:
                 if m not in modes:
@@ -837,7 +840,8 @@ class Api:
             screens.append({"connector": c["connector"], "connected": c["status"] == "connected", "modes": modes[:24]})
         out = {"version": __version__, "mpv": self._mpv_version(), "os": hardware.os_release().get("name", ""),
                "kernel": platform.release(), "board": self.board.get("model") or self.board.get("kind"),
-               "disk": disk, "screens": screens, "output": None}
+               "disk": disk, "screens": screens, "output": None, "clock": self.clock_status(),
+               "system_actions": self.sysd is not None}
         try:
             size = self.player.osd_size()
             fps = self.player.ipc.request("get_property", "display-fps")
@@ -846,6 +850,43 @@ class Api:
         except (PlayerError, AttributeError):
             pass
         return out
+
+    def _sysd(self, message):
+        if self.sysd is None:
+            raise ApiError(503, "the system helper is not available on this box")
+        try:
+            reply = self.sysd.request(message)
+        except OSError as e:
+            raise ApiError(503, str(e))
+        if not reply.get("ok"):
+            raise ApiError(409, reply.get("error", "the system helper refused"))
+        return reply
+
+    def clock_status(self):
+        try:
+            return self._sysd({"cmd": "status"})
+        except ApiError:
+            return {"clock_from_network": None, "now": int(time.time())}
+
+    def reboot(self, body, device, client):
+        if body.get("confirm") != "reboot":
+            raise bad('send {"confirm": "reboot"}')
+        self._sysd({"cmd": "reboot"})
+        return {"rebooting": True}
+
+    def poweroff(self, body, device, client):
+        if body.get("confirm") != "poweroff":
+            raise bad('send {"confirm": "poweroff"}')
+        self._sysd({"cmd": "poweroff"})
+        return {"powering_off": True}
+
+    def set_clock(self, body, device, client):
+        """Set the box clock from the phone's (only while it is not set from the network)."""
+        epoch = body.get("epoch")
+        if isinstance(epoch, bool) or not isinstance(epoch, int):
+            raise bad("epoch must be whole seconds since 1970")
+        self._sysd({"cmd": "set_time", "epoch": epoch})
+        return self.clock_status()
 
     def _mpv_version(self):
         if not hasattr(self, "_mpv_ver"):
@@ -1417,6 +1458,9 @@ class Api:
             ("POST", "/api/testtone"): ("live", self.test_tone),
             ("POST", "/api/media/info"): ("view", self.media_info),
             ("GET", "/api/system"): ("view", self.system_info),
+            ("POST", "/api/system/reboot"): ("full", self.reboot),
+            ("POST", "/api/system/poweroff"): ("full", self.poweroff),
+            ("POST", "/api/system/clock"): ("full", self.set_clock),
             ("POST", "/api/mix"): ("live", self.set_mix),
             ("GET", "/api/access"): ("full", self.get_access),
             ("POST", "/api/access/code"): ("full", self.make_join_code),

@@ -585,6 +585,22 @@
         body.appendChild(kv(sc.connector, sc.connected ? 'connected' : 'nothing plugged in'));
         if (sc.connected && sc.modes.length) body.appendChild(h('div', { class: 'k mono', text: 'Modes: ' + sc.modes.join(', ') }));
       });
+      var c = d.clock || {};
+      var boxTime = c.now ? new Date(c.now * 1000) : null;
+      body.appendChild(kv('Box clock', (boxTime ? boxTime.toLocaleString() : '?') + (c.clock_from_network === true ? ' (from the network)' : c.clock_from_network === false ? ' (NOT set from the network)' : '')));
+      if (!can('full') || !d.system_actions) return;
+      if (c.clock_from_network === false) body.appendChild(h('button', { class: 'btn small', id: 'setclock', text: 'Set the box clock to this phone\'s time', onclick: function () {
+        act('POST', '/api/system/clock', { epoch: Math.round(Date.now() / 1000) }, function () { say('Box clock set.'); render(); });
+      } }));
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn small grow', id: 'rebootbtn', text: 'Restart the box', onclick: function () {
+          if (!window.confirm('Restart the box now? The show stops for about a minute.')) return;
+          act('POST', '/api/system/reboot', { confirm: 'reboot' }, function () { say('Restarting. Reconnect in about a minute.'); });
+        } }),
+        h('button', { class: 'btn small grow', id: 'poweroffbtn', text: 'Power off', onclick: function () {
+          if (!window.confirm('Power the box off? Someone must unplug and replug it to start it again.')) return;
+          act('POST', '/api/system/poweroff', { confirm: 'poweroff' }, function () { say('Powering off. Wait for the light to stop blinking before unplugging.'); });
+        } })));
     });
     return card;
   }
