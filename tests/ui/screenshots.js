@@ -42,6 +42,14 @@ function startServer() {
     }, [method, url, body]);
     const card = (title) => page.locator('.card', { has: page.locator('h2', { hasText: new RegExp('^' + title) }) }).first();
     const shell = () => page.locator('.shell').first();
+    // A screen taller than the phone: the fixed tab bar would land in the middle of the picture, so for the shot
+    // it sits in the page flow, at the bottom of the screen.
+    async function whole(f) {
+      await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.setProperty('position', 'static', 'important'); });
+      try { await shell().screenshot({ path: f }); } finally {
+        await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.removeProperty('position'); });
+      }
+    }
     const byId = (id) => page.locator('#' + id).first();
     const holding = (sel) => page.locator('.card', { has: page.locator(sel) }).first();   // the card around an element
     const tabs = (show) => page.evaluate((on) => {   // the fixed tab bar would cover the bottom of tall cards
@@ -83,7 +91,7 @@ function startServer() {
     await page.reload();
     await page.waitForSelector('.pad.on', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(1200);
-    await shot('live', (f) => shell().screenshot({ path: f }));
+    await shot('live', whole);
 
     // The transport (seek bar, prev and next, fade in, test pattern) and the snapshot card under it. The snapshot
     // is taken when it works; a headless player may have no picture to give, and then the card is shown untouched.
@@ -102,7 +110,7 @@ function startServer() {
 
     await page.click('nav >> text=Mix');
     await page.waitForSelector('#mo');
-    await shot('mix', (f) => shell().screenshot({ path: f }));
+    await shot('mix', whole);
 
     // Projection mapping: the module on, a grid and a quad placed apart, one mapping saved.
     await api('POST', '/api/modules/mapper', { enabled: true });
@@ -213,7 +221,7 @@ function startServer() {
     await page.reload();
     await page.waitForSelector('.pad.on', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(1200);
-    await shot('live-night-red', (f) => shell().screenshot({ path: f }));
+    await shot('live-night-red', whole);
     await api('POST', '/api/theme', { name: 'dark-stage', accent: null });
 
     await page.setViewportSize({ width: 1180, height: 760 });
