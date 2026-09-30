@@ -225,6 +225,14 @@ class Player:
         elif audio_device:
             self.ipc.request("set_property", "audio-device", audio_device)
         single = len(files) == 1
+        if getattr(self, "_pipe_globals", None):          # options a live input set for the whole player on an old mpv
+            for k in self._pipe_globals:
+                try:
+                    self.ipc.request("set_property", k, {"demuxer": "", "cache": "auto", "demuxer-readahead-secs": 1,
+                                                         "demuxer-max-bytes": "150MiB"}.get(k, 0 if "rawvideo-w" in k or "rawvideo-h" in k else ""))
+                except PlayerError:
+                    pass
+            self._pipe_globals = None
         # Set before loading: a new file picks these up as it starts.
         self.ipc.request("set_property", "keep-open", "yes" if ending == "hold" else "no")
         self.ipc.request("set_property", "image-display-duration",
@@ -245,12 +253,20 @@ class Player:
         """Play raw YUYV frames from a pipe (a live input read by a separate helper; see pvj/capture.py)."""
         if not self.is_running():
             raise PlayerError("player service is not running (systemctl start pvj-player)")
-        opts = ("demuxer=rawvideo,demuxer-rawvideo-w=%d,demuxer-rawvideo-h=%d,demuxer-rawvideo-mp-format=yuyv422,"
-                "demuxer-rawvideo-fps=%d,cache=no" % (int(width), int(height), int(fps)))
+        opts = {"demuxer": "rawvideo", "demuxer-rawvideo-w": int(width), "demuxer-rawvideo-h": int(height),
+                "demuxer-rawvideo-mp-format": "yuyv422", "demuxer-rawvideo-fps": int(fps), "cache": "no",
+                "demuxer-readahead-secs": 0, "demuxer-max-bytes": "32MiB"}
         self.ipc.request("set_property", "keep-open", "no")
         self.ipc.request("set_property", "loop-file", "no")
         self.ipc.request("set_property", "loop-playlist", "no")
-        self.ipc.request("loadfile", path, "replace", -1, opts)
+        try:        # mpv 0.38 and later take per-file options as the 4th argument of loadfile
+            self.ipc.request("loadfile", path, "replace", -1, ",".join("%s=%s" % kv for kv in opts.items()))
+        except PlayerError:
+            # mpv 0.35 (Raspberry Pi OS Bookworm): set them for the player instead, and undo them on the next play
+            for k, v in opts.items():
+                self.ipc.request("set_property", k, v)
+            self._pipe_globals = list(opts)
+            self.ipc.request("loadfile", path, "replace")
         self.ipc.request("set_property", "pause", False)
 
     def shuffle(self):

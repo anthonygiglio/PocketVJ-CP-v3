@@ -15,6 +15,7 @@ import errno
 import fcntl
 import grp
 import os
+import stat
 import re
 import signal
 import subprocess
@@ -49,6 +50,11 @@ def list_devices(sysfs="/sys/class/video4linux"):
             continue
         if index != "0" or label.lower().startswith(SKIP_NAMES):
             continue
+        try:                                   # only devices on a USB bus: the Pi's own codec, ISP and camera blocks are not inputs
+            if "/usb" not in os.path.realpath(os.path.join(sysfs, n, "device")):
+                continue
+        except OSError:
+            continue
         out.append({"id": n, "name": re.sub(r"[^\w .:()-]", "", label)[:60]})
     return out
 
@@ -62,60 +68,70 @@ class Capture:
         self._lock = threading.RLock()
 
     def helper_args(self, device, mode):
+        """The helper always writes exactly W x H YUYV, whatever the device sends (a webcam may give MJPEG at 1080p or
+        fall back to another size), because the player is told that layout."""
         w, h, fps = MODES[mode]
         return [self.mpv_bin, "--no-config", "--really-quiet", "--no-audio", "--no-input-terminal",
-                "--demuxer-lavf-o=video_size=%dx%d,framerate=%d" % (w, h, fps), "--of=rawvideo", "--ovc=rawvideo",
+                "--demuxer-lavf-o=input_format=yuyv422,video_size=%dx%d,framerate=%d" % (w, h, fps),
+                "--vf=scale=%d:%d,format=yuyv422" % (w, h), "--of=rawvideo", "--ovc=rawvideo",
                 "--o=-", "--", "av://v4l2:/dev/%s" % device]
 
     def prepare(self, device, mode):
-        """Check the request and make a fresh pipe. Returns (width, height, fps). Raises CaptureError."""
-        if mode not in MODES:
+        """Check the request and make a fresh pipe. Returns (width, height, fps). Raises CaptureError. The caller holds
+        self.lock across prepare, loading the pipe in the player and start, so two requests cannot interleave."""
+        if not isinstance(mode, str) or mode not in MODES:
             raise CaptureError("mode must be one of " + ", ".join(MODES))
         if not isinstance(device, str) or not DEVICE.fullmatch(device) or device not in [d["id"] for d in self.lister()]:
             raise CaptureError("no such input")
-        with self._lock:
-            self.stop()
-            try:
-                os.unlink(self.fifo)
-            except FileNotFoundError:
-                pass
-            os.mkfifo(self.fifo, 0o660)
-            try:
-                os.chown(self.fifo, -1, grp.getgrnam("pvj").gr_gid, follow_symlinks=False)
-            except (KeyError, OSError):
-                pass
+        self.stop()
+        os.mkfifo(self.fifo, 0o660)
         return MODES[mode]
 
     def start(self, device, mode, timeout=5.0):
-        """Start the helper writing into the pipe. The player must already be opening the pipe (a pipe can only be
-        opened for writing once someone reads it). Raises CaptureError."""
-        with self._lock:
-            deadline = time.monotonic() + timeout
-            fd = None
-            while fd is None:
-                try:
-                    fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
-                except OSError as e:
-                    if e.errno != errno.ENXIO or time.monotonic() > deadline:
-                        raise CaptureError("the player did not open the input")
-                    time.sleep(0.05)
+        """Start the helper writing into the pipe the player is opening. Raises CaptureError, and cleans up."""
+        deadline = time.monotonic() + timeout
+        fd = None
+        while fd is None:
+            try:
+                fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+            except OSError as e:
+                if e.errno != errno.ENXIO or time.monotonic() > deadline:
+                    self.stop()
+                    raise CaptureError("the player did not open the input")
+                time.sleep(0.05)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISFIFO(st.st_mode) or st.st_uid != os.getuid():   # someone swapped the pipe for something else
+                raise CaptureError("the input pipe was replaced; not writing to it")
             fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
             try:
-                self.proc = self._spawn(self.helper_args(device, mode), stdin=subprocess.DEVNULL, stdout=fd,
-                                        stderr=subprocess.DEVNULL, start_new_session=True)
+                fcntl.fcntl(fd, getattr(fcntl, "F_SETPIPE_SZ", 1031), 4 * 1024 * 1024)   # fewer wake-ups at ~124 MB/s
+            except OSError:
+                pass
+            try:
+                proc = self._spawn(self.helper_args(device, mode), stdin=subprocess.DEVNULL, stdout=fd,
+                                   stderr=subprocess.DEVNULL, start_new_session=True)
             except OSError as e:
                 raise CaptureError("could not start the capture: %s" % e)
-            finally:
-                os.close(fd)
-            self.current = {"device": device, "mode": mode}
+        except CaptureError:
+            os.close(fd)
+            self.stop()
+            raise
+        os.close(fd)
+        self.proc, self.current = proc, {"device": device, "mode": mode}
+        try:                                    # a busy, unplugged or unhappy device ends the helper at once: say so
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
             self.log("pvj-web: live input %s %s started" % (device, mode))
+            return
+        self.stop()
+        raise CaptureError("the input could not be opened (in use by something else, unplugged, or that size is not offered)")
 
     def stop(self):
-        """Stop the helper (its teardown may crash; it is on its own). Safe to call when nothing runs."""
-        with self._lock:
-            p, self.proc, self.current = self.proc, None, None
-            if p is None:
-                return False
+        """Stop the helper (its teardown may crash; it is on its own) and remove the pipe, waking any reader still waiting
+        on it. Safe to call when nothing runs."""
+        p, self.proc, self.current = self.proc, None, None
+        if p is not None:
             try:
                 p.send_signal(signal.SIGTERM)
                 p.wait(timeout=3)
@@ -127,14 +143,26 @@ class Capture:
                     pass
             except (OSError, ProcessLookupError):
                 pass
-            try:
-                os.unlink(self.fifo)
-            except FileNotFoundError:
-                pass
-            return True
+        try:
+            wake = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+            os.close(wake)                      # a reader blocked in open() gets end of file instead of waiting for ever
+        except OSError:
+            pass
+        try:
+            os.unlink(self.fifo)
+        except FileNotFoundError:
+            pass
+        return p is not None
 
-    def status(self):
-        with self._lock:
-            running = bool(self.proc and self.proc.poll() is None)
-            return {"running": running, "current": self.current if running else None, "devices": self.lister(),
-                    "modes": list(MODES)}
+    @property
+    def lock(self):
+        return self._lock
+
+    def status(self, devices=True):
+        """No lock: a status poll must never wait behind a capture that is starting or stopping."""
+        p, cur = self.proc, self.current
+        running = bool(p and p.poll() is None)
+        out = {"running": running, "current": cur if running else None, "modes": list(MODES)}
+        if devices:
+            out["devices"] = self.lister()
+        return out

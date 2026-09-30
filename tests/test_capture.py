@@ -11,10 +11,14 @@ from pvj import capture
 from tests.test_server import ServerBase
 
 
-def fake_sysfs(entries):
+def fake_sysfs(entries, usb=True):
     d = tempfile.mkdtemp()
+    bus = os.path.join(d, "devices", "platform", "usb1" if usb else "soc", "dev")
+    os.makedirs(bus)
     for node, name, index in entries:
         os.makedirs(os.path.join(d, node))
+        on_usb = usb and not name.startswith(("bcm2835", "rpi-"))
+        os.symlink(bus if on_usb else os.path.join(d, "devices"), os.path.join(d, node, "device"))
         with open(os.path.join(d, node, "name"), "w") as f:
             f.write(name + "\n")
         with open(os.path.join(d, node, "index"), "w") as f:
@@ -29,6 +33,10 @@ class ListTest(unittest.TestCase):
                         ("video19", "rpi-hevc-dec", "0"), ("video2", "HD Webcam <x>", "0"), ("junk", "x", "0")])
         self.assertEqual(capture.list_devices(d), [{"id": "video0", "name": "USB3.0 UHD: USB3.0 UHD"}, {"id": "video2", "name": "HD Webcam x"}])
         self.assertEqual(capture.list_devices("/nonexistent"), [])
+
+    def test_a_device_that_is_not_on_usb_is_not_an_input(self):
+        d = fake_sysfs([("video0", "some codec", "0")], usb=False)
+        self.assertEqual(capture.list_devices(d), [])
 
 
 class FakeProc:
@@ -45,6 +53,9 @@ class FakeProc:
         self.alive = False
 
     def wait(self, timeout=None):
+        import subprocess
+        if self.alive:
+            raise subprocess.TimeoutExpired("mpv", timeout)
         return 0
 
     def kill(self):
@@ -77,8 +88,9 @@ class CaptureTest(unittest.TestCase):
         t.join(2)
         p = self.procs[0]
         self.assertEqual(p.args[-1], "av://v4l2:/dev/video0")
-        self.assertIn("--demuxer-lavf-o=video_size=1920x1080,framerate=30", p.args)
         self.assertIn("--no-config", p.args)
+        self.assertIn("--demuxer-lavf-o=input_format=yuyv422,video_size=1920x1080,framerate=30", p.args)
+        self.assertIn("--vf=scale=1920:1080,format=yuyv422", p.args)          # always the layout the player expects
         self.assertEqual(self.c.status()["current"], {"device": "video0", "mode": "1080p30"})
         self.assertTrue(self.c.stop())
         self.assertEqual(len(p.signals), 1)
@@ -87,7 +99,8 @@ class CaptureTest(unittest.TestCase):
         os.close(box["fd"])
 
     def test_only_listed_devices_and_known_modes(self):
-        for dev, mode in (("video1", "720p30"), ("../../dev/sda", "720p30"), ("video0", "1080p60"), ("video0", "720p60"), (5, "720p30"), ("video0\n", "720p30")):
+        for dev, mode in (("video1", "720p30"), ("../../dev/sda", "720p30"), ("video0", "1080p60"), ("video0", "720p60"), (5, "720p30"),
+                          ("video0\n", "720p30"), ("video0", ["720p30"]), ("video0", {"a": 1})):
             with self.assertRaises(capture.CaptureError, msg=(dev, mode)):
                 self.c.prepare(dev, mode)
 
@@ -110,6 +123,89 @@ class CaptureTest(unittest.TestCase):
         os.close(box["fd"])
 
 
+class ReviewFindingsTest(CaptureTest):
+    def test_stop_removes_the_pipe_even_with_no_helper(self):
+        self.c.prepare("video0", "720p30")
+        self.assertTrue(os.path.exists(self.c.fifo))
+        self.c.stop()
+        self.assertFalse(os.path.exists(self.c.fifo))
+
+    def test_a_helper_that_dies_at_once_is_an_error_and_is_cleaned_up(self):
+        def dying(args, **kw):
+            p = FakeProc(args, **kw)
+            p.alive = False
+            self.procs.append(p)
+            return p
+        self.c._spawn = dying
+        self.c.prepare("video0", "720p30")
+        t, box = self.reader()
+        with self.assertRaises(capture.CaptureError):
+            self.c.start("video0", "720p30")
+        t.join(2)
+        self.assertIsNone(self.c.proc)
+        self.assertFalse(os.path.exists(self.c.fifo))
+        os.close(box["fd"])
+
+    def test_a_pipe_swapped_for_a_regular_file_is_never_written(self):
+        self.c.prepare("video0", "720p30")
+        os.unlink(self.c.fifo)
+        with open(self.c.fifo, "w") as f:
+            f.write("do not fill me")
+        with self.assertRaises(capture.CaptureError):
+            self.c.start("video0", "720p30", timeout=0.3)
+        self.assertEqual(self.procs, [])
+
+    def test_status_never_waits_for_the_lock(self):
+        with self.c.lock:
+            done = []
+            t = threading.Thread(target=lambda: done.append(self.c.status()))
+            t.start()
+            t.join(1)
+            self.assertTrue(done)
+
+    def test_two_requests_at_once_leave_exactly_one_helper(self):
+        results = []
+
+        def one():
+            with self.c.lock:
+                self.c.prepare("video0", "720p30")
+                t, box = self.reader()
+                self.c.start("video0", "720p30")
+                t.join(2)
+                os.close(box["fd"])
+            results.append(1)
+        threads = [threading.Thread(target=one) for _ in range(4)]
+        [t.start() for t in threads]
+        [t.join(10) for t in threads]
+        self.assertEqual(len(results), 4)
+        self.assertEqual(sum(p.alive for p in self.procs), 1)                     # every earlier helper was stopped
+
+
+class OldMpvTest(unittest.TestCase):
+    def test_play_pipe_falls_back_to_player_wide_options_and_undoes_them(self):
+        from pvj.player import Player, PlayerError
+        p = Player.__new__(Player)
+        sent = []
+
+        class Ipc:
+            def request(self, *cmd):
+                sent.append(cmd)
+                if cmd[0] == "loadfile" and len(cmd) > 3:
+                    raise PlayerError("invalid parameter")                   # mpv 0.35 has no index argument
+                if cmd[:2] == ("get_property", "pid"):
+                    return 1
+                if cmd[:2] == ("get_property", "path"):
+                    return "/m/a.mp4"
+                return None
+        p.ipc = Ipc()
+        p.play_pipe("/run/pvj/capture.fifo", 1280, 720, 30)
+        self.assertIn(("set_property", "demuxer", "rawvideo"), sent)
+        self.assertIn(("loadfile", "/run/pvj/capture.fifo", "replace"), sent)
+        sent.clear()
+        p.play(["/m/a.mp4"], spawn=False)
+        self.assertIn(("set_property", "demuxer", ""), sent)                   # a normal file is not read as raw video
+
+
 class CaptureApiTest(ServerBase):
     def setUp(self):
         super().setUp()
@@ -119,6 +215,7 @@ class CaptureApiTest(ServerBase):
         class Cap:
             fifo = os.path.join(self.rundir, "capture.fifo")
             current = None
+            lock = threading.RLock()
 
             def prepare(inner, device, mode):
                 if device != "video0" or mode not in capture.MODES:
@@ -134,7 +231,7 @@ class CaptureApiTest(ServerBase):
                 events.append(("stop",))
                 inner.current = None
 
-            def status(inner):
+            def status(inner, devices=True):
                 return {"running": bool(inner.current), "current": inner.current, "devices": [{"id": "video0", "name": "stick"}], "modes": list(capture.MODES)}
         self.events = events
         self.api.capture = Cap()
@@ -148,6 +245,14 @@ class CaptureApiTest(ServerBase):
         self.assertIn(("play_pipe", os.path.join(self.rundir, "capture.fifo"), 1280, 720, 30), self.player.calls)
         self.assertEqual([e[0] for e in self.events], ["prepare", "start"])       # not stopped by its own start
         self.post("/api/play", {"file": "a.mp4"})
+        self.assertEqual(self.events[-1], ("stop",))
+
+    def test_restart_player_and_test_pattern_off_also_stop_the_helper(self):
+        self.post("/api/play", {"capture": {"device": "video0", "mode": "720p30"}})
+        self.post("/api/player/restart", {})
+        self.assertEqual(self.events[-1], ("stop",))
+        self.post("/api/play", {"capture": {"device": "video0", "mode": "720p30"}})
+        self.post("/api/testpattern", {"on": False})
         self.assertEqual(self.events[-1], ("stop",))
 
     def test_stop_also_stops_the_helper_and_bad_input_is_400(self):
