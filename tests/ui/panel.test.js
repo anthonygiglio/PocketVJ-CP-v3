@@ -100,7 +100,7 @@ function startServer() {
     await page.click('.item:has-text("renamed-on-phone.mp4") >> text=Delete');
     await page.waitForFunction(() => !/renamed-on-phone/.test(document.body.textContent));
     await page.setInputFiles('#filepick', { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100, 1) });
-    await page.waitForFunction(() => /only video and image files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => /only video, image and audio files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
 
     // Mix: drag a slider and check the throttle keeps request count sane
     await page.click('nav >> text=Mix');
