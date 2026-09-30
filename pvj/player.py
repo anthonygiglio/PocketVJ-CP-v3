@@ -302,6 +302,29 @@ class Player:
         self._set("screenshot-jpeg-quality", int(quality))
         self.ipc.request("screenshot-to-file", path, "window")
 
+    def osd_size(self):
+        """(width, height) of the picture the player is drawing on, in pixels, or None if unknown."""
+        try:
+            w, h = self.ipc.request("get_property", "osd-width"), self.ipc.request("get_property", "osd-height")
+        except PlayerError:
+            return None
+        return (int(w), int(h)) if isinstance(w, (int, float)) and isinstance(h, (int, float)) and w > 0 and h > 0 else None
+
+    def overlay(self, oid, x, y, width, height, pixels):
+        """Draw a bitmap (raw BGRA, `width` x `height`) over the picture and the on-screen text, at x, y, until
+        overlay_remove(oid). The pixels go through a file in the runtime folder that the player reads."""
+        if not (isinstance(oid, int) and 0 <= oid < 64) or len(pixels) != width * height * 4:
+            raise PlayerError("bad overlay")
+        path = os.path.join(self.rundir, "overlay-%d.bgra" % oid)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o660)
+        with os.fdopen(fd, "wb") as f:
+            f.write(pixels)
+        os.chmod(path, 0o660)
+        self.ipc.request("overlay-add", oid, int(x), int(y), path, 0, "bgra", int(width), int(height), int(width) * 4)
+
+    def overlay_remove(self, oid):
+        self.ipc.request("overlay-remove", oid)
+
     def volume_step(self, delta):
         self.ipc.request("add", "volume", float(delta))
 

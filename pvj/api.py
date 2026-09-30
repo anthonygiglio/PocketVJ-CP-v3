@@ -19,6 +19,7 @@ import time
 import unicodedata
 
 from . import dmx as dmx_mod, hardware, midi as midi_mod, netcfg, osc as osc_mod, presets, streams as streams_mod, themes as themes_mod
+from . import auth as auth_mod
 from .auth import Auth, AuthError
 from .modules import ModuleError
 from .player import PlayerError, VIDEO_EXTENSIONS, IMAGE_EXTENSIONS
@@ -740,7 +741,12 @@ class Api:
             token, dev = self.auth.invite(str(body.get("name", "guest"))[:40], body.get("role"))
         except AuthError as e:
             raise bad(str(e))
-        return {"device": dev, "token": token, "note": "Share this token once; it is not shown again."}
+        out = {"device": dev, "token": token, "note": "Share this token once; it is not shown again."}
+        origin = body.get("origin")
+        if isinstance(origin, str) and re.fullmatch(r"https?://[A-Za-z0-9.\-:\[\]]{1,100}", origin):
+            from . import qr as qr_mod
+            out["qr_svg"] = qr_mod.svg(qr_mod.encode("%s/#token=%s" % (origin, token)))
+        return out
 
     def revoke(self, body, device, client):
         did = body.get("id")
@@ -876,6 +882,62 @@ class Api:
             raise ApiError(404, "autostart is not available")
         message = self.autostart.run_now()
         return dict(self.autostart.status(), message=message)
+
+    # --- join codes and access on the display --------------------------------
+    def _access_state(self):
+        return {"codes": self.auth.list_joins(), "screen": self.pinscreen.status() if self.pinscreen else {"showing": False, "items": [], "seconds_left": 0},
+                "screen_available": self.pinscreen is not None}
+
+    def get_access(self, body, device, client):
+        return self._access_state()
+
+    def make_join_code(self, body, device, client):
+        try:
+            self.auth.create_join(body.get("role"), body.get("minutes", auth_mod.JOIN_DEFAULT_MINUTES), body.get("uses", auth_mod.JOIN_DEFAULT_USES))
+        except AuthError as e:
+            raise bad(str(e))
+        return self._access_state()
+
+    def cancel_join_code(self, body, device, client):
+        if body.get("all") is True:
+            self.auth.cancel_join(None)
+        elif not isinstance(body.get("code"), str) or not self.auth.cancel_join(body["code"]):
+            raise ApiError(404, "no such code")
+        return self._access_state()
+
+    def access_qr(self, target, origin):
+        """An SVG QR code for the panel address ("panel", no access in it) or for a live join code ("view", "live").
+        The address comes from the Host the browser used, so the code works from the same network as the viewer."""
+        from . import qr as qr_mod
+        if not re.fullmatch(r"[A-Za-z0-9.\-:\[\]]{1,100}", origin or ""):
+            raise bad("unknown address")
+        base = "http://%s/" % origin
+        if target == "panel":
+            text = base
+        elif target in ("view", "live"):
+            codes = {j["role"]: j["code"] for j in self.auth.list_joins()}
+            if target not in codes:
+                raise ApiError(404, "make a %s code first" % ("guest" if target == "view" else "presenter"))
+            text = "%s#code=%s" % (base, codes[target])
+        else:
+            raise bad("unknown QR code")
+        return qr_mod.svg(qr_mod.encode(text)).encode()
+
+    def show_access(self, body, device, client):
+        """Put the PIN and/or the guest and presenter codes on the display for a while, or take them off."""
+        if self.pinscreen is None:
+            raise ApiError(404, "the on-screen display is not available")
+        show = body.get("show")
+        if not isinstance(show, bool):
+            raise bad("show must be true or false")
+        if not show:
+            self.pinscreen.hide()
+            return self._access_state()
+        try:
+            self.pinscreen.show(body.get("items"), body.get("seconds", 60))
+        except (ValueError, AuthError) as e:
+            raise bad(str(e))
+        return self._access_state()
 
     # --- DMX and MIDI input --------------------------------------------
     def _need_control(self, module, manager):
@@ -1089,6 +1151,10 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/access"): ("full", self.get_access),
+            ("POST", "/api/access/code"): ("full", self.make_join_code),
+            ("POST", "/api/access/cancel"): ("full", self.cancel_join_code),
+            ("POST", "/api/access/screen"): ("full", self.show_access),
             ("GET", "/api/audio"): ("view", self.get_audio),
             ("POST", "/api/audio"): ("full", self.set_audio),
             ("GET", "/api/autostart"): ("view", self.get_autostart),

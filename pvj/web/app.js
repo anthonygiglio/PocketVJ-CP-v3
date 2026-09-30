@@ -118,37 +118,55 @@
         text.split('').forEach(function (c, j) { pins[j].value = c; });
       });
     });
-    var name = h('input', { class: 'text-input', value: 'My phone', 'aria-label': 'Name for this device', maxlength: 40 });
-    var button = h('button', { class: 'btn on big', text: 'Pair this device' });
-    button.addEventListener('click', function () {
-      var pin = pinValue();
-      if (pin.length !== 4) return say('Enter the 4 digit PIN shown on the box.', true);
+    var sc = S.scanned;
+    if (sc && sc.kind === 'pin') sc.value.split('').forEach(function (c, j) { if (pins[j]) pins[j].value = c; });
+    var code = h('input', { class: 'text-input mono', id: 'joincode', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6,
+      'aria-label': 'Guest or presenter code (6 digits)', placeholder: '6 digit code', value: sc && sc.kind === 'code' ? sc.value : '' });
+    code.addEventListener('input', function () { code.value = code.value.replace(/\D/g, '').slice(0, 6); });
+    var name = h('input', { class: 'text-input', value: sc && sc.kind === 'code' ? 'Phone' : 'My phone', 'aria-label': 'Name for this device', maxlength: 40 });
+    function join(secret, button) {
       button.disabled = true;
-      api('POST', '/api/pair', { pin: pin, name: name.value || 'device' }).then(function (r) {
+      api('POST', '/api/pair', { pin: secret, name: name.value || 'device' }).then(function (r) {
         button.disabled = false;
         if (!r.ok) {
           var wait = r.data.retry_after ? ' Try again in ' + r.data.retry_after + ' seconds.' : '';
-          return say((r.status === 403 ? 'Wrong PIN.' : (r.data.error || 'Could not pair.')) + wait, true);
+          var why = r.status === 403 ? (secret.length === 6 ? 'That code is wrong or has expired. Ask for a new one.' : 'Wrong PIN.') : (r.data.error || 'Could not connect.');
+          return say(why + wait, true);
         }
+        S.scanned = null;
         S.device = r.data.device;
         S.token = r.data.token;
         start();
       });
+    }
+    var pinButton = h('button', { class: 'btn' + (sc ? '' : ' on') + ' big', id: 'pairbtn', text: 'Pair with PIN' });
+    pinButton.addEventListener('click', function () {
+      var pin = pinValue();
+      if (pin.length !== 4) return say('Enter the 4 digit PIN shown on the box.', true);
+      join(pin, pinButton);
     });
+    var codeButton = h('button', { class: 'btn' + (sc && sc.kind === 'code' ? ' on' : '') + ' big', id: 'joinbtn', text: 'Join with code' });
+    codeButton.addEventListener('click', function () {
+      if (code.value.length !== 6) return say('Enter the 6 digit code shown on the screen.', true);
+      join(code.value, codeButton);
+    });
+    var scannedNote = sc && sc.kind === 'code' ? h('div', { class: 'msg', id: 'scannednote', text: 'Code read from the QR code. Tap Join.' }) : null;
     return h('div', { class: 'shell' },
       h('div', { class: 'screen' },
         h('h1', { text: 'Connect to your box' }),
-        h('p', { text: "Join the box's network, then enter the 4 digit PIN shown on the box's screen (until the first device has paired) or printed by \"sudo pvj-pin\" on the box. No internet needed." }),
-        h('div', { class: 'k', text: 'PIN' }),
-        h('div', { class: 'pin-row' }, pins),
-        h('label', { class: 'k', for: 'devname', text: 'Device name' }),
+        h('p', { text: 'Scan the QR code on the screen, or type the code shown there. The box\'s owner can use the 4 digit PIN instead. No internet needed.' }),
+        scannedNote,
+        h('div', { class: 'k', text: 'Guest or presenter code' }), code,
+        h('label', { class: 'k', for: 'devname', text: 'Name for this device' }),
         (name.id = 'devname', name),
-        button,
+        codeButton,
+        h('div', { class: 'k', text: 'Owner: PIN' }),
+        h('div', { class: 'pin-row' }, pins),
+        pinButton,
         h('div', { id: 'msg', class: 'msg', role: 'status' }),
         h('div', { class: 'grow' }),
         h('div', { class: 'k', text: 'Connection lost? The box keeps playing. Reconnect any time.' })));
   }
-
   // ---- live -----------------------------------------------------------
   function padButton(bank, index, pad) {
     var playing = S.status && S.status.player && S.status.player.path && pad.file && base(S.status.player.path) === pad.file;
@@ -938,32 +956,115 @@
           return sw;
         })));
   }
+  var accessForm = { pin: false, view: true, live: false, seconds: 300 };  // survives redraws
+  var accessTimer = null;
   function accessCard() {
+    var card = h('div', { class: 'card', id: 'accesscard' }, h('h2', { text: 'Access' }));
+    var devices = h('div', { class: 'list' }, S.devices.map(function (d) {
+      return h('div', { class: 'item' }, h('span', { text: d.name }), h('span', { class: 'row' }, h('span', { class: 'k', text: d.role }),
+        h('button', { class: 'btn small', text: 'Remove', onclick: function () {
+          act('POST', '/api/devices/revoke', { id: d.id }, function () { S.devices = S.devices.filter(function (x) { return x.id !== d.id; }); if (S.device && d.id === S.device.id) { S.device = null; } render(); });
+        } })));
+    }));
+    var live = h('div', { class: 'list', id: 'accesslive' });
+    function roleName(r) { return r === 'view' ? 'Guest (watch only)' : 'Presenter (play and mix)'; }
+    function clock(sec) { var m = Math.floor(sec / 60), s2 = sec % 60; return m + ':' + (s2 < 10 ? '0' : '') + s2; }
+    function drawLive(d) {
+      live.textContent = '';
+      var scr = d.screen;
+      live.appendChild(h('div', { class: 'k', id: 'accessscreenline', text: scr.showing ? 'On the display now: ' + scr.items.map(function (i) { return i === 'pin' ? 'full access PIN' : roleName(i).toLowerCase(); }).join(', ') + ', hides in ' + clock(scr.seconds_left) : 'Nothing on the display.' }));
+      var boxes = [['pin', 'Full access PIN (owner only)'], ['view', 'Guest code and QR (watch only)'], ['live', 'Presenter code and QR (play and mix)']].map(function (it) {
+        var cb = h('input', { type: 'checkbox', id: 'show-' + it[0], checked: accessForm[it[0]] });
+        cb.addEventListener('change', function () { accessForm[it[0]] = cb.checked; });
+        return h('label', { class: 'row', for: 'show-' + it[0] }, cb, h('span', { text: it[1] }));
+      });
+      var secs = h('select', { class: 'text-input', id: 'showsecs', 'aria-label': 'Show for' },
+        [[60, '1 minute'], [300, '5 minutes'], [900, '15 minutes'], [3600, '1 hour']].map(function (o) { return h('option', { value: o[0], text: 'Show for ' + o[1], selected: o[0] === accessForm.seconds }); }));
+      secs.addEventListener('change', function () { accessForm.seconds = parseInt(secs.value, 10); });
+      live.appendChild(h('div', { class: 'k', text: 'Show on the display' }));
+      boxes.forEach(function (b) { live.appendChild(b); });
+      live.appendChild(secs);
+      live.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn on small', id: 'showaccess', text: scr.showing ? 'Show again' : 'Show on display', onclick: function () {
+          var items = ['pin', 'view', 'live'].filter(function (i) { return accessForm[i]; });
+          if (!items.length) return say('Choose what to show.', true);
+          if (accessForm.pin && !window.confirm('Anyone who can see the display will see the full access PIN. Show it?')) return;
+          act('POST', '/api/access/screen', { show: true, items: items, seconds: accessForm.seconds }, function (data) { say(''); drawLive(data); });
+        } }),
+        h('button', { class: 'btn small', id: 'hideaccess', text: 'Hide from display', disabled: !scr.showing, onclick: function () {
+          act('POST', '/api/access/screen', { show: false }, function (data) { drawLive(data); });
+        } })));
+      live.appendChild(h('div', { class: 'k', text: 'Join codes (6 digits; they expire and work a limited number of times)' }));
+      if (!d.codes.length) live.appendChild(h('div', { class: 'k', id: 'nocodes', text: 'None active.' }));
+      d.codes.forEach(function (c) {
+        live.appendChild(h('div', { class: 'item join-code', 'data-role': c.role },
+          h('span', {}, roleName(c.role), h('br'), h('span', { class: 'mono big-code', text: c.code }), h('br'),
+            h('span', { class: 'k', text: 'expires in ' + clock(c.seconds_left) + ' · ' + c.uses_left + ' uses left' })),
+          h('img', { class: 'qr', alt: 'QR code for the ' + roleName(c.role).toLowerCase() + ' code', src: '/api/qr.svg?for=' + c.role + '&c=' + c.code }),
+          h('button', { class: 'btn small', text: 'Cancel', onclick: function () { act('POST', '/api/access/cancel', { code: c.code }, drawLive); } })));
+      });
+      live.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn small', id: 'newguest', text: 'New guest code', onclick: function () { act('POST', '/api/access/code', { role: 'view', minutes: 60 }, drawLive); } }),
+        h('button', { class: 'btn small', id: 'newpresenter', text: 'New presenter code', onclick: function () { act('POST', '/api/access/code', { role: 'live', minutes: 60 }, drawLive); } }),
+        h('button', { class: 'btn small', id: 'printsheet', text: 'Print access sheet', onclick: function () { printSheet(d); } })));
+      clearTimeout(accessTimer);
+      if (scr.showing || d.codes.length) accessTimer = setTimeout(refresh, 5000);
+    }
+    function refresh() {
+      if (!document.getElementById('accesscard')) return;
+      api('GET', '/api/access').then(function (r) { if (r.ok && document.getElementById('accesscard')) drawLive(r.data); });
+    }
     var link = h('input', { class: 'text-input mono', readonly: true, 'aria-label': 'Guest link', hidden: true });
+    var linkQr = h('img', { class: 'qr', id: 'linkqr', alt: 'QR code for the guest link', hidden: true });
     var role = h('select', { class: 'text-input', 'aria-label': 'Access level' }, h('option', { value: 'view', text: 'View only' }), h('option', { value: 'live', text: 'Live (play and mix)' }));
     var pinOut = h('div', { class: 'mono', id: 'pinout' });
-    return h('div', { class: 'card' }, h('h2', { text: 'Access' }),
-      h('div', { class: 'k', text: 'Paired devices' }),
-      h('div', { class: 'list' }, S.devices.map(function (d) {
-        return h('div', { class: 'item' }, h('span', { text: d.name }), h('span', { class: 'row' }, h('span', { class: 'k', text: d.role }),
-          h('button', { class: 'btn small', text: 'Remove', onclick: function () {
-            act('POST', '/api/devices/revoke', { id: d.id }, function () { S.devices = S.devices.filter(function (x) { return x.id !== d.id; }); if (S.device && d.id === S.device.id) { S.device = null; } render(); });
-          } })));
-      })),
-      h('div', { class: 'k', text: 'Guest link' }), role,
-      h('button', { class: 'btn', text: 'Create guest link', onclick: function () {
-        act('POST', '/api/devices/invite', { name: 'Guest (' + role.value + ')', role: role.value }, function (d) {
-          link.value = location.origin + '/#token=' + d.token; link.hidden = false; link.select();
-          api('GET', '/api/devices').then(function (r) { if (r.ok) S.devices = r.data.devices; });
-        });
-      } }), link,
-      h('button', { class: 'btn', text: 'New PIN', onclick: function () { act('POST', '/api/pin/rotate', {}, function (d) { pinOut.textContent = 'New PIN: ' + d.pin; }); } }), pinOut);
+    card.appendChild(h('div', { class: 'k', text: 'Paired devices' }));
+    card.appendChild(devices);
+    card.appendChild(live);
+    card.appendChild(h('div', { class: 'k', text: 'Guest link that does not expire (until you remove it above)' }));
+    card.appendChild(role);
+    card.appendChild(h('button', { class: 'btn', text: 'Create guest link', onclick: function () {
+      act('POST', '/api/devices/invite', { name: 'Guest (' + role.value + ')', role: role.value, origin: location.origin }, function (d) {
+        link.value = location.origin + '/#token=' + d.token; link.hidden = false; link.select();
+        if (d.qr_svg) { linkQr.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.qr_svg); linkQr.hidden = false; }
+        api('GET', '/api/devices').then(function (r) { if (r.ok) S.devices = r.data.devices; });
+      });
+    } }));
+    card.appendChild(link);
+    card.appendChild(linkQr);
+    card.appendChild(h('button', { class: 'btn', text: 'New PIN', onclick: function () { act('POST', '/api/pin/rotate', {}, function (d) { pinOut.textContent = 'New PIN: ' + d.pin; }); } }));
+    card.appendChild(pinOut);
+    refresh();
+    return card;
+  }
+  // A page to print and pin up in a studio: the panel address as a QR code (no access in it), plus the current guest
+  // and presenter codes if any. Printed from the browser; nothing leaves the box.
+  function printSheet(d) {
+    var sheet = h('div', { id: 'printsheet' },
+      h('h1', { text: 'nxlx.mastercontrol' }),
+      h('p', { text: 'Scan with your phone camera to open the control panel. You need a code from the person running the show, or the PIN on the box.' }),
+      h('div', { class: 'sheet-row' },
+        h('figure', {}, h('img', { class: 'qr-big', alt: 'QR code for the control panel', src: '/api/qr.svg?for=panel' }), h('figcaption', { text: location.origin + '/' }))),
+      d.codes.length ? h('div', { class: 'sheet-row' }, d.codes.map(function (c) {
+        return h('figure', {}, h('img', { class: 'qr-big', alt: 'QR code for the ' + c.role + ' code', src: '/api/qr.svg?for=' + c.role + '&c=' + c.code }),
+          h('figcaption', { text: (c.role === 'view' ? 'Guest (watch only)' : 'Presenter (play and mix)') + ': ' + c.code + ' (expires)' }));
+      })) : null,
+      h('p', { class: 'k', text: 'Codes shown here expire. The panel address above does not.' }));
+    document.body.appendChild(sheet);
+    document.body.classList.add('printing');
+    var done = function () { document.body.classList.remove('printing'); if (sheet.parentNode) sheet.parentNode.removeChild(sheet); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    var imgs = sheet.querySelectorAll('img'), left = imgs.length;
+    var go = function () { window.print(); setTimeout(done, 1000); };
+    if (!left) return go();
+    Array.prototype.forEach.call(imgs, function (im) { var fin = function () { if (--left === 0) go(); }; im.addEventListener('load', fin); im.addEventListener('error', fin); });
   }
 
   // ---- shell ----------------------------------------------------------
   function render() {
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
+    clearTimeout(accessTimer);
     keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
@@ -980,6 +1081,10 @@
 
   // A guest link carries its token in the URL fragment, which is never sent to the server in a request line.
   function boot() {
+    // A scanned QR code carries a join code or the box's PIN in the address fragment (never sent to any server);
+    // keep it for the connect screen and take it out of the address bar and history at once.
+    var scanned = /^#(code|pin)=([0-9]{4,6})$/.exec(location.hash);
+    if (scanned) { S.scanned = { kind: scanned[1], value: scanned[2] }; history.replaceState(null, '', location.pathname); }
     var m = /^#token=([A-Za-z0-9_-]+)$/.exec(location.hash);
     var first = m ? api('POST', '/api/session', { token: m[1] }).then(function () { history.replaceState(null, '', location.pathname); }) : Promise.resolve();
     first.then(function () { return api('GET', '/api/status'); }).then(function (r) {

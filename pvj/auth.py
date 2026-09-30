@@ -5,6 +5,9 @@
 * A 4-digit PIN (shown on the box) pairs a phone or tablet and yields a token.
 * Tokens are random 192-bit values; only their SHA-256 is stored.
 * Roles: view (read only) < live (play and mix) < full (everything).
+* A paired full-access device can also make short-lived JOIN CODES (6 digits) for guests (view) or presenters (live).
+  They are meant to be shown on the display, so they can never give full access, they expire, they work a limited
+  number of times, and only a few can exist at once. They live in memory only: a restart clears them.
 * The PIN is stored as a salted scrypt hash. Because it is short, guessing is
   throttled per client and globally, and comparisons are constant-time.
 """
@@ -17,6 +20,11 @@ import time
 
 ROLES = {"view": 1, "live": 2, "full": 3}
 PIN_LENGTH = 4
+JOIN_LENGTH = 6
+JOIN_ROLES = ("view", "live")
+MAX_JOINS = 4
+JOIN_MIN_MINUTES, JOIN_MAX_MINUTES, JOIN_DEFAULT_MINUTES = 1, 120, 15
+JOIN_MAX_USES, JOIN_DEFAULT_USES = 50, 20
 PER_CLIENT_FAILS, PER_CLIENT_WINDOW = 5, 60.0
 GLOBAL_FAILS, GLOBAL_WINDOW = 20, 600.0
 LOCKOUT_SECONDS = 60.0
@@ -50,6 +58,7 @@ class Auth:
         self._locked_until = {}  # client or "*" -> time
         self.last_seen = {}
         self._pair_lock = threading.Lock()  # one PIN attempt at a time, so the counters are exact
+        self._joins = {}        # code -> {"role", "expires" (monotonic), "uses"}
         if rotate_on_start or not settings.data["auth"].get("pin_hash"):
             self._new_pin()
 
@@ -105,15 +114,83 @@ class Auth:
 
     # --- pairing and tokens --------------------------------------------
     def pair(self, pin, name, client="?"):
+        """Pair with the box's PIN (full access) or a join code (guest or presenter). A wrong try counts against the
+        same throttle either way."""
         with self._pair_lock:
             wait = self._locked(client)
             if wait:
                 raise AuthError("too many attempts", retry_after=int(wait) + 1)
+            given = pin if isinstance(pin, str) else ""
+            if len(given) == JOIN_LENGTH and given.isdigit():
+                role = self._use_join(given)
+                if role:
+                    self._fails.pop(client, None)
+                    return self._add_device(name, role)
+                self._record_fail(client)
+                raise AuthError("wrong or expired code")
             if not self._check_pin(pin):
                 self._record_fail(client)
                 raise AuthError("wrong PIN")
             self._fails.pop(client, None)
             return self._add_device(name, "full")
+
+    # --- join codes ----------------------------------------------------
+    def _prune_joins(self):
+        t = self._clock()
+        for code in [c for c, j in self._joins.items() if j["expires"] <= t or j["uses"] <= 0]:
+            del self._joins[code]
+
+    def _use_join(self, given):
+        """The role of an active join code that matches `given` (and use it up once), else None. Compares every
+        active code in constant time, so timing does not say which digits were right."""
+        self._prune_joins()
+        found = None
+        for code, j in self._joins.items():
+            if hmac.compare_digest(code, given):
+                found = code
+        if found is None:
+            return None
+        self._joins[found]["uses"] -= 1
+        role = self._joins[found]["role"]
+        self._prune_joins()
+        return role
+
+    def create_join(self, role, minutes=JOIN_DEFAULT_MINUTES, uses=JOIN_DEFAULT_USES):
+        """A new join code for `role` (view or live). Raises AuthError on bad input or too many codes."""
+        if role not in JOIN_ROLES:
+            raise AuthError("a join code is for view (guest) or live (presenter) access")
+        for name, v, lo, hi in (("minutes", minutes, JOIN_MIN_MINUTES, JOIN_MAX_MINUTES), ("uses", uses, 1, JOIN_MAX_USES)):
+            if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+                raise AuthError("%s must be a whole number from %d to %d" % (name, lo, hi))
+        with self._pair_lock:
+            self._prune_joins()
+            same = [c for c, j in self._joins.items() if j["role"] == role]
+            for c in same:                      # one live code per role: a new one replaces the old
+                del self._joins[c]
+            if len(self._joins) >= MAX_JOINS:
+                raise AuthError("too many join codes; cancel one first")
+            while True:
+                code = "%0*d" % (JOIN_LENGTH, secrets.randbelow(10 ** JOIN_LENGTH))
+                if code not in self._joins:
+                    break
+            self._joins[code] = {"role": role, "expires": self._clock() + minutes * 60, "uses": uses}
+            return code
+
+    def list_joins(self):
+        with self._pair_lock:
+            self._prune_joins()
+            t = self._clock()
+            return [{"code": c, "role": j["role"], "seconds_left": max(0, int(j["expires"] - t)), "uses_left": j["uses"]}
+                    for c, j in sorted(self._joins.items(), key=lambda kv: kv[1]["role"])]
+
+    def cancel_join(self, code=None):
+        """Cancel one code (or all if `code` is None). True if something was cancelled."""
+        with self._pair_lock:
+            if code is None:
+                changed = bool(self._joins)
+                self._joins.clear()
+                return changed
+            return self._joins.pop(code, None) is not None
 
     def invite(self, name, role):
         if role not in ("view", "live"):

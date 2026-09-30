@@ -46,7 +46,9 @@ ReadWritePaths=/var/lib/pvj /run/pvj
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK: reading the box's own addresses (`ip -j addr`) for the Network card and the join QR codes. Without it both
+# silently showed no address on a real Pi 4 (2026-09-30).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes
 LockPersonality=yes
 SystemCallArchitectures=native

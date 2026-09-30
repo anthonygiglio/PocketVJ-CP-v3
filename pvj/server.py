@@ -148,10 +148,21 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
             except ApiError as e:
                 self._json(e.status, {"error": e.message})
 
+        def _qr(self):
+            """GET /api/qr.svg?for=panel|view|live (full access): a QR code to print or show."""
+            try:
+                api.require(auth.authenticate(self._token()), "full")
+                target = (parse_qs(urlsplit(self.path).query).get("for") or [""])[0]
+                self._send(200, api.access_qr(target, self.headers.get("Host", "")), "image/svg+xml")
+            except ApiError as e:
+                self._json(e.status, {"error": e.message})
+
         def do_GET(self):
             path = urlsplit(self.path).path
             if path == "/api/preview.jpg":
                 return self._preview()
+            if path == "/api/qr.svg":
+                return self._qr()
             if path.startswith("/api/"):
                 return self._api("GET", path, {})
             if path == "/theme.css":
