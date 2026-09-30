@@ -921,7 +921,7 @@
     function draw(d) {
       body.textContent = '';
       body.appendChild(h('div', { class: 'k', id: 'projline', text: d.projectors.length ?
-        'Controlled over the network with PJLink (port 4352), like the old Beamer On and Off buttons.' :
+        'Controlled over the network with PJLink, like the old Beamer On and Off buttons.' :
         'No projectors added. Most network projectors speak PJLink; switch it on in the projector\'s network menu.' }));
       if (d.projectors.length > 1 && can('live')) body.appendChild(h('div', { class: 'row' },
         h('button', { class: 'btn small grow', id: 'projallon', text: 'All on', onclick: function () { run('all', 'on', 'All on', function () { draw(d); }); } }),
@@ -942,7 +942,8 @@
       var name = h('input', { class: 'text-input', id: 'projname', 'aria-label': 'Projector name', placeholder: 'Name', maxlength: 40, value: projForm.name });
       var host = h('input', { class: 'text-input mono', id: 'projhost', 'aria-label': 'Projector address', placeholder: '192.168.1.50', value: projForm.host, autocomplete: 'off' });
       var port = h('input', { class: 'text-input mono', id: 'projport', type: 'number', min: 1, max: 65535, 'aria-label': 'Port', value: projForm.port });
-      var pw = h('input', { class: 'text-input mono', id: 'projpw', type: 'password', 'aria-label': 'PJLink password (if set on the projector)', placeholder: 'Password, if the projector has one', value: projForm.password, autocomplete: 'new-password' });
+      var pw = h('input', { class: 'text-input mono', id: 'projpw', type: 'password', 'aria-label': 'PJLink password (if set on the projector)', placeholder: 'Password, if the projector has one', autocomplete: 'new-password' });
+      pw.value = projForm.password;     // the property, not an attribute: a typed password never becomes page HTML
       name.addEventListener('input', function () { projForm.name = name.value; });
       host.addEventListener('input', function () { projForm.host = host.value; });
       port.addEventListener('input', function () { projForm.port = port.value; });

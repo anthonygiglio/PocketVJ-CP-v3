@@ -137,6 +137,13 @@ class Scheduler:
         return fired
 
     def _run(self, entry, minute):
+        if entry["action"] in ("projector_on", "projector_off"):
+            # A projector that is off the network can take seconds to fail; the next entry must not wait for it.
+            threading.Thread(target=self._execute, args=(entry, minute), name="schedule-projector", daemon=True).start()
+        else:
+            self._execute(entry, minute)
+
+    def _execute(self, entry, minute):
         action = entry["action"]
         try:
             if action == "play":

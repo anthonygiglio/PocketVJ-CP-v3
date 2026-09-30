@@ -75,6 +75,11 @@ class PrivateNetworkTest(unittest.TestCase):
             with self.assertRaises(projector.ProjectorError, msg=bad):
                 projector.private_address(bad)
 
+    def test_names_dns_cannot_encode_and_the_metadata_address_are_clear_errors(self):
+        for bad in ("a..b", "..", "a" * 64 + ".lan", "169.254.169.254"):
+            with self.assertRaises(projector.ProjectorError, msg=bad):
+                projector.private_address(bad)
+
     def test_a_name_must_resolve_to_a_private_address(self):
         ok = lambda h, p, proto=0: [(0, 0, 0, "", ("192.168.0.60", p))]
         public = lambda h, p, proto=0: [(0, 0, 0, "", ("93.184.216.34", p))]
@@ -147,6 +152,46 @@ class PJLinkTest(unittest.TestCase):
             projector.PJLink("127.0.0.1", srv.server_address[1], timeout=0.5).power(True)
         self.assertLess(_t.monotonic() - start, 2.0)                    # each byte was quick; the whole line was not
 
+    def test_one_command_at_a_time_per_projector(self):
+        with LOOPBACK_OK:
+            fake = FakeProjector()
+            self.addCleanup(fake.close)
+            live, peak, guard = [0], [0], threading.Lock()
+            real = socket.create_connection
+
+            def counting_connect(addr, timeout=None):
+                with guard:
+                    live[0] += 1
+                    peak[0] = max(peak[0], live[0])
+                s = real(addr, timeout=timeout)
+
+                class Counted:
+                    def __getattr__(self, name):
+                        return getattr(s, name)
+
+                    def close(self):
+                        with guard:
+                            live[0] -= 1
+                        s.close()
+                return Counted()
+            links = [projector.PJLink("127.0.0.1", fake.port, connect=counting_connect) for _ in range(6)]
+            ts = [threading.Thread(target=l.state) for l in links]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            self.assertEqual(peak[0], 1)
+
+    def test_connect_shares_the_deadline(self):
+        seen = []
+
+        def connect(addr, timeout=None):
+            seen.append(timeout)
+            raise OSError("refused")
+        with self.assertRaises(projector.ProjectorError):
+            projector.PJLink("192.168.0.9", timeout=3, connect=connect).power(True)
+        self.assertLessEqual(seen[0], 3)
+
     def test_something_that_is_not_a_projector(self):
         class Web(socketserver.StreamRequestHandler):
             def handle(self):
@@ -203,6 +248,43 @@ class ApiTest(ServerBase):
         self.assertEqual(st, 502)
         self.assertIn("cannot reach", body["error"])
 
+    def test_background_answers_at_once_and_still_switches(self):
+        self.add()
+        st, body, _ = self.post("/api/projector", {"id": "all", "action": "on", "background": True})
+        self.assertEqual((st, body), (200, {"started": True}))
+        import time as _t
+        end = _t.monotonic() + 5
+        while self.fake.power != "1" and _t.monotonic() < end:
+            _t.sleep(0.05)
+        self.assertEqual(self.fake.power, "1")
+        self.assertEqual(self.post("/api/projector", {"id": "all", "action": "on", "background": "yes"})[0], 400)
+
+    def test_an_unexpected_error_is_a_502_not_a_crash(self):
+        pid = self.add()[1]["projectors"][0]["id"]
+
+        class Broken:
+            def power(self, on):
+                raise RuntimeError("boom")
+        with mock.patch.object(self.api, "_pjlink", lambda p: Broken()):
+            st, body, _ = self.post("/api/projector", {"id": pid, "action": "on"})
+        self.assertEqual(st, 502)
+        self.assertIn("boom", body["error"])
+
+    def test_a_slow_name_lookup_does_not_hold_the_settings_lock(self):
+        api = self.api
+        held = []
+
+        def check(host, resolve=None):
+            got = []
+            t = threading.Thread(target=lambda: got.append(api.settings.lock.acquire(timeout=1)) or (got[0] and api.settings.lock.release()))
+            t.start()
+            t.join()
+            held.append(not got[0])
+            return "192.168.0.7"
+        with mock.patch.object(projector, "private_address", check):
+            self.assertEqual(self.post("/api/projectors", {"add": {"host": "beamer.lan"}})[0], 200)
+        self.assertEqual(held, [False])
+
     def test_roles(self):
         view = self.post("/api/devices/invite", {"name": "g", "role": "view"})[1]["token"]
         live = self.post("/api/devices/invite", {"name": "g", "role": "live"})[1]["token"]
@@ -223,9 +305,35 @@ class ScheduleAndOscTest(unittest.TestCase):
                 scheduler.validate({"entries": [dict({"time": "10:00", "days": [1]}, **bad)]})
 
     def test_legacy_osc_beamer_addresses(self):
-        self.assertEqual(osc.translate("/beameron", [1.0]), ("/api/projector", {"id": "all", "action": "on"}))
-        self.assertEqual(osc.translate("/beameroff", [1.0]), ("/api/projector", {"id": "all", "action": "off"}))
+        self.assertEqual(osc.translate("/beameron", [1.0]), ("/api/projector", {"id": "all", "action": "on", "background": True}))
+        self.assertEqual(osc.translate("/beameroff", [1.0]), ("/api/projector", {"id": "all", "action": "off", "background": True}))
         self.assertIsNone(osc.translate("/beameron", [0.0]))                                       # the release does nothing
+
+
+class ScheduledProjectorTest(unittest.TestCase):
+    def test_projector_entries_run_off_the_schedule_thread_and_record_the_result(self):
+        import tempfile, os, time as _t
+        from pvj.settings import Settings
+        from pvj.modules import Registry
+        gate = threading.Event()
+
+        class Api:
+            def projector_action(self, body, device, client):
+                gate.wait(5)
+                return {"results": {"p1": {"ok": False, "error": "cannot reach the projector"}}}
+        st = Settings(os.path.join(tempfile.mkdtemp(), "settings.json"))
+        st.load()
+        s = scheduler.Scheduler(Api(), st, Registry(st, "x86"), log=lambda *_: None)
+        e = {"id": "e1", "action": "projector_on"}
+        start = _t.monotonic()
+        s._run(e, __import__("datetime").datetime(2026, 9, 30, 18, 0))
+        self.assertLess(_t.monotonic() - start, 0.5)                          # did not wait for the projector
+        self.assertNotIn("e1", s.last)
+        gate.set()
+        end = _t.monotonic() + 5
+        while "e1" not in s.last and _t.monotonic() < end:
+            _t.sleep(0.02)
+        self.assertEqual((s.last["e1"]["ok"], s.last["e1"]["message"]), (False, "cannot reach the projector"))
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import re
 import socket
+import threading
 import time
 import uuid
 
@@ -28,6 +29,7 @@ ERRORS = {"ERR1": "the projector does not know that command", "ERR2": "the proje
           "ERRA": "wrong projector password"}
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                                              "fc00::/7", "fe80::/10")]
+REFUSED = {ipaddress.ip_address("169.254.169.254")}      # the cloud metadata service on an x86 install in a VM
 _HOST = re.compile(r"[A-Za-z0-9.-]{1,253}|[0-9A-Fa-f:.]{2,45}")
 
 
@@ -44,13 +46,13 @@ def private_address(host, resolve=socket.getaddrinfo):
     except ValueError:
         try:
             infos = resolve(host, PORT, proto=socket.IPPROTO_TCP)
-        except OSError:
+        except (OSError, UnicodeError):          # a name that is not valid for DNS raises UnicodeError
             raise ProjectorError("cannot find %s on the network" % host)
         addrs = [ipaddress.ip_address(i[4][0].split("%")[0]) for i in infos]
         if not addrs:
             raise ProjectorError("cannot find %s on the network" % host)
         addr = addrs[0]
-    if not any(addr in n for n in PRIVATE):
+    if addr in REFUSED or not any(addr in n for n in PRIVATE):
         raise ProjectorError("only projectors on a private network (such as 192.168.x.x) can be added")
     return str(addr)
 
@@ -94,8 +96,18 @@ def _read_line(sock, limit, deadline):
     return buf.decode("ascii", "replace").strip()
 
 
+_busy = {}                       # (host, port) -> Lock: one command at a time per projector (many take one connection)
+_busy_guard = threading.Lock()
+
+
+def _lock_for(host, port):
+    with _busy_guard:
+        return _busy.setdefault((host, port), threading.Lock())
+
+
 class PJLink:
-    """One command per connection, as projectors expect."""
+    """One command per connection, as projectors expect. The connect and both reads share one deadline of
+    2 x timeout; a name lookup is not bounded by us (use an IP address to avoid it)."""
 
     def __init__(self, host, port=PORT, password="", timeout=5.0, connect=socket.create_connection, resolve=socket.getaddrinfo):
         self.host, self.port, self.password, self.timeout = host, port, password, timeout
@@ -103,14 +115,22 @@ class PJLink:
 
     def command(self, body):
         """Send "%1" + body (e.g. "POWR 1") and return the answer after "=". Raises ProjectorError."""
-        addr = private_address(self.host, self._resolve)       # checked again at every use: a name may change
+        lock = _lock_for(self.host, self.port)
+        if not lock.acquire(timeout=2 * self.timeout):
+            raise ProjectorError("the projector is busy with another command")
         try:
-            s = self._connect((addr, self.port), timeout=self.timeout)
+            return self._command(body)
+        finally:
+            lock.release()
+
+    def _command(self, body):
+        addr = private_address(self.host, self._resolve)       # checked again at every use: a name may change
+        deadline = time.monotonic() + 2 * self.timeout
+        try:
+            s = self._connect((addr, self.port), timeout=min(self.timeout, max(0.1, deadline - time.monotonic())))
         except OSError as e:
             raise ProjectorError("cannot reach the projector at %s: %s" % (self.host, getattr(e, "strerror", None) or e))
         try:
-            s.settimeout(self.timeout)
-            deadline = time.monotonic() + 2 * self.timeout
             greeting = _read_line(s, 128, deadline)
             if greeting == "PJLINK ERRA":
                 raise ProjectorError(ERRORS["ERRA"])

@@ -1127,14 +1127,19 @@ class Api:
         """{"add": {name, host, port, password}} or {"remove": id}."""
         from . import projector as projector_mod
         self._need_projectors()
+        entry = None
+        if "add" in body:
+            try:
+                entry = projector_mod.validate(body["add"])
+                projector_mod.private_address(entry["host"])      # refuse a public address now; a name lookup is slow, so outside the lock
+            except projector_mod.ProjectorError as e:
+                raise bad(str(e))
         with self.settings.lock:
             items = list(self.settings.data["projectors"])
             try:
-                if "add" in body:
+                if entry is not None:
                     if len(items) >= projector_mod.MAX_PROJECTORS:
                         raise bad("at most %d projectors" % projector_mod.MAX_PROJECTORS)
-                    entry = projector_mod.validate(body["add"])
-                    projector_mod.private_address(entry["host"])      # refuse a public address now, not at show time
                     items.append(entry)
                 elif "remove" in body:
                     if not any(p["id"] == body["remove"] for p in items):
@@ -1149,15 +1154,35 @@ class Api:
         return self.get_projectors({}, device, client)
 
     def projector_action(self, body, device, client):
-        """{"id": projector id or "all", "action": "on" | "off" | "mute" | "unmute" | "state"}."""
-        from . import projector as projector_mod
+        """{"id": projector id or "all", "action": "on" | "off" | "mute" | "unmute" | "state", "background"?: bool}.
+        With "background" the commands are sent from a thread of their own and the answer is {"started": true}; OSC
+        uses that, so an unplugged projector never delays the next cue."""
         self._need_projectors()
         action, pid = body.get("action"), body.get("id", "all")
         if action not in ("on", "off", "mute", "unmute", "state"):
             raise bad("action must be on, off, mute, unmute or state")
+        if not isinstance(body.get("background", False), bool):
+            raise bad("background must be true or false")
         targets = [p for p in self.settings.data["projectors"] if pid == "all" or p["id"] == pid]
         if not targets:
             raise ApiError(404, "no such projector" if pid != "all" else "no projectors added")
+        if body.get("background"):
+            def run():
+                failed = [r["error"] for r in self._projector_run(targets, action).values() if not r["ok"]]
+                if failed:
+                    self.log("pvj-web: projector %s (from %s): %s" % (action, client, "; ".join(failed)))
+            threading.Thread(target=run, name="projector", daemon=True).start()
+            return {"started": True}
+        results = self._projector_run(targets, action)
+        if len(targets) == 1 and not results[targets[0]["id"]]["ok"]:
+            raise ApiError(502, results[targets[0]["id"]]["error"])
+        return {"results": results}
+
+    PROJECTOR_WAIT = 30.0     # a name lookup is the only unbounded step; nobody waits longer than this
+
+    def _projector_run(self, targets, action):
+        """Send `action` to every target at once; {id: {"ok", "power"?, "error"?}}."""
+        from . import projector as projector_mod
         results = {}
 
         def one(p):
@@ -1173,15 +1198,16 @@ class Api:
                     results[p["id"]] = {"ok": True, "power": link.state()}
             except projector_mod.ProjectorError as e:
                 results[p["id"]] = {"ok": False, "error": str(e)}
+            except Exception as e:      # never leave a projector without an answer
+                results[p["id"]] = {"ok": False, "error": "error: %s" % e}
         # All at once: eight projectors that are off the network cost one timeout, not eight.
         workers = [threading.Thread(target=one, args=(p,), daemon=True) for p in targets]
         for w in workers:
             w.start()
+        end = time.monotonic() + self.PROJECTOR_WAIT
         for w in workers:
-            w.join()
-        if len(targets) == 1 and not results[targets[0]["id"]]["ok"]:
-            raise ApiError(502, results[targets[0]["id"]]["error"])
-        return {"results": results}
+            w.join(max(0, end - time.monotonic()))
+        return {p["id"]: dict(results.get(p["id"]) or {"ok": False, "error": "the projector did not answer in time"}) for p in targets}
 
     # --- audio output --------------------------------------------------
     def _audio_devices(self):
