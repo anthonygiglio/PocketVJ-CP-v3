@@ -20,6 +20,8 @@ class FakeRun:
     """Records every command; `fail` makes the command starting with those words fail."""
 
     def __init__(self):
+        self.link = False                    # whether wg-pvj exists, as the real `ip` would say
+        self.stuck = False                   # `ip link delete` fails and the link stays
         self.calls, self.fail, self.dump = [], None, "priv\tpub\t51820\toff\n%s\t(none)\t1.2.3.4:51820\t10.77.0.0/24\t1790000000\t1200\t3400\t25\n" % KEY
 
     def __call__(self, argv, input=None, capture_output=True, text=True, timeout=None):
@@ -28,6 +30,15 @@ class FakeRun:
         out, code = "", 0
         if self.fail and [name] + argv[1:1 + len(self.fail) - 1] == self.fail:
             code, out = 1, "failed on purpose"
+        elif argv[1:4] == ["link", "add", sd.IFACE]:
+            self.link = True
+        elif argv[1:4] == ["link", "delete", sd.IFACE]:
+            if self.stuck:
+                code = 1
+            else:
+                code, self.link = (0 if self.link else 1), False
+        elif argv[1:4] == ["link", "show", sd.IFACE]:
+            code = 0 if self.link else 1
         elif argv[1:] == ["genkey"]:
             out = "PRIVATEKEY=\n"
         elif argv[1:] == ["pubkey"]:
@@ -97,11 +108,13 @@ class ValidationTest(unittest.TestCase):
                 sd.check_config(bad)
 
     def test_the_firewall_lets_in_only_the_panel_and_ping(self):
-        r = sd.ruleset("10.77.0.0/24")
-        self.assertIn('iifname "wg-pvj" ip saddr 10.77.0.0/24 tcp dport 80 ct state new accept', r)
+        r = sd.ruleset("10.77.0.0/24", "10.77.0.5", 8080)
+        self.assertIn('iifname "wg-pvj" ip saddr 10.77.0.0/24 tcp dport 8080 ct state new accept', r)
+        self.assertIn('iifname "wg-pvj" ip daddr != 10.77.0.5 drop', r)          # only this box's tunnel address
         self.assertIn('iifname "wg-pvj" drop', r)
         self.assertIn('oifname "wg-pvj" drop', r)                 # the box starts nothing into the tunnel
         self.assertNotIn("22", r.replace("10.77.0.0/24", ""))       # no SSH, nothing else
+        self.assertLess(r.index("daddr !="), r.index("established"))
 
 
 class HelperTest(unittest.TestCase):
@@ -147,6 +160,41 @@ class HelperTest(unittest.TestCase):
         self.assertTrue(svc.handle({"cmd": "status"})["active"])
         self.assertFalse(svc.handle({"cmd": "extend", "minutes": 500})["ok"])
 
+    def test_the_panel_port_is_used_and_checked(self):
+        svc, run, timers, clock = service()
+        svc.handle(dict(CFG, cmd="start", minutes=60, port=8080))
+        nft = [c for c in run.calls if c[:2] == ["nft", "-f"]]
+        self.assertTrue(nft)
+        self.assertFalse(svc.handle(dict(CFG, cmd="start", minutes=60, port=0))["ok"])
+
+    def test_teardown_removes_the_link_first_and_keeps_the_firewall_if_it_cannot(self):
+        """Review finding: the firewall went first, so a link that would not go was left open without it."""
+        svc, run, timers, clock = service()
+        svc.handle(dict(CFG, cmd="start", minutes=60))
+        run.stuck = True
+        start = len(run.calls)
+        svc.handle({"cmd": "stop"})
+        after = run.calls[start:]
+        self.assertEqual(after[0][:3], ["ip", "link", "delete"])
+        self.assertNotIn(["nft", "delete", "table", "inet", sd.TABLE], after)
+        run.stuck = False
+        svc.handle({"cmd": "stop"})
+        self.assertIn(["nft", "delete", "table", "inet", sd.TABLE], run.calls)
+
+    def test_a_session_ends_eight_hours_after_it_started_however_often_it_is_extended(self):
+        svc, run, timers, clock = service()
+        svc.handle(dict(CFG, cmd="start", minutes=240))
+        clock.t += 200 * 60
+        self.assertTrue(svc.handle({"cmd": "extend", "minutes": 240})["active"])       # 440 minutes in all
+        clock.t += 200 * 60
+        self.assertFalse(svc.handle({"cmd": "extend", "minutes": 240})["ok"])          # would be 640
+
+    def test_a_key_file_left_half_written_does_not_block_the_key(self):
+        svc, run, timers, clock = service()
+        os.makedirs(svc.keydir, exist_ok=True)
+        open(svc._keyfile() + ".tmp", "w").close()
+        self.assertEqual(svc.handle({"cmd": "key"})["public_key"], BOX_KEY)
+
     def test_a_failed_step_leaves_nothing_open(self):
         run = FakeRun()
         run.fail = ["wg", "set"]
@@ -190,7 +238,7 @@ class FakeHelperClient:
         return self.svc.handle(json.loads(json.dumps(message)))
 
 
-class SessionApiTest(ServerBase):
+class SupportBase(ServerBase):
     def setUp(self):
         super().setUp()
         self.full = self.call("POST", "/api/pair", {"pin": self.pin, "name": "Studio laptop"})[1]["token"]
@@ -209,6 +257,8 @@ class SessionApiTest(ServerBase):
     def start(self, **kw):
         return self.h("POST", "/api/support/start", dict({"confirm": "start"}, **kw), self.full_dev)
 
+
+class SessionApiTest(SupportBase):
     def test_off_and_unset_by_default(self):
         st, body = self.h("GET", "/api/support", device=self.full_dev)
         self.assertEqual((st, body["active"], body["config"]["allowed"], body["configured"]), (200, False, False, False))
@@ -255,9 +305,10 @@ class SessionApiTest(ServerBase):
 
     def test_only_the_studio_starts_or_changes_it_and_only_support_logins_work_in_the_tunnel(self):
         self.ready()
-        self.assertEqual(self.h("POST", "/api/support/start", {"confirm": "start"}, self.full_dev, TUNNEL)[0], 403)
-        self.assertEqual(self.h("GET", "/api/status", device=self.full_dev, client=TUNNEL)[0], 403)    # a studio token over the tunnel
         code = self.start()[1]["code"]
+        self.assertEqual(self.h("POST", "/api/support/extend", {"minutes": 60}, self.full_dev, TUNNEL)[0], 403)
+        self.assertEqual(self.h("POST", "/api/support/config", {"allowed": False}, self.full_dev, TUNNEL)[0], 403)
+        self.assertEqual(self.h("GET", "/api/status", device=self.full_dev, client=TUNNEL)[0], 403)    # a studio token over the tunnel
         self.assertEqual(self.h("POST", "/api/support/login", {"code": code}, client=LAN)[0], 403)      # the code only in the tunnel
         token = self.h("POST", "/api/support/login", {"code": code}, client=TUNNEL)[1]["token"]
         dev = self.api.support.authenticate(token)
@@ -312,10 +363,13 @@ class SessionApiTest(ServerBase):
 
     def test_hello_tells_the_panel_where_the_request_came_from(self):
         self.ready()
+        self.assertFalse(self.h("GET", "/api/hello", client=TUNNEL)[1]["remote"])      # no session: nothing is remote
+        self.start()
         self.assertTrue(self.h("GET", "/api/hello", client=TUNNEL)[1]["remote"])
+        self.assertTrue(self.api.support.is_remote("::ffff:10.77.0.9"))
         self.assertFalse(self.h("GET", "/api/hello")[1]["remote"])
 
-    def test_support_login_cookie_lasts_only_as_long_as_the_session(self):
+    def test_support_login_cookie_and_the_qr_route(self):
         """Over HTTP, pretending 127.0.0.1 is in the tunnel (the real tunnel is tested on the Pi)."""
         self.ready()
         code = self.start(minutes=15)[1]["code"]
@@ -323,8 +377,56 @@ class SessionApiTest(ServerBase):
         st, body, r = self.call("POST", "/api/support/login", {"code": code})
         self.assertEqual(st, 200)
         cookie = r.getheader("Set-Cookie")
-        self.assertIn("Max-Age=900", cookie)
+        self.assertIn("Max-Age=%d" % (sd.MAX_TOTAL_MINUTES * 60), cookie)          # the box decides; the cookie may outlive it
         self.assertEqual(self.call("GET", "/api/qr.svg?for=view", token=body["token"])[0], 403)       # access codes: never
+
+
+class OverlapTest(SupportBase):
+    """Review finding: a support network equal to the studio's own locked every studio device out for good."""
+
+    def test_a_support_network_on_the_studio_lan_is_refused_and_can_never_lock_the_studio_out(self):
+        import ipaddress
+        self.api.support.networks_in_use = lambda: [ipaddress.ip_network("10.77.0.0/24")]
+        st, body = self.h("POST", "/api/support/config", dict(CFG, allowed=True), self.full_dev)
+        self.assertEqual(st, 400)
+        self.assertIn("overlaps", body["error"])
+        # even if it got into the settings (the fleet file, or the studio's network changed later) ...
+        with self.settings.lock:
+            self.settings.data["support"] = dict(sp.blank(), allowed=True, **CFG)
+        self.assertEqual(self.h("GET", "/api/status", device=self.full_dev, client=TUNNEL)[0], 200)    # not remote: no session
+        st, body = self.start()
+        self.assertEqual(st, 409)                                     # ... no session starts on it
+        self.assertIn("overlaps", body["error"])
+
+    def test_the_real_interface_list_is_used(self):
+        """Found on the Pi: the overlap check was wired to a same-named method of the network settings (pairs, not
+        networks) and failed with an internal error. Through the panel's own interface listing this time."""
+        self.api.support.networks_in_use = self.api._support_clash_networks
+        self.api._ip_json = lambda: [{"ifname": "lo", "addr_info": [{"family": "inet", "local": "127.0.0.1", "prefixlen": 8}]},
+                                     {"ifname": "eth0", "addr_info": [{"family": "inet", "local": "10.77.0.20", "prefixlen": 24}]},
+                                     {"ifname": "wg-pvj", "addr_info": [{"family": "inet", "local": "10.99.0.5", "prefixlen": 24}]}]
+        st, body = self.h("POST", "/api/support/config", dict(CFG, allowed=True), self.full_dev)
+        self.assertEqual(st, 400, body)
+        self.assertIn("overlaps a network this box is on (10.77.0.0/24)", body["error"])
+        ok = dict(CFG, address="10.99.0.5", network="10.99.0.0/24")      # the tunnel's own interface does not count
+        self.assertEqual(self.h("POST", "/api/support/config", dict(ok, allowed=True), self.full_dev)[0], 200)
+
+    def test_the_panel_closes_a_tunnel_left_by_an_earlier_run(self):
+        """Review finding: after a panel restart the tunnel stayed up with no banner and no Stop."""
+        self.ready()
+        self.start()
+        helper = self.api.support.client
+        fresh = sp.SupportManager(self.settings, self.auth, helper, log=lambda *_: None, clock=self.clock,
+                                  now=lambda: 1790000000 + self.clock.t, defaults_file="/nonexistent")
+        self.assertIsNotNone(helper.svc.session)
+        fresh.close_leftover()
+        self.assertIsNone(helper.svc.session)
+
+    def test_lifting_the_pin_lockout_is_never_allowed_through_the_tunnel(self):
+        self.ready()
+        code = self.start()[1]["code"]
+        dev = self.api.support.authenticate(self.h("POST", "/api/support/login", {"code": code}, client=TUNNEL)[1]["token"])
+        self.assertEqual(self.h("POST", "/api/pin/unlock", {}, dev, TUNNEL)[0], 403)
 
 
 class MigrationTest(unittest.TestCase):

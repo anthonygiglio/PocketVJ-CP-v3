@@ -24,6 +24,7 @@ apt-get install -y --no-install-recommends wireguard-tools nftables
 
 umask 077
 mkdir -p "$DIR"
+printf '%s:%s\n' "$HOST" "$PORT" > "$DIR/pvj0.endpoint"
 wg genkey > "$DIR/pvj0.key"
 wg pubkey < "$DIR/pvj0.key" > "$DIR/pvj0.pub"
 cat > "$CONF" <<CONF

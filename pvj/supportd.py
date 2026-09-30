@@ -34,6 +34,7 @@ IFACE = "wg-pvj"
 TABLE = "pvj_support"
 PANEL_PORT = 80
 MIN_MINUTES, MAX_MINUTES = 5, 240
+MAX_TOTAL_MINUTES = 480          # however often it is extended, a session ends 8 hours after it started
 KEEPALIVE = 25                   # seconds: keeps the studio router's NAT entry open, so support can reach the box
 HOST = re.compile(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*")
 SUPPORT_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")]
@@ -101,14 +102,19 @@ def check_config(message):
     if isinstance(minutes, bool) or not isinstance(minutes, int) or not MIN_MINUTES <= minutes <= MAX_MINUTES:
         raise SupportError("a session lasts %d to %d minutes" % (MIN_MINUTES, MAX_MINUTES))
     ep = ("[%s]:%d" % (host, port)) if ":" in host else ("%s:%d" % (host, port))
-    return {"endpoint": ep, "server_key": key, "address": addr, "network": net, "minutes": minutes}
+    panel = message.get("port", PANEL_PORT)
+    if isinstance(panel, bool) or not isinstance(panel, int) or not 1 <= panel <= 65535:
+        raise SupportError("the panel port must be 1 to 65535")
+    return {"endpoint": ep, "server_key": key, "address": addr, "network": net, "minutes": minutes, "port": panel}
 
 
-def ruleset(network):
-    """The firewall table for the tunnel: in, only the panel and ping from the support network; out, only replies."""
+def ruleset(network, address, port=PANEL_PORT):
+    """The firewall table for the tunnel: in, only the panel and ping from the support network to this box's own
+    tunnel address; out, only replies; nothing forwarded."""
     return """table inet %(t)s {
     chain input {
         type filter hook input priority -10; policy accept;
+        iifname "%(i)s" ip daddr != %(a)s drop
         iifname "%(i)s" ct state established,related accept
         iifname "%(i)s" ip saddr %(n)s tcp dport %(p)d ct state new accept
         iifname "%(i)s" ip saddr %(n)s icmp type echo-request accept
@@ -126,7 +132,7 @@ def ruleset(network):
         oifname "%(i)s" drop
     }
 }
-""" % {"t": TABLE, "i": IFACE, "n": network, "p": PANEL_PORT}
+""" % {"t": TABLE, "i": IFACE, "n": network, "a": address, "p": port}
 
 
 class SupportService:
@@ -166,6 +172,10 @@ class SupportService:
             if code != 0:
                 raise SupportError("could not make a key: %s" % out[-160:])
             os.makedirs(self.keydir, mode=0o700, exist_ok=True)
+            try:
+                os.unlink(path + ".tmp")            # left by a crash half-way through
+            except FileNotFoundError:
+                pass
             fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
             with os.fdopen(fd, "w") as f:
                 f.write(out.strip() + "\n")
@@ -178,9 +188,14 @@ class SupportService:
         return check_key(out.strip())
 
     def teardown(self, reason):
-        """Remove the tunnel and its firewall table, whatever state they are in. Always safe to call."""
-        self._run(["nft", "delete", "table", "inet", TABLE])
+        """Remove the tunnel and then its firewall table, whatever state they are in. Always safe to call. The table
+        goes last, and stays if the interface could not be removed: a tunnel without its firewall is never left."""
         self._run(["ip", "link", "delete", IFACE])
+        still_up, _ = self._run(["ip", "link", "show", IFACE])
+        if still_up == 0:
+            self.log("pvj-supportd: could not remove %s; its firewall stays in place" % IFACE)
+        else:
+            self._run(["nft", "delete", "table", "inet", TABLE])
         if self._cancel:
             self._cancel()
             self._cancel = None
@@ -200,7 +215,7 @@ class SupportService:
             prefix = ipaddress.ip_network(cfg["network"]).prefixlen
             steps = [
                 (["ip", "link", "add", IFACE, "type", "wireguard"], None),
-                (["nft", "-f", "-"], ruleset(cfg["network"])),        # the firewall before the link comes up
+                (["nft", "-f", "-"], ruleset(cfg["network"], cfg["address"], cfg["port"])),        # the firewall before the link comes up
                 (["wg", "set", IFACE, "private-key", self._keyfile(), "peer", cfg["server_key"], "endpoint", cfg["endpoint"],
                   "allowed-ips", cfg["network"], "persistent-keepalive", str(KEEPALIVE)], None),
                 (["ip", "address", "add", "%s/%d" % (cfg["address"], prefix), "dev", IFACE], None),
@@ -213,7 +228,7 @@ class SupportService:
                     what = "the support server's name could not be found" if "resolve" in out.lower() or "name or service" in out.lower() else out[-200:]
                     return {"ok": False, "error": "could not open the tunnel: %s" % what}
             seconds = cfg["minutes"] * 60
-            self.session = {"until": self._clock() + seconds, "until_epoch": int(self._now() + seconds),
+            self.session = {"started": self._clock(), "until": self._clock() + seconds, "until_epoch": int(self._now() + seconds),
                             "address": cfg["address"], "network": cfg["network"], "endpoint": cfg["endpoint"]}
             self._cancel = self._timer(seconds, self._expire)
             self.log("pvj-supportd: support tunnel open to %s for %d minutes, as %s (box key %s)"
@@ -227,9 +242,11 @@ class SupportService:
         with self.lock:
             if not self.session or self._clock() >= self.session["until"]:
                 raise SupportError("no session is running")
+            seconds = minutes * 60
+            if self._clock() + seconds - self.session["started"] > MAX_TOTAL_MINUTES * 60:
+                raise SupportError("a session cannot last more than %d hours in all; start a new one" % (MAX_TOTAL_MINUTES // 60))
             if self._cancel:
                 self._cancel()
-            seconds = minutes * 60
             self.session["until"] = self._clock() + seconds
             self.session["until_epoch"] = int(self._now() + seconds)
             self._cancel = self._timer(seconds, self._expire)
@@ -292,6 +309,8 @@ class SupportService:
                     return {"ok": True, "public_key": self.public_key()}
         except SupportError as e:
             return {"ok": False, "error": str(e)}
+        except OSError as e:
+            return {"ok": False, "error": "the helper could not do that: %s" % e}
         return {"ok": False, "error": "unknown command"}
 
 

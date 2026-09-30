@@ -152,7 +152,8 @@ class Api:
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
         from . import support as support_mod
-        self.support = support_mod.SupportManager(settings, auth, None)      # the helper client is set by server.build
+        self.support = support_mod.SupportManager(settings, auth, None,      # the helper client is set by server.build
+                                                  networks_in_use=self._support_clash_networks)
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -1117,6 +1118,21 @@ class Api:
         return state
 
     # --- remote support (see support.py) --------------------------------------------------
+    def _support_clash_networks(self):
+        """The IPv4 networks this box is on (not the support tunnel itself), for refusing an overlapping support network."""
+        import ipaddress
+        out = []
+        try:
+            for entry in self._ip_json():
+                if entry.get("ifname") in ("lo", "wg-pvj"):
+                    continue
+                for a in entry.get("addr_info", []):
+                    if a.get("family") == "inet" and a.get("local"):
+                        out.append(ipaddress.ip_network("%s/%s" % (a["local"], a.get("prefixlen", 32)), strict=False))
+        except Exception:
+            pass
+        return out
+
     def _support(self, fn, body, device, client):
         from . import support as support_mod
         try:

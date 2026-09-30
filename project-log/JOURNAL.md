@@ -12,6 +12,8 @@ Done:
 
 Verified on the Pi 4 against a stand-in support server in a network namespace: tunnel up with a handshake in 3 seconds; through it `/api/hello` said remote, the status needed a login, a wrong code was refused, the code signed in with the chosen role, PIN change, invites, session start, support settings and power off answered 403, SSH was blocked, the snapshot route passed the checks; restarting the helper mid-session removed the interface and the firewall table and the panel ended the session; Stop removed everything. Afterwards remote support was switched off and cleared on the box, and the stand-in removed.
 
+Independent security review: no high findings; three medium, all fixed with tests: a support network equal to the studio's LAN would have locked every studio device out for good (remote rules now apply only during a session, and an overlapping network is refused); the hub script accepted a key with a line break that could have given a box a support laptop's address (the whole key is checked now, and duplicate keys refused); restarting the panel left the tunnel open with no banner (the panel closes it at start). Also fixed: teardown order, a stale key file, the panel's real port in the firewall (the default is 8080, not 80), an 8 hour cap, lifting the PIN lockout refused through the tunnel, IPv4-mapped addresses, and the docs.
+
 Not verified: a real server on the internet, a studio network, NAT, the hub scripts on a VPS.
 
 ## 2026-09-30 (projection mapper)

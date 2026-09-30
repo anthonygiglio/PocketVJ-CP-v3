@@ -25,25 +25,28 @@ free() {  # first free host number from $1 to $2
 	echo "no free address left" >&2; exit 1
 }
 reload() { wg syncconf pvj0 <(wg-quick strip pvj0); }
+exists() { grep -qxF "# $1" "$CONF"; }
 
 case "$kind" in
 box)
 	key="${3:-}"
-	if ! printf '%s' "$key" | grep -Eq '^[A-Za-z0-9+/]{43}=$'; then echo "that is not a WireGuard key" >&2; exit 1; fi
-	if grep -q "^# $name\$" "$CONF"; then echo "$name exists; remove it first" >&2; exit 1; fi
+	# the whole string, one line: a key with a line break after it could add lines to the hub's config
+	if ! [[ $key =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$ ]]; then echo "that is not a WireGuard key" >&2; exit 1; fi
+	if grep -qxF "PublicKey = $key" "$CONF"; then echo "that key is already on this hub" >&2; exit 1; fi
+	if exists "$name"; then echo "$name exists; remove it first" >&2; exit 1; fi
 	n=$(free 32 254)
 	printf '\n# %s\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.77.0.%s/32\n' "$name" "$key" "$n" >> "$CONF"
 	reload
 	echo "Added box $name as 10.77.0.$n. In its panel, set 'This box on the support network' to 10.77.0.$n."
 	;;
 support)
-	if grep -q "^# $name\$" "$CONF"; then echo "$name exists; remove it first" >&2; exit 1; fi
+	if exists "$name"; then echo "$name exists; remove it first" >&2; exit 1; fi
 	n=$(free 2 31)
 	umask 077
 	priv=$(wg genkey); pub=$(printf '%s' "$priv" | wg pubkey)
 	printf '\n# %s\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.77.0.%s/32\n' "$name" "$pub" "$n" >> "$CONF"
 	reload
-	endpoint=$(sed -n 's/^ListenPort = //p' "$CONF")
+	endpoint=$(cat "$DIR/pvj0.endpoint")
 	cat <<CLIENT
 # WireGuard config for support laptop $name. Import it in the WireGuard app; keep it private.
 [Interface]
@@ -52,13 +55,13 @@ Address = 10.77.0.$n/32
 
 [Peer]
 PublicKey = $(cat "$DIR/pvj0.pub")
-Endpoint = $(hostname -f):$endpoint
+Endpoint = $endpoint
 AllowedIPs = 10.77.0.0/24
 PersistentKeepalive = 25
 CLIENT
 	;;
 remove)
-	if ! grep -q "^# $name\$" "$CONF"; then echo "no peer called $name" >&2; exit 1; fi
+	if ! exists "$name"; then echo "no peer called $name" >&2; exit 1; fi
 	# drop the "# name" line and the [Peer] block after it
 	awk -v n="# $name" '$0 == n {skip = 1; next} skip && /^\[Peer\]$/ {next} skip && /^(PublicKey|AllowedIPs) = / {next} {skip = 0; print}' "$CONF" > "$CONF.new"
 	mv "$CONF.new" "$CONF"

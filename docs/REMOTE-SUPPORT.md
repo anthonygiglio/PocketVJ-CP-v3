@@ -9,14 +9,14 @@ Help a studio from anywhere, without opening anything on their router and withou
 Remote support is **off** until someone with full access, at the studio, allows it (System > Remote support). Even then nothing can reach the box until you start a session.
 
 1. Support asks for a session. In System > Remote support, choose how long (1 hour unless you choose otherwise, 4 hours at most) and what support may do:
-   - **Full**: support can check and change settings (most useful when something is wrong);
+   - **Full**: support can check and change settings (most useful when something is wrong). That includes everything a full-access device can do except the list below: for example the network settings (a wrong change reverts by itself unless confirmed), projectors and streams (the box then connects to addresses on your network), uploads, the schedule, restarting;
    - **Play and mix only**;
    - **Watch only**.
 2. Press **Start support session**. The box connects out to the support server. A support code appears, like `3AW8-C65R`. Read it to support on the phone.
-3. While the session is open, every phone and laptop connected to the box shows a banner with the time left and a **Stop** button. Stop ends it at once; so does the end of the time, a restart or a reboot. Support's sign-in ends with it.
+3. While the session is open, every phone and laptop connected to the box shows a banner with the time left; presenter and full-access devices also get a **Stop** button. Stop ends it at once; so does the end of the time, a restart of the box or of its panel service, or a reboot. You can give it more time while it runs, but a session never lasts more than 8 hours in all. Support's sign-in ends with it.
 4. The last sessions are listed on the card: who started it, how long, what support could do, how it ended and how many times support signed in.
 
-What support can never do through the connection, whatever you chose: change these settings, start, extend or restart a session, pair or invite devices, make guest or presenter codes, change the PIN, show access codes, or power the box off. They can restart it (which ends the session). Only the panel is reachable: OSC, DMX, SSH and everything else on the box are blocked on the support connection.
+What support can never do through the connection, whatever you chose: change these settings, start, extend or restart a session, pair or invite devices, make guest or presenter codes, change the PIN or lift its lockout, show access codes, or power the box off. They can restart it (which ends the session). Only the panel is reachable: OSC, DMX, SSH and everything else on the box are blocked on the support connection.
 
 Your IT only needs to allow the box to send UDP to the support server's address and port (51820 unless your support provider says otherwise). No incoming rules, no port forwarding.
 
@@ -25,8 +25,8 @@ Your IT only needs to allow the box to send UDP to the support server's address 
 Once per support laptop, get a WireGuard configuration from whoever runs the support server and import it in the WireGuard app. When the studio has started a session and read you the code:
 
 1. Switch the WireGuard connection on.
-2. Open `http://<the box's support address>/` (for example `http://10.77.0.40/`). The panel asks for the support code.
-3. Type the code. You are signed in for the rest of the session, with what the studio chose. A code works for 3 sign-ins; wrong codes are limited like PIN guesses.
+2. Open the address the studio's panel shows, `http://<the box's support address>/` (for example `http://10.77.0.40/`; a box whose panel is not on port 80 shows the port too). The panel asks for the support code.
+3. Type the code. You are signed in for the rest of the session, with what the studio chose. A code works for 3 sign-ins. Wrong codes are limited: 5 from one address in 10 minutes, or 15 from all addresses together, lock sign-in for 5 minutes; if someone else on the support network is guessing, ask the studio to stop and start a new session (that resets it).
 
 The screen snapshot on the Live screen shows you what the display shows.
 
@@ -42,6 +42,8 @@ A small Linux server with a fixed public address (any cheap VPS; Debian or Ubunt
 For a fleet, the server, its key and the network can be put in `/etc/pvj/support.json` on each box (`{"endpoint": "...", "server_key": "...", "network": "10.77.0.0/24"}`); the box's own address is still set per box. The file can never allow remote support by itself.
 
 ## What is trusted, and the limits
+
+- The support network (10.77.0.0/24 by default) must not be a network the box is already on; the panel refuses it, because the studio's own devices would then look like remote support. Remote rules apply only while a session is open.
 
 - The support server sees panel traffic during a session (the panel is plain HTTP inside the encrypted tunnel) and can reach any box that has a session open. Keep it small, updated, and used only for this.
 - A box's private key never leaves it (`/var/lib/pvj-support`, root only). Removing the box on the server revokes it.

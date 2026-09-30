@@ -306,9 +306,10 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
                 extra.append(("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
                               % (COOKIE, payload["token"])))
             if status == 200 and path == "/api/support/login" and payload.get("token"):
-                # support's login lasts only as long as the session
+                # support's login ends with the session on the box; the cookie only has to cover the longest a
+                # session can last (the studio may extend it), and is useless after that
                 extra.append(("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d"
-                              % (COOKIE, payload["token"], max(60, int(payload.get("seconds_left") or 60)))))
+                              % (COOKIE, payload["token"], supportd_max_seconds())))
             if payload.get("retry_after"):
                 extra.append(("Retry-After", str(payload["retry_after"])))
             self._json(status, payload, extra)
@@ -352,6 +353,11 @@ def write_pin_file(rundir, pin):
         f.write(pin + "\n")
 
 
+def supportd_max_seconds():
+    from . import supportd
+    return supportd.MAX_TOTAL_MINUTES * 60
+
+
 def build(env=None, player=None):
     env = os.environ if env is None else env
     state = env.get("PVJ_STATE_DIR", "/var/lib/pvj")
@@ -372,6 +378,8 @@ def build(env=None, player=None):
     api.sysd = sysd_mod.SysdClient(os.path.join(os.environ.get("PVJ_SYSD_DIR", "/run/pvj-sysd"), "sysd.sock"))
     from . import supportd as supportd_mod
     api.support.client = supportd_mod.SupportdClient(os.path.join(os.environ.get("PVJ_SUPPORTD_DIR", "/run/pvj-supportd"), "supportd.sock"))
+    api.support.panel_port = int(env.get("PVJ_PORT", "8080"))
+    api.support.close_leftover()
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)

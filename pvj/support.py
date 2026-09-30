@@ -16,7 +16,8 @@ How it works for the people involved:
   deadline (the helper enforces it), on Stop, on a restart or a reboot; support's logins end with it. They are never
   saved as devices.
 * Over the tunnel support cannot: change these settings, start, extend or restart a session, pair or invite devices,
-  make guest or presenter codes, change the PIN, or power the box off (a reboot is allowed; it ends the session).
+  make guest or presenter codes, change the PIN or lift its lockout, or power the box off (a reboot is allowed; it
+  ends the session).
 
 All of this is logged (the journal, and the last sessions in the panel).
 """
@@ -47,7 +48,7 @@ DEFAULTS_FILE = "/etc/pvj/support.json"
 REMOTE_DENY = {
     ("POST", "/api/support/config"), ("POST", "/api/support/start"), ("POST", "/api/support/extend"),
     ("POST", "/api/pair"), ("POST", "/api/session"), ("POST", "/api/devices/invite"), ("POST", "/api/devices/revoke"),
-    ("POST", "/api/pin/rotate"), ("POST", "/api/system/poweroff"), ("GET", "/api/qr.svg"),
+    ("POST", "/api/pin/rotate"), ("POST", "/api/pin/unlock"), ("POST", "/api/system/poweroff"), ("GET", "/api/qr.svg"),
 }
 REMOTE_DENY_PREFIX = ("/api/access",)
 REMOTE_OPEN = {("GET", "/api/hello"), ("POST", "/api/support/login")}
@@ -102,8 +103,10 @@ def validate_config(body, current):
 
 
 class SupportManager:
-    def __init__(self, settings, auth, client, log=print, clock=time.monotonic, now=time.time, defaults_file=DEFAULTS_FILE):
+    def __init__(self, settings, auth, client, log=print, clock=time.monotonic, now=time.time, defaults_file=DEFAULTS_FILE,
+                 networks_in_use=lambda: [], panel_port=80):
         self.settings, self.auth, self.client, self.log = settings, auth, client, log
+        self.networks_in_use, self.panel_port = networks_in_use, panel_port
         self._clock, self._now = clock, now
         self.defaults_file = defaults_file
         self.lock = threading.RLock()
@@ -143,14 +146,32 @@ class SupportManager:
             return None
 
     def is_remote(self, client):
-        """True for a request that came through the support tunnel (an address in the support network)."""
+        """True for a request that came through the support tunnel: only while a session is open (no tunnel, nothing
+        is remote, so a support network that happens to match a studio's own network can never lock the studio out),
+        and only from an address in the support network. The address is the connection's own, never a header."""
+        if not self.session:
+            return False
         net = self.network()
         if net is None:
             return False
         try:
-            return ipaddress.ip_address(client) in net
+            addr = ipaddress.ip_address(client)
         except ValueError:
             return False
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        return addr in net
+
+    def overlap(self, network):
+        """The first network this box is already on that overlaps `network`, or None."""
+        try:
+            net = ipaddress.ip_network(network)
+        except ValueError:
+            return None
+        for n in self.networks_in_use():
+            if n.version == net.version and n.overlaps(net):
+                return n
+        return None
 
     # -- guard for every API request ----------------------------------------------------------------------------
     def guard(self, method, path, device, client):
@@ -181,6 +202,18 @@ class SupportManager:
         if not reply.get("ok"):
             raise SupportApiError(409, reply.get("error") or "the remote support helper refused")
         return reply
+
+    def close_leftover(self):
+        """At the panel's start: a tunnel left open by an earlier run of the panel (a crash, a restart) has no banner
+        and no Stop button here, so close it."""
+        if self.client is None:
+            return
+        try:
+            reply = self.client.request({"cmd": "stop"})
+            if reply.get("ok"):
+                self.log("pvj-web: remote support: closed any session left from an earlier run")
+        except OSError:
+            pass
 
     def public_key(self):
         if self._key is None:
@@ -235,11 +268,15 @@ class SupportManager:
         role = body.get("role", "full")
         if role not in ROLES:
             raise SupportApiError(400, "role must be view, live or full")
+        clash = self.overlap(cfg["network"])
+        if clash is not None:
+            raise SupportApiError(409, "the support network %s overlaps a network this box is on (%s); ask your support "
+                                       "provider for a different one" % (cfg["network"], clash))
         with self.lock:
             if self.session:
                 raise SupportApiError(409, "a session is already running")
             reply = self._helper({"cmd": "start", "minutes": minutes, "endpoint": cfg["endpoint"], "server_key": cfg["server_key"],
-                                  "address": cfg["address"], "network": cfg["network"]})
+                                  "address": cfg["address"], "network": cfg["network"], "port": self.panel_port})
             code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
             sid = secrets.token_hex(4)
             self.session = {"id": sid, "until": self._clock() + minutes * 60, "until_epoch": reply.get("until", int(self._now() + minutes * 60)),
@@ -370,7 +407,7 @@ class SupportManager:
             if s:
                 out["code"] = s["code"][:4] + "-" + s["code"][4:]
                 out["logins"], out["max_logins"] = s["logins"], MAX_LOGINS
-                out["address"] = cfg["address"]
+                out["address"] = cfg["address"] + ("" if self.panel_port == 80 else ":%d" % self.panel_port)
             try:
                 out["public_key"] = self.public_key()
                 out["available"] = True
@@ -385,6 +422,9 @@ class SupportManager:
                 raise SupportApiError(409, "stop the running session first")
             with self.settings.lock:
                 cfg = validate_config(body, self.settings.data.get("support", blank()))
+                clash = self.overlap(cfg["network"]) if cfg["network"] else None
+                if clash is not None:
+                    raise SupportApiError(400, "the support network %s overlaps a network this box is on (%s)" % (cfg["network"], clash))
                 self.settings.data["support"] = cfg
                 self.settings.save()
             self.log("pvj-web: remote support settings changed by %s (allowed: %s)" % (device["name"], cfg["allowed"]))
