@@ -484,7 +484,7 @@
       if (!d.streams.length) body.appendChild(h('div', { class: 'k', id: 'streamempty', text: 'No streams saved yet.' }));
       d.streams.forEach(function (st) {
         body.appendChild(h('div', { class: 'item stream-entry' },
-          h('span', {}, st.name, h('br'), h('span', { class: 'k mono', text: st.url })),
+          h('span', {}, st.name, h('br'), h('span', { class: 'addr', text: st.url })),
           h('span', { class: 'row' },
             h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + st.name, disabled: !can('live'),
               onclick: function () { act('POST', '/api/play', { stream: st.id }, function () { say('Playing ' + st.name); poll(); }); } }),

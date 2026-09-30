@@ -92,6 +92,7 @@ function startServer() {
     await page.waitForSelector('#netiface');
     await page.waitForTimeout(800);
 
+    await page.addStyleTag({ content: '.tabs { display: none !important }' });   // the fixed tab bar would cover the bottom of tall cards
     await shot('system-vitals', (f) => card('Vitals').screenshot({ path: f }));
     await shot('system-modules', (f) => card('Modules').screenshot({ path: f }));
     await shot('schedule', (f) => card('Schedule').screenshot({ path: f }));
