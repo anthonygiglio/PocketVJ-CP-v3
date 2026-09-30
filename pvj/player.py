@@ -289,6 +289,13 @@ class Player:
         """Stop the current clip but keep the player service and window alive."""
         self.ipc.request("stop")
 
+    def screenshot(self, path, quality=60):
+        """Save what the player is showing right now (the window, including brightness and size) as a JPEG.
+        Returns when the file is written; takes about 0.7 s at 2560x1440 on a Pi 4."""
+        self._set("screenshot-format", "jpg")
+        self._set("screenshot-jpeg-quality", int(quality))
+        self.ipc.request("screenshot-to-file", path, "window")
+
     def volume_step(self, delta):
         self.ipc.request("add", "volume", float(delta))
 

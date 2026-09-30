@@ -88,4 +88,6 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px
 .list .item > span:first-child { flex: 1 1 0; }
 /* Stream and other addresses keep their case (the small-caps label style would mangle them). */
 .addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
+/* The screen preview keeps the picture's shape and never overflows the card. */
+#preview { display: block; width: 100%; height: auto; margin-top: 8px; border-radius: 6px; background: #000; }
 

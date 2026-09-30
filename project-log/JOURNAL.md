@@ -4,6 +4,15 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (screen viewer, more hardware results)
+
+Done, on the real Pi 4 (Debian 13):
+- Merged the two boot fixes (#24). A full reboot brings the services up; `kill -9` on mpv is recovered in about 2 s.
+- DMX (Art-Net) over the real LAN from the owner's Mac: blackout on and off and opacity 40 percent all took effect, 143 frames counted. Weekly schedule: a `stop` entry and a `play` entry two and three minutes ahead both fired on time and reported `done`. Board self-test passes.
+- Built the screen viewer (D19): `GET /api/preview.jpg`, a Screen card on Live, tests. The owner confirmed on the Mac that it looks right.
+
+Not verified yet: PIN on the projector (still missing), USB drive, MIDI, streams, autostart across a reboot, HDMI audio, 1080p and higher decode load, read-only root, Network module.
+
 ## 2026-09-30 (first boot on a real Pi 4)
 
 Hardware: Raspberry Pi 4 Model B Rev 1.5, image built by CI from master `0d7ca86`, flashed by the owner, wired Ethernet, a 2560x1440 75 Hz monitor. Debian 13 (trixie), kernel 6.18 aarch64, mpv 0.40.

@@ -27,8 +27,9 @@ function startServer() {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
     const problems = [];
-    // The 401 before pairing, the 403 for the wrong PIN and the 400 for a refused upload are provoked on purpose.
-    const expected = /status of (400|401|403)/;
+    // The 401 before pairing, the 403 for the wrong PIN, the 400 for a refused upload and the 503 for a screen
+    // preview from a harness player with no window are provoked on purpose.
+    const expected = /status of (400|401|403|503)/;
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type()) && !expected.test(m.text())) problems.push(m.text()); });
     page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
     const base = 'http://127.0.0.1:' + info.port;
@@ -57,6 +58,13 @@ function startServer() {
     await page.waitForFunction(() => /intro/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
     await page.waitForSelector('.pad.on');
     if (shots) await page.screenshot({ path: path.join(shots, '2-live.png') });
+    // Screen preview: switch it on and off. The harness player has no real window (--vo=null), so no picture
+    // can be made here; the panel must say so instead of showing a broken image, and stop when switched off.
+    await page.click('#previewbtn');
+    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Hide screen');
+    await page.waitForFunction(() => { const m = document.getElementById('previewmsg'), i = document.getElementById('preview'); return (m && !m.hidden) || (i && !i.hidden); }, null, { timeout: 8000 });
+    await page.click('#previewbtn');
+    await page.waitForFunction(() => document.getElementById('previewbtn').textContent === 'Show screen' && document.getElementById('preview').hidden);
     await page.click('#black');
     await page.waitForFunction(() => document.getElementById('black').textContent === 'Show');
     await page.click('#black');

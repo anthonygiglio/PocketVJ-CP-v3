@@ -58,6 +58,8 @@ def number(body, key, lo, hi, integer=False):
     return int(v) if integer else float(v)
 
 
+PREVIEW_MIN_INTERVAL = 0.7    # seconds: a screenshot costs the Pi real work, so viewers share one frame
+PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 MAX_UPLOAD_BYTES = int(os.environ.get("PVJ_MAX_UPLOAD_MB", "8192")) * 1024 * 1024
 FREE_SPACE_RESERVE = 200 * 1024 * 1024  # never fill the disk completely: the system needs room to work
 CHUNK = 256 * 1024
@@ -121,6 +123,8 @@ class Api:
         self._media_lock = threading.Lock()   # rename, delete and publishing an upload never interleave
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
+        self._preview_lock = threading.Lock()
+        self._preview = None      # (time, jpeg bytes) of the last frame
         self.scheduler = None     # Scheduler or None
         self.autostart = None     # Autostart or None
         self.dmx = None           # DmxManager or None
@@ -184,6 +188,27 @@ class Api:
                 "system": {"board": self.board["kind"], "model": self.board["model"],
                            "temp_c": max((t["celsius"] for t in temps), default=None)},
                 "device": device}
+
+    def preview_jpeg(self):
+        """A JPEG of what the player is showing on the screen. One screenshot at a time; viewers who ask within
+        PREVIEW_MIN_INTERVAL of the last one get the same frame, so ten phones cost no more than one."""
+        with self._preview_lock:
+            now = time.monotonic()
+            if self._preview and now - self._preview[0] < PREVIEW_MIN_INTERVAL:
+                return self._preview[1]
+            path = os.path.join(self.player.rundir, "preview.jpg")
+            try:
+                self._player_call(self.player.screenshot, path)
+                if os.path.islink(path):
+                    raise ApiError(500, "preview file is a link")
+                with open(path, "rb") as f:
+                    data = f.read(PREVIEW_MAX_BYTES + 1)
+            except OSError as e:
+                raise ApiError(503, "no picture to show: %s" % (e.strerror or e))
+            if not data.startswith(b"\xff\xd8") or len(data) > PREVIEW_MAX_BYTES:
+                raise ApiError(503, "the player did not produce a picture")
+            self._preview = (time.monotonic(), data)
+            return data
 
     def _public_player_status(self):
         """Player status with stream passwords hidden and the saved stream's name added."""
