@@ -2,7 +2,7 @@
 
 **nxlx.mastercontrol** is a project of NXLX.Systems. It began as a fork of PocketVJ CP v3 (the repository was formerly named `PocketVJ-CP-v3`, after the last version maintained upstream). It is a modernization of that control panel, a control panel for playing, mixing and mapping video on small computers. It is built for artists who run visuals at gigs: raves, concerts and installations.
 
-> **Status: work in progress.** The new core (Python 3, in `pvj/`) is in place and has been tested in containers and CI only; **nothing has been booted on a real board yet**. The `master` branch also still holds the legacy v3 code, which targets Raspberry Pi 3B+ on Raspbian Jessie. The state before the fork work began is tagged `legacy-v3`. Do not expose the legacy code to an untrusted network; see [SECURITY.md](SECURITY.md).
+> **Status: work in progress.** The new core (Python 3, in `pvj/`) is in place and has been tested in containers and CI, and the CI-built image has been booted and exercised on **one Raspberry Pi 4** (see [HANDOFF.md](HANDOFF.md) for exactly what was and was not verified there); other boards are untested. The `master` branch also still holds the legacy v3 code, which targets Raspberry Pi 3B+ on Raspbian Jessie. The state before the fork work began is tagged `legacy-v3`. Do not expose the legacy code to an untrusted network; see [SECURITY.md](SECURITY.md).
 
 ## What it looks like
 

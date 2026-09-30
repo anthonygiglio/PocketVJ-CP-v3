@@ -4,7 +4,7 @@
 
 For the person running visuals at a gig. It covers the new Python panel (the `pvj/` folder). The old PHP panel for the legacy Pi 3 line has its own manual in `docs/html`.
 
-**Status, read this first.** The new core has been built and tested in containers and CI. **It has not been booted on a real Raspberry Pi or mini PC yet.** Where this manual says what happens on the box, that is what the code is written to do. Until the checklist in [tools/DEVICE-TESTING.md](../tools/DEVICE-TESTING.md) has been run on a real board, treat everything as untested on hardware, and do not use it at a paid show without a rehearsal and a backup plan.
+**Status, read this first.** The new core has been built and tested in containers and CI, and the image has been booted and used on **one Raspberry Pi 4** (what was and was not verified there is listed in [HANDOFF.md](../HANDOFF.md)). Other boards, a projector, and several features (MIDI Learn, streams, the read-only root, the Network module) have not been tried on hardware. Where this manual describes them, that is what the code is written to do. Treat anything not listed as verified as untested on hardware, and do not use it at a paid show without a rehearsal and a backup plan. The checklist is in [tools/DEVICE-TESTING.md](../tools/DEVICE-TESTING.md).
 
 The pictures come from the test suite (test clips and a fake network), see [UI.md](UI.md).
 
