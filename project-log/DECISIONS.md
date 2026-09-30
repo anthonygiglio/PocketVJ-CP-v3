@@ -58,3 +58,6 @@ Why: D1 says the standard library only, so Art-Net and sACN are parsed by hand f
 ## D18. Autostart runs at first sight of a player and after a player restart, never because playback stopped
 Why: the goal is a box that recovers by itself after a power cut or an mpv crash, without fighting the operator. Watching the player's process id distinguishes "the player was restarted" (start again) from "someone pressed Stop" (leave it). It plays through the same API calls as the panel and OSC, so validation and the mix apply. Off by default. Cost: a box whose clip simply ends will not restart it (use loop, or the schedule); autostart from a USB drive appearing later is not covered.
 
+## D19. The device-test workflow names its one allowed person, not "the repository owner"
+Why: the repository moved to the `nxlx-systems` organisation, and `github.actor == github.repository_owner` can never be true when the owner is an organisation, so the guard would have shut the workflow for everyone. Naming the account (`anthonygiglio`) keeps the D13 rule (nobody else's code or clicks reach the board) and still fails closed. Cost: rename the account or add a second operator and the line must be edited.
+

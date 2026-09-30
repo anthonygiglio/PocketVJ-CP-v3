@@ -21,8 +21,10 @@ concurrency:
 
 jobs:
   device:
-    # Only the repository owner may start it.
-    if: github.actor == github.repository_owner
+    # Only Anthony may start it. This names the person, not the repository owner: when the repository belongs to
+    # an organisation, `github.repository_owner` is the organisation and no person would ever match it.
+    # Anyone else (or a rename of the account) makes it fail closed, which is the safe direction.
+    if: github.actor == 'anthonygiglio'
     runs-on: [self-hosted, pvj-device]
     timeout-minutes: 30
     steps:

@@ -76,7 +76,7 @@ The output of checks 1 to 7 and 13, the `journalctl` tail for anything that fail
 
 ## Safety
 
-- The workflow starts by **manual dispatch only**, and only for the repository owner. It never runs for pushes, pull requests or forks, so nobody else's code reaches the Pi. Keep it that way.
+- The workflow starts by **manual dispatch only**, and only for the person named in the workflow's `if:` line (currently `anthonygiglio`; change it if the account is renamed). It never runs for pushes, pull requests or forks, so nobody else's code reaches the Pi. Keep it that way.
 - Under **Settings, Actions, General**, set "Fork pull request workflows" to require approval, and keep the runner group limited to this repository.
 - The runner user has no sudo. Anything that needs root (the network helper, USB mounting) is not exercised by this workflow.
 - Network tests are deliberately not included: a bad change could cut the runner off. Test the Network module by hand, with a monitor and keyboard on the Pi.
