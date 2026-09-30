@@ -141,6 +141,9 @@ if [ "$REAL" = 1 ]; then
 		run mkdir -p /var/lib/pvj-player
 		run chown "$PVJ_USER":pvj /var/lib/pvj-player
 		run chmod 0750 /var/lib/pvj-player
+		# usermod refuses while the account has a running process (the player; found on a real Pi 4), and this
+		# script stops at the first error. The player is started again at the end.
+		if [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then systemctl stop pvj-player.service 2>/dev/null || true; fi
 		run usermod -d /var/lib/pvj-player "$PVJ_USER"
 	fi
 	for g in pvj video render audio input; do

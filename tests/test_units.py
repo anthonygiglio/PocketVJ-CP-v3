@@ -96,6 +96,12 @@ class InstallerOwnershipTest(unittest.TestCase):
         self.assertRegex(self.sh, r"usermod -d /var/lib/pvj-player")
         self.assertNotRegex(self.sh, r"usermod[^\n]*\s-m\b")                     # -m would move settings and media
 
+    def test_the_player_is_stopped_before_its_home_is_changed(self):
+        # usermod fails while the account has a running process, and the installer stops at the first error
+        stop = self.sh.index("systemctl stop pvj-player.service")
+        change = self.sh.index("usermod -d /var/lib/pvj-player")
+        self.assertLess(stop, change)
+
     def test_the_state_folder_belongs_to_the_web_user_and_is_not_group_writable(self):
         self.assertIn("chown pvj-web:pvj /var/lib/pvj;", self.sh)
         self.assertIn("chmod 2750 /var/lib/pvj", self.sh)
