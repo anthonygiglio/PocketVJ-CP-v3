@@ -16,6 +16,7 @@ from .player import PlayerError
 
 DEFAULT_MEDIA_DIR = "/media/internal/video"
 DEFAULT_USB_DIR = "/media/usb"
+SCAN_LIMIT = 2000
 
 # family -> (loop, audio, uses_usb, sync_master)
 FAMILIES = {
@@ -48,7 +49,8 @@ def resolve_files(preset, media_dir=None, usb_dir=None):
     else:
         root = media_dir or os.environ.get("PVJ_MEDIA_DIR", DEFAULT_MEDIA_DIR)
     try:
-        names = sorted(n for n in os.listdir(root) if not n.startswith("."))
+        with os.scandir(root) as it:            # bounded: a USB drive can hold any number of entries
+            names = sorted(e.name for _, e in zip(range(SCAN_LIMIT), it) if not e.name.startswith("."))
     except OSError:
         raise PlayerError("media folder %s is not readable" % root)
     if preset["index"] is not None:

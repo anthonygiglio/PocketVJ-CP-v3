@@ -19,6 +19,7 @@ from .api import ApiError, MEDIA_EXTENSIONS, valid_name
 from .player import PlayerError
 
 MODES = ("off", "file", "all", "preset")
+AUDIO_CHECK_EVERY = 5      # ticks (2 s each): the sound output is re-checked about every 10 seconds
 MAX_DELAY = 120
 
 
@@ -76,6 +77,7 @@ class Autostart:
         self._sleep = sleep or time.sleep
         self.interval = interval
         self.seen_pid = None
+        self._ticks = 0
         self.last = None            # {"at": ..., "ok": bool, "message": str}
         self._stop = threading.Event()
         self._thread = None
@@ -115,6 +117,11 @@ class Autostart:
         """Call regularly. Starts playback the first time it sees a player and after each player restart.
         Returns True if it ran."""
         pid = self._pid()
+        self._ticks += 1
+        if pid is not None and pid == self.seen_pid and self._ticks % AUDIO_CHECK_EVERY == 0:
+            ensure = getattr(self.api, "ensure_audio", None)
+            if ensure:
+                ensure()        # a screen switched on late, or a sound device plugged in later
         if pid is None or pid == self.seen_pid:
             return False
         first_sight = self.seen_pid is None

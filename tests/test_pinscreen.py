@@ -82,6 +82,18 @@ class PinScreenTest(unittest.TestCase):
             self.assertNotIn(bad, text)
         self.assertEqual(pinscreen.clean(r"a b.c:/d_e-f${}\;"), "a b.c:/d_e-f")
 
+    def test_it_comes_back_if_every_device_is_removed_and_a_starting_clip_clears_it(self):
+        self.auth.devices = [{"id": "x"}]
+        self.assertFalse(self.p.wanted())
+        self.auth.devices = []                        # the way back in for a box nobody can reach
+        self.assertTrue(self.p.wanted())
+        self.p.clear()
+        self.assertEqual(self.api.player.shown[-1][:2], ("show-text", ""))
+
+    def test_the_text_lasts_a_little_longer_than_the_tick_so_it_is_steady(self):
+        self.assertGreater(pinscreen.SHOW_MS / 1000.0, 3.0)
+        self.assertLess(pinscreen.SHOW_MS / 1000.0, 5.0)
+
     def test_a_missing_address_list_still_shows_the_pin(self):
         self.api._ip_json = lambda: (_ for _ in ()).throw(OSError("no ip"))
         self.assertTrue(self.p.tick())

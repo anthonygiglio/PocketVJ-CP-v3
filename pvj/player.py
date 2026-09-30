@@ -154,7 +154,13 @@ class Player:
     def mpv_command(self, audio_device=None, windowed=False):
         args = [self.mpv_bin, "--idle=yes", "--input-ipc-server=" + self.socket_path,
                 "--no-terminal", "--really-quiet", "--osd-level=0", "--no-osc",
-                "--keep-open=no", "--force-window=yes"]
+                "--keep-open=no", "--force-window=yes",
+                # A file is judged by its content, not its name: a hostile drive can hold an "mp4" that is really a
+                # playlist or EDL naming other files or URLs, plus sidecar subtitle and audio files. Play media only.
+                # (--load-unsafe-playlists=no alone did not stop a fake .mp4 that was really a playlist: tested on a Pi 4.
+                # --access-references=no does: such a file is no longer followed to other files or URLs.)
+                "--load-unsafe-playlists=no", "--access-references=no", "--sub-auto=no", "--audio-file-auto=no", "--ytdl=no",
+                "--load-scripts=no", "--load-auto-profiles=no"]
         if not windowed:
             args.append("--fullscreen")
         if audio_device:

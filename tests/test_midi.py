@@ -35,8 +35,10 @@ class BuiltinMapTest(unittest.TestCase):
 
     def test_pads_functions_levels_and_program_change(self):
         for note in (36, 47, 48, 71, 35, 72, 73, 74, 75, 76, 77):
+            self.t[0] += 1
             self.m.message("any", ("on", 0, note, 100))
             self.m.message("any", ("off", 0, note, 0))                         # release: must not fire again
+        self.t[0] += 1
         self.m.message("any", ("program", 0, 14, 0))
         self.assertEqual(self.rec.calls, [
             ("/api/play", {"pad": [0, 0]}), ("/api/play", {"pad": [0, 11]}), ("/api/play", {"pad": [1, 0]}), ("/api/play", {"pad": [2, 11]}),
@@ -77,21 +79,41 @@ class LearnedMapTest(unittest.TestCase):
     def test_a_trigger_fires_once_per_press_not_on_release_or_repeat(self):
         m = self.mapper(entry(kind="note", number=60, action="pad", bank=0, index=4))
         for msg in (("on", 0, 60, 127), ("on", 0, 60, 127), ("off", 0, 60, 0), ("on", 0, 60, 90)):
+            self.t[0] += 1
             m.message("Mini", msg)
-        self.assertEqual(self.rec.calls, [("/api/play", {"pad": [0, 4]})] * 2)
+        self.assertEqual(self.rec.calls, [("/api/play", {"pad": [0, 4]})] * 2)   # the repeated press with no release in between did not fire
+
+    def test_a_bouncing_button_fires_once(self):
+        m = self.mapper(entry(kind="note", number=60, action="stop"))
+        for _ in range(6):
+            m.message("Mini", ("on", 0, 60, 127))
+            self.t[0] += 0.02                                    # 20 ms: contact bounce, faster than any hand
+            m.message("Mini", ("off", 0, 60, 0))
+            self.t[0] += 0.02
+        self.assertEqual(len(self.rec.calls), 1)
+        self.t[0] += 0.5
+        m.message("Mini", ("on", 0, 60, 127))
+        self.assertEqual(len(self.rec.calls), 2)
 
     def test_a_cc_button_fires_on_the_rising_edge_only(self):
         m = self.mapper(entry(number=41, action="stop"))
         for v in (0, 127, 127, 127, 0, 127):
+            self.t[0] += 1
             m.message("nano", ("cc", 0, 41, v))
         self.assertEqual(len(self.rec.calls), 2)
 
-    def test_learned_entries_come_before_the_builtin_ones(self):
-        hub_entries = [entry(kind="note", number=36, action="stop")] + midi.builtin_map()
-        m = self.mapper(*hub_entries)
+    def test_a_learned_mapping_replaces_the_builtin_one_for_that_control(self):
+        # note 36 is pad 1 in the built-in map; the user made it "stop": pressing it must NOT also play pad 1
+        m = self.mapper(*([entry(kind="note", number=36, action="stop")] + midi.builtin_map()))
         m.message("Mini", ("on", 0, 36, 127))
-        self.assertEqual(self.rec.calls[0], ("/api/control", {"action": "stop"}))     # both fire; the user's is first
-        self.assertEqual(len(self.rec.calls), 2)
+        self.assertEqual(self.rec.calls, [("/api/control", {"action": "stop"})])
+        m.message("Mini", ("on", 0, 37, 127))                                        # a control the user has not mapped still uses the built-in one
+        self.assertEqual(self.rec.calls[-1], ("/api/play", {"pad": [0, 1]}))
+
+    def test_a_mapping_for_another_controller_does_not_switch_off_the_builtin_one(self):
+        m = self.mapper(*([entry(source="nano", kind="note", number=36, action="stop")] + midi.builtin_map()))
+        m.message("Mini", ("on", 0, 36, 127))
+        self.assertEqual(self.rec.calls, [("/api/play", {"pad": [0, 0]})])
 
     def test_a_fader_sweep_is_thinned_but_the_last_value_lands(self):
         m = self.mapper(entry(number=0))
@@ -248,6 +270,37 @@ class HubTest(ServerBase):
         self.assertIsNone(self.hub.captured)
         clock[0] += midi.LEARN_SECONDS + 1
         self.assertFalse(self.hub.status()["learn"]["active"])
+
+    def test_a_hand_edited_map_cannot_break_the_reader(self):
+        self.settings.data["control"]["midi"]["map"] = [
+            {"id": "abcd1234", "source": "*", "kind": "cc", "channel": 0, "number": 0, "action": "opacity"},
+            {"id": "x"}, {"kind": "cc"}, "junk", None, {"id": "abcd1235", "source": "*", "kind": "cc", "channel": 0, "number": 1, "action": "shutdown"}]
+        self.assertEqual([e["id"] for e in self.hub.entries() if not e.get("builtin")], ["abcd1234"])
+        self.hub.on_message("nano", ("cc", 0, 0, 100))                       # must not raise
+
+    def test_the_control_just_learned_is_ignored_while_it_settles(self):
+        clock = [50.0]
+        self.hub._clock = lambda: clock[0]
+        self.settings.data["control"]["midi"]["map"] = [midi.validate_entry({"kind": "cc", "number": 5, "action": "opacity", "source": "nano"})]
+        self.hub.start_learn()
+        self.hub.on_message("nano", ("cc", 0, 5, 40))                        # captured
+        self.assertEqual(self.hub.captured["number"], 5)
+        self.hub.on_message("nano", ("cc", 0, 5, 41))                        # the fader is still moving: no old mapping runs
+        self.assertEqual(self.player.calls, [])
+        clock[0] += midi.LEARN_QUIET + 0.1
+        self.hub.on_message("nano", ("cc", 0, 5, 90))
+        self.assertTrue(self.player.calls)
+
+    def test_calls_into_the_player_are_made_without_the_hub_lock(self):
+        held = []
+        real = self.api.handle
+
+        def handle(*a, **k):
+            held.append(self.hub._lock._is_owned())                          # RLock: is this thread holding it?
+            return real(*a, **k)
+        self.api.handle = handle
+        self.hub.on_message("Mini", ("on", 0, 74, 100))
+        self.assertEqual(held, [False])
 
     def test_the_hub_stops_everything_when_switched_off(self):
         self.present = ["/dev/snd/midiC1D0"]

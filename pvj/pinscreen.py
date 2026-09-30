@@ -5,8 +5,9 @@
 The panel and the manual say the PIN is on the projector; until this existed it was only in a file in RAM, so a
 box with no keyboard could not be paired. It is drawn by mpv on its own idle screen (its on-screen text), and:
 
-* only while NO device has ever paired, so it never appears again once the box is set up (a paired full-access
-  device can make a new PIN, or guest links, in System);
+* only while NO device is paired, so it stays off once the box is set up. If every device is later removed it comes
+  back, which is the way back in for a box with no keyboard (a paired full-access device can make a new PIN, or
+  guest links, in System);
 * only while nothing is playing, so it can never draw over a show;
 * only characters from a short safe set, because mpv would expand `${...}` in the text.
 """
@@ -18,7 +19,7 @@ import threading
 from .player import PlayerError
 
 SAFE = re.compile(r"[^A-Za-z0-9 .:/_\-]")
-SHOW_MS = 5000        # each draw lasts this long; it is repeated while conditions hold
+SHOW_MS = 3500        # each draw lasts this long (a little longer than the 3 s tick, so it is steady); a clip clears it at once
 
 
 def clean(text):
@@ -65,6 +66,13 @@ class PinScreen:
         except PlayerError:
             return False
         return bool(status.get("running")) and not status.get("path")
+
+    def clear(self):
+        """Take the text off the screen now (a clip is starting). Best effort."""
+        try:
+            self.api.player.ipc.request("show-text", "", 1)
+        except PlayerError:
+            pass
 
     def tick(self):
         if not self.wanted():

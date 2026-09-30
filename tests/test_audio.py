@@ -92,6 +92,44 @@ class AudioTest(ServerBase):
         for token in (view, live):
             self.assertEqual(self.call("POST", "/api/audio", {"device": "auto"}, token=token)[0], 403)
 
+    def test_a_screen_switched_on_after_boot_moves_the_sound_to_hdmi(self):
+        current = ["alsa/plughw:CARD=Headphones,DEV=0"]
+
+        class Ipc(FakeIpc):
+            def request(inner, *cmd):
+                if cmd == ("get_property", "audio-device"):
+                    return current[0]
+                if cmd[:2] == ("set_property", "audio-device"):
+                    current[0] = cmd[2]
+                return FakeIpc.request(inner, *cmd)
+        self.player.ipc = Ipc()
+        with mock.patch("pvj.api.hardware.drm_connectors", return_value=connectors(("HDMI-A-1", "disconnected"))):
+            self.assertEqual(self.api.ensure_audio(), "auto")                # no screen yet: mpv's own choice
+        current[0] = "alsa/plughw:CARD=Headphones,DEV=0"
+        self.assertEqual(self.api.ensure_audio(), "alsa/sysdefault:CARD=vc4hdmi0")     # the screen came on
+        self.assertEqual(current[0], "alsa/sysdefault:CARD=vc4hdmi0")
+        before = len(self.player.ipc.calls)
+        self.api.ensure_audio()
+        self.assertFalse([c for c in self.player.ipc.calls[before:] if c[:2] == ("set_property", "audio-device")])   # already right: no change
+
+    def test_ensure_audio_never_raises_when_the_player_is_gone(self):
+        self.ipc.down = True
+        self.assertIsNone(self.api.ensure_audio())
+
+    def test_autostart_rechecks_the_output_every_few_ticks(self):
+        pid = [100]
+        calls = []
+
+        class Ipc(FakeIpc):
+            def request(inner, *cmd):
+                return pid[0] if cmd == ("get_property", "pid") else FakeIpc.request(inner, *cmd)
+        self.player.ipc = Ipc()
+        self.api.ensure_audio = lambda: calls.append(1)
+        a = autostart.Autostart(self.api, self.settings, log=lambda *_: None)
+        for _ in range(autostart.AUDIO_CHECK_EVERY * 2 + 1):
+            a.tick()
+        self.assertGreaterEqual(len(calls), 2)
+
     def test_a_restarted_player_gets_the_output_again_before_autostart_plays(self):
         pid = [100]
 

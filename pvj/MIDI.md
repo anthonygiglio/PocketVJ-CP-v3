@@ -12,7 +12,7 @@ Play pads, fade and mix from USB MIDI controllers: pad grids, fader boxes, keybo
 2. Tap **Learn a control**, then move or press the control on any controller (you have 20 seconds). Nothing runs while it is listening.
 3. It is saved and shown in the list, for example `nanoKONTROL2 · CC 0 → Opacity (fader)`.
 
-A mapping belongs to one controller (by its ALSA card id, such as `nanoKONTROL2`, `Mix` or `Mini`, which stays the same when USB numbering changes between boots). Learning the same control again replaces its mapping. Up to 200 mappings. Your mappings are checked before the built-in map, so they win.
+A mapping belongs to one controller (by its ALSA card id, such as `nanoKONTROL2`, `Mix` or `Mini`, which stays the same when USB numbering changes between boots). Learning the same control again replaces its mapping. Up to 200 mappings. **A control you have mapped uses only your mapping**: it replaces the built-in one for that control instead of firing next to it (so learning note 36 as Stop does not also play pad 1). Controls you have not mapped still use the built-in map, and a mapping made for one controller does not switch off the built-in map on another.
 
 ## Actions
 
@@ -23,7 +23,7 @@ A mapping belongs to one controller (by its ALSA card id, such as `nanoKONTROL2`
 | Opacity, Size, Position X, Speed, Volume | level | Follows the control, 0 to 127 spread over the range (opacity 0 to 100 percent, size 1 to 200, position -100 to 100, speed 0.25x to 2x, volume 0 to 100) |
 | Blackout while held up | level | Black at 64 or more, shown below |
 
-A trigger fires once per press (a note-on, or a CC that goes from below 64 to 64 or more), not on release or repeat. A fader sweep is thinned to 20 changes a second and the last position always lands.
+A trigger fires once per press (a note-on, or a CC that goes from below 64 to 64 or more), not on release or repeat, and a button cannot fire again within a quarter of a second, so contact bounce cannot repeat it. Right after Learn captures a control, that control is ignored for about half a second so a fader you are still moving does not run its old mapping. A fader sweep is thinned to 20 changes a second and the last position always lands.
 
 ## Built-in map
 
@@ -33,7 +33,7 @@ On unless you turn it off (System > MIDI controllers > Built-in map). It exists 
 
 - Only paths of the form `/dev/snd/midiC<n>D<n>` are ever opened, and only if they are character devices (no links).
 - Only the actions in the table are reachable: nothing shuts down, reboots or changes settings.
-- At most 50 commands a second reach the player, whatever the controllers send.
+- At most 50 commands a second reach the player, whatever the controllers send, and a pad or button can fire at most four times a second (a single "play" is many round trips to the player, so the second limit is the one that matters for pads).
 - The web service reads the device through systemd: it needs the `audio` group and read access to ALSA devices, and the unit has both (`DeviceAllow=char-alsa r`).
 
 ## Not built yet
