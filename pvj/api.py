@@ -131,6 +131,7 @@ class Api:
         self._preview = None      # (time, jpeg bytes) of the last frame
         self.scheduler = None     # Scheduler or None
         self.autostart = None     # Autostart or None
+        self.pinscreen = None     # PinScreen or None
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
