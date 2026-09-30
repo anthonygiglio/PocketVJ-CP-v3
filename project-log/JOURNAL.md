@@ -4,6 +4,22 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (first boot on a real Pi 4)
+
+Hardware: Raspberry Pi 4 Model B Rev 1.5, image built by CI from master `0d7ca86`, flashed by the owner, wired Ethernet, a 2560x1440 75 Hz monitor. Debian 13 (trixie), kernel 6.18 aarch64, mpv 0.40.
+
+Verified on the real board:
+- The image boots; `pvj-web` and `pvj-netd` start on their own; the panel answers on port 80 and reports `"board": "pi4"` and the right model; temperature 32 to 38 C, no throttling (`get_throttled=0x0`).
+- Pairing with the PIN over the network works; an upload of a 7.5 MB clip over the LAN works; playing through the panel works and the owner confirmed the picture on the monitor is smooth (720p30 H.264, software decode, about 18 percent of one core, 75 Hz display).
+- After the fixes below: a full reboot brings all three services up by themselves, and `kill -9` on mpv is recovered by systemd in about 2 seconds with the panel still working.
+
+Found on the board (none of these could show in a container), fixed in the same PR:
+1. **The player never started at boot.** `pvj-player.service` had `After=multi-user.target` and is `WantedBy=multi-user.target`, and `pvj-web` is ordered after it: an ordering cycle. systemd deleted the player's start job with one journal line and no error. Fix: drop the ordering, and udev-settle (deprecated). A static test now builds the start-order graph of `install/*.service` and fails on a cycle (and proves it catches the old unit).
+2. **The panel could not reach the player.** mpv creates its control socket owner-only (0600) whatever the `UMask`, and the panel runs as another user in group `pvj`. My first fix, a shell `ExecStartPost=` in the unit, did nothing: it ran before mpv had made the NEW socket and changed the stale one from the previous run. Real fix: `pvj-player serve` removes the stale socket, then a detached helper waits for the new socket and sets it to 0660. Tested with the real `serve()` and a stand-in mpv.
+3. Not fixed yet: nothing shows the pairing PIN on the projector (the panel text and the manual say it does); H.264 uses software decode (`hwdec-current = no`); a 30 fps clip on a 75 Hz display was smooth here but refresh matching is not configured.
+
+Not verified: HDMI audio, USB drive, MIDI, DMX, streams, schedule, autostart across a reboot, 1080p and higher decode load, the read-only root, the Network module (must be tested with a keyboard on the box).
+
 ## 2026-09-30 (manual)
 
 Done:
