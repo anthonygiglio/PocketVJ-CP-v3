@@ -91,7 +91,8 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | What | Where to read |
 | --- | --- |
 | **Autostart**: what plays at power-up and after a crash | [pvj/AUTOSTART.md](../pvj/AUTOSTART.md) |
-| **Weekly schedule**: play, stop, blackout or show at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
+| **Weekly schedule**: play, start scripts, stop, blackout, show and projector power at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
+| **Projector control**: on, off and picture mute over PJLink | [pvj/PROJECTORS.md](../pvj/PROJECTORS.md) |
 | **Streams**: SRT, RTSP, RTMP | [pvj/STREAMS.md](../pvj/STREAMS.md) |
 | **DMX over the network**: Art-Net and sACN | [pvj/DMX.md](../pvj/DMX.md) |
 | **MIDI controller** (USB) | [pvj/MIDI.md](../pvj/MIDI.md) |
@@ -120,8 +121,9 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 | Clip will not play | Check the file plays in `mpv` on the box; on a Pi 5 use HEVC (no hardware H.264 decode) |
 | Nothing shows on the projector | `pvj-selftest --play` on the box; check `journalctl -u pvj-player` |
 | DMX or MIDI does nothing | The module must be on **and** the card turned on; read the card's status line and `journalctl -u pvj-web` |
+| A projector does not answer | PJLink must be switched on in the projector's network menu; check its address and password; a projector that is warming up or cooling down answers "busy" |
 | Schedule fires at the wrong time | Check the box clock shown on the Schedule card and the time zone |
 
 ## 8. Not built yet
 
-Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, ST 2110, the mapper, the presenter, the video wall, projector control, MIDI learn and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, ST 2110, the mapper, the presenter, the video wall and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).

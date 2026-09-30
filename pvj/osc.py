@@ -283,6 +283,8 @@ def translate(address, args, mix=None):
     legacy = {"/stopall": "stop", "/stopvideo": "stop", "/pause": "pause"}
     if a in legacy:
         return control(legacy[a]) if pressed(args) else None
+    if a in ("/beameron", "/beameroff"):
+        return ("/api/projector", {"id": "all", "action": "on" if a == "/beameron" else "off"}) if pressed(args) else None
     if a == "/fastforward":
         return control("seek", 10) if pressed(args) else None
     if a in ("/volumeup", "/volumedown"):

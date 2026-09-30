@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 9
+SCHEMA = 10
 
 
 class SettingsError(Exception):
@@ -46,6 +46,7 @@ def default_settings():
         "autostart": {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0},
         "audio": {"device": "auto"},
         "overlay": {"file": "", "on": False},
+        "projectors": [],
     }
 
 
@@ -93,7 +94,13 @@ def _v8_to_v9(data):
     data.setdefault("overlay", {"file": "", "on": False})
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9}
+def _v9_to_v10(data):
+    """10: projectors (PJLink). None yet."""
+    data.setdefault("projectors", [])
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9,
+              9: _v9_to_v10}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

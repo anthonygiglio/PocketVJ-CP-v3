@@ -1109,6 +1109,80 @@ class Api:
             self.settings.save()
         return state
 
+    # --- projectors (PJLink) -------------------------------------------------------
+    def _pjlink(self, entry):
+        from . import projector as projector_mod
+        return projector_mod.PJLink(entry["host"], entry["port"], entry["password"])
+
+    def _need_projectors(self):
+        if not self.registry.enabled("projector"):
+            raise ApiError(409, "turn on the Projector control module in System first")
+
+    def get_projectors(self, body, device, client):
+        """The projectors, without their passwords."""
+        return {"enabled": self.registry.enabled("projector"), "projectors": [{"id": p["id"], "name": p["name"], "host": p["host"], "port": p["port"],
+                                "has_password": bool(p["password"])} for p in self.settings.data["projectors"]]}
+
+    def set_projectors(self, body, device, client):
+        """{"add": {name, host, port, password}} or {"remove": id}."""
+        from . import projector as projector_mod
+        self._need_projectors()
+        with self.settings.lock:
+            items = list(self.settings.data["projectors"])
+            try:
+                if "add" in body:
+                    if len(items) >= projector_mod.MAX_PROJECTORS:
+                        raise bad("at most %d projectors" % projector_mod.MAX_PROJECTORS)
+                    entry = projector_mod.validate(body["add"])
+                    projector_mod.private_address(entry["host"])      # refuse a public address now, not at show time
+                    items.append(entry)
+                elif "remove" in body:
+                    if not any(p["id"] == body["remove"] for p in items):
+                        raise ApiError(404, "no such projector")
+                    items = [p for p in items if p["id"] != body["remove"]]
+                else:
+                    raise bad("send add or remove")
+            except projector_mod.ProjectorError as e:
+                raise bad(str(e))
+            self.settings.data["projectors"] = items
+            self.settings.save()
+        return self.get_projectors({}, device, client)
+
+    def projector_action(self, body, device, client):
+        """{"id": projector id or "all", "action": "on" | "off" | "mute" | "unmute" | "state"}."""
+        from . import projector as projector_mod
+        self._need_projectors()
+        action, pid = body.get("action"), body.get("id", "all")
+        if action not in ("on", "off", "mute", "unmute", "state"):
+            raise bad("action must be on, off, mute, unmute or state")
+        targets = [p for p in self.settings.data["projectors"] if pid == "all" or p["id"] == pid]
+        if not targets:
+            raise ApiError(404, "no such projector" if pid != "all" else "no projectors added")
+        results = {}
+
+        def one(p):
+            link = self._pjlink(p)
+            try:
+                if action in ("on", "off"):
+                    link.power(action == "on")
+                    results[p["id"]] = {"ok": True}
+                elif action in ("mute", "unmute"):
+                    link.mute(action == "mute")
+                    results[p["id"]] = {"ok": True}
+                else:
+                    results[p["id"]] = {"ok": True, "power": link.state()}
+            except projector_mod.ProjectorError as e:
+                results[p["id"]] = {"ok": False, "error": str(e)}
+        # All at once: eight projectors that are off the network cost one timeout, not eight.
+        workers = [threading.Thread(target=one, args=(p,), daemon=True) for p in targets]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        if len(targets) == 1 and not results[targets[0]["id"]]["ok"]:
+            raise ApiError(502, results[targets[0]["id"]]["error"])
+        return {"results": results}
+
     # --- audio output --------------------------------------------------
     def _audio_devices(self):
         """mpv's list of sound outputs, [{"name", "description"}]; raises ApiError 503 if the player is down."""
@@ -1520,6 +1594,9 @@ class Api:
             ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
+            ("GET", "/api/projectors"): ("view", self.get_projectors),
+            ("POST", "/api/projectors"): ("full", self.set_projectors),
+            ("POST", "/api/projector"): ("live", self.projector_action),
             ("GET", "/api/audio"): ("view", self.get_audio),
             ("POST", "/api/audio"): ("full", self.set_audio),
             ("GET", "/api/autostart"): ("view", self.get_autostart),

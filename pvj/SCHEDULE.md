@@ -2,11 +2,11 @@
      SPDX-License-Identifier: Apache-2.0 -->
 # Weekly schedule (beta)
 
-Play a clip, stop, or black out or show the screen at a set time on chosen days. Switch the **Weekly schedule** module on under System > Modules, then use System > Schedule (full-access devices change it; view devices can read it). Off by default, and nothing runs until the module and the schedule switch are both on.
+Play a clip or a legacy start script, stop, black out or show the screen, or switch the projectors on or off at a set time on chosen days. Switch the **Weekly schedule** module on under System > Modules, then use System > Schedule (full-access devices change it; view devices can read it). Off by default, and nothing runs until the module and the schedule switch are both on.
 
 ## What an entry can do
 
-`play` (a clip from the media folder, loop on or off), `stop`, `blackout`, `show`. Nothing else is schedulable: no shutdown, reboot or settings changes.
+`play` (a clip from the media folder, loop on or off), `preset` (a legacy start script such as `startlessonce05`, in `"preset"`), `stop`, `blackout`, `show`, `projector_on` and `projector_off` (every projector added under System > Projectors, see [PROJECTORS.md](PROJECTORS.md)). Nothing else is schedulable: no shutdown, reboot or settings changes.
 
 ## Clock rules
 
@@ -17,7 +17,7 @@ Play a clip, stop, or black out or show the screen at a set time on chosen days.
 
 ## API
 
-`GET /api/schedule` (view) and `POST /api/schedule` (full) with `{"enabled": bool, "entries": [{"id"?, "label"?, "time": "HH:MM", "days": [0-6, Monday is 0], "action": "play|stop|blackout|show", "file"?, "loop"?}]}`. The whole list is replaced on each save. At most 50 entries.
+`GET /api/schedule` (view) and `POST /api/schedule` (full) with `{"enabled": bool, "entries": [{"id"?, "label"?, "time": "HH:MM", "days": [0-6, Monday is 0], "action": "play|preset|stop|blackout|show|projector_on|projector_off", "file"?, "loop"?, "preset"?}]}`. The whole list is replaced on each save. At most 50 entries.
 
 ## Not verified on real hardware
 

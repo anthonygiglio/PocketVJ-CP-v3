@@ -244,6 +244,26 @@ function startServer() {
     await page.waitForFunction(() => document.getElementById('schedtoggle').getAttribute('aria-pressed') === 'false');
     await page.click('.sched-entry >> button:has-text("Remove")');
     await page.waitForSelector('#schedempty');
+    await page.selectOption('#schedaction', 'preset');
+    await page.fill('#schedpreset', 'startlessonce01');
+    await page.click('#schedadd');
+    await page.waitForSelector('.sched-entry:has-text("Start script startlessonce01")');
+    await page.click('.sched-entry >> button:has-text("Remove")');
+    await page.waitForSelector('#schedempty');
+    // Projectors: a public address is refused; a private one is added (no projector is contacted) and removed
+    await page.click('.item:has-text("Projector control") >> button');
+    await page.waitForSelector('#projline');
+    await page.fill('#projname', 'Main');
+    await page.fill('#projhost', '8.8.8.8');
+    await page.click('#projadd');
+    await page.waitForFunction(() => /private/.test(document.getElementById('msg').textContent));
+    await page.fill('#projhost', '192.168.0.50');
+    await page.fill('#projpw', 'secret1');
+    await page.click('#projadd');
+    await page.waitForSelector('.proj-entry:has-text("password set")');
+    if ((await page.content()).includes('secret1')) problems.push('the projector password came back to the page');
+    await page.click('.proj-entry >> button:has-text("Remove")');
+    await page.waitForFunction(() => !document.querySelector('.proj-entry'));
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');

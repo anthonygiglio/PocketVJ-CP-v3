@@ -122,6 +122,12 @@ class SettingsTest(unittest.TestCase):
         data = Settings(self.path).load()
         self.assertEqual((data["schema"], data["overlay"]), (settings.SCHEMA, {"file": "", "on": False}))
 
+    def test_real_migration_from_schema_9_adds_no_projectors(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 9, "overlay": {"file": "", "on": False}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual((data["schema"], data["projectors"]), (settings.SCHEMA, []))
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)
