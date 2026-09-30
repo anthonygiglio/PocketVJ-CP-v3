@@ -395,6 +395,11 @@ class Player:
         """Draw a ready raw BGRA file (width x height, at 0, 0) over the picture until overlay_remove(oid)."""
         self.ipc.request("overlay-add", oid, 0, 0, path, 0, "bgra", int(width), int(height), int(width) * 4)
 
+    def set_shaders(self, paths):
+        """Use these GLSL user shader files (the projection mapping), or none. The files must be readable by the
+        player; they are compiled on the GPU at once."""
+        self.ipc.request("set_property", "glsl-shaders", list(paths))
+
     def flip(self, horizontal, on):
         """Mirror the picture left-right or upside down (a video filter; about half a core more on a Pi 4 at 1080p)."""
         label = "@pvjfliph" if horizontal else "@pvjflipv"

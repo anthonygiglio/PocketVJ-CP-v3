@@ -365,6 +365,7 @@
           h('button', { class: 'btn grow' + (m.flip_v ? ' on' : ''), id: 'flipv', text: 'Flip upside down', 'aria-pressed': m.flip_v ? 'true' : 'false', disabled: !can('live'),
             onclick: function () { act('POST', '/api/control', { action: 'flip_v', value: !m.flip_v }, function () { poll(); setTimeout(render, 200); }); } }))),
       overlayCard(),
+      mapperCard(),
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Rotate' }),
         choice([0, 90, 180, 270].map(function (d) { return { label: d + '°', value: d }; }), m.rotate === undefined ? 0 : m.rotate,
@@ -398,6 +399,223 @@
     }
     api('GET', '/api/overlay').then(function (r) {
       if (!document.getElementById('overlaycard')) return;
+      if (r.ok) draw(r.data); else { body.textContent = ''; body.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' })); }
+    });
+    return card;
+  }
+
+  // ---- projection mapping (the old Mapping tab) ------------------------
+  // The screen is drawn small on a canvas; drag a corner, or pick one and nudge it. Edit on screen shows outlines on
+  // the display itself. Screen corners are pixels of the display; picture corners are parts of the picture (0 to 1).
+  var mapUi = { step: 10, whole: false, name: '' };  // survives redraws
+  function mapOutline(s) {
+    if (s.type !== 'grid') return s.vertices;
+    var c = s.cols, r = s.rows, v = s.vertices, at = function (i, j) { return v[i * (c + 1) + j]; }, out = [], k;
+    for (k = 0; k <= c; k++) out.push(at(0, k));
+    for (k = 1; k <= r; k++) out.push(at(k, c));
+    for (k = c - 1; k >= 0; k--) out.push(at(r, k));
+    for (k = r - 1; k > 0; k--) out.push(at(k, 0));
+    return out;
+  }
+  function mapperCard() {
+    var body = h('div', { class: 'list', id: 'mapbody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'mapcard' }, h('div', { class: 'k', text: 'Projection mapping (beta)' }), body);
+    var mod = S.modules.filter(function (m) { return m.id === 'mapper'; })[0];
+    if (!mod || !mod.enabled) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'mapmsg', text: 'Off. Switch on "Projection mapper" under System > Modules (beta).' }));
+      return card;
+    }
+    var full = can('full'), d = null, canvas = null, drag = null, lastSend = 0, waiting = null;
+    function selected() { return d && d.surfaces.filter(function (s) { return s.id === d.edit.selected; })[0]; }
+    function send(b) {
+      return api('POST', '/api/mapper', b).then(function (r) {
+        if (!document.getElementById('mapcard')) return r;
+        if (!r.ok) { say(r.data.error || 'Could not change the mapping', true); if (d) draw(d); return r; }
+        say(''); draw(r.data); return r;
+      });
+    }
+    function watch() {       // the show picture is built in the background: follow it until it is on
+      clearTimeout(waiting);
+      if (!d || d.status.state !== 'building') return;
+      waiting = setTimeout(function () {
+        api('GET', '/api/mapper').then(function (r) { if (r.ok && document.getElementById('mapcard')) draw(r.data); });
+      }, 1200);
+    }
+    function geometry() {
+      var pic = d.edit.target === 'picture', cw = canvas.clientWidth || 320;
+      var ch = Math.round(cw * d.screen[1] / d.screen[0]);
+      return { pic: pic, cw: cw, ch: ch, sx: cw / (pic ? 1 : d.screen[0]), sy: ch / (pic ? 1 : d.screen[1]) };
+    }
+    function corners(s, pic) { return pic ? s.tex : s.vertices; }
+    function paint() {
+      if (!canvas || !d) return;
+      var gm = geometry(), dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(gm.cw * dpr); canvas.height = Math.round(gm.ch * dpr); canvas.style.height = gm.ch + 'px';
+      var g = canvas.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.fillStyle = '#111'; g.fillRect(0, 0, gm.cw, gm.ch);
+      if (gm.pic) { g.fillStyle = '#9aa0a6'; g.font = '12px sans-serif'; g.fillText('The picture: drag the corners of the part this surface shows', 8, 16); }
+      d.surfaces.slice().reverse().forEach(function (s) {
+        var sel = s.id === d.edit.selected;
+        if (gm.pic && !sel) return;
+        var pts = gm.pic ? s.tex : mapOutline(s);
+        g.strokeStyle = sel ? '#ffd800' : (s.on ? '#00ccff' : '#808080'); g.lineWidth = sel ? 2 : 1;
+        g.beginPath();
+        pts.forEach(function (p, i) { if (i) g.lineTo(p[0] * gm.sx, p[1] * gm.sy); else g.moveTo(p[0] * gm.sx, p[1] * gm.sy); });
+        g.closePath(); g.stroke();
+        if (!gm.pic) { g.fillStyle = g.strokeStyle; g.font = '11px sans-serif'; g.fillText(s.name, pts[0][0] * gm.sx + 6, pts[0][1] * gm.sy + 14); }
+        if (sel) corners(s, gm.pic).forEach(function (p, i) {
+          var on = !mapUi.whole && i === d.edit.corner;
+          g.fillStyle = on ? '#ff2878' : '#ffd800';
+          g.beginPath(); g.arc(p[0] * gm.sx, p[1] * gm.sy, on ? 7 : 4, 0, 7); g.fill();
+        });
+      });
+    }
+    function toModel(e) {
+      var r = canvas.getBoundingClientRect(), gm = geometry();
+      return { x: (e.clientX - r.left) / gm.sx, y: (e.clientY - r.top) / gm.sy, gm: gm };
+    }
+    function nearest(pt) {
+      var best = null, gm = pt.gm, order = d.surfaces.slice();
+      var s0 = selected();
+      if (s0) order = [s0].concat(order.filter(function (s) { return s !== s0; }));
+      order.forEach(function (s) {
+        if (gm.pic && s !== s0) return;
+        corners(s, gm.pic).forEach(function (p, i) {
+          var dx = (p[0] - pt.x) * gm.sx, dy = (p[1] - pt.y) * gm.sy, dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 22 && (!best || dist < best.dist - 0.01)) best = { s: s, i: i, dist: dist };
+        });
+      });
+      return best;
+    }
+    function inside(pt, poly) {
+      var c = false;
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var a = poly[i], b = poly[j];
+        if ((a[1] > pt.y) !== (b[1] > pt.y) && pt.x < a[0] + (pt.y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])) c = !c;
+      }
+      return c;
+    }
+    function place(final) {
+      var now = Date.now();
+      if (!final && now - lastSend < 120) return;
+      lastSend = now;
+      var s = drag.s, p = corners(s, d.edit.target === 'picture')[drag.i];
+      api('POST', '/api/mapper', { action: 'place', id: s.id, target: d.edit.target, corner: drag.i, x: p[0], y: p[1] }).then(function (r) {
+        if (!r.ok) { say(r.data.error || 'Could not move that corner', true); api('GET', '/api/mapper').then(function (x) { if (x.ok) draw(x.data); }); }
+        else if (final) { say(''); draw(r.data); }
+      });
+    }
+    function draw(data) {
+      d = data;
+      body.textContent = '';
+      var st = d.status, s = selected();
+      var words = { off: 'Mapping is off', building: 'Preparing the mapped picture...', on: 'Mapping is on', editing: 'Editing on the display', error: 'Problem: ' + st.message };
+      body.appendChild(h('div', { class: 'k', id: 'mapstatus', text: (words[st.state] || st.state) + ' · screen ' + d.screen[0] + 'x' + d.screen[1] + ' · ' + d.surfaces.length + ' surface' + (d.surfaces.length === 1 ? '' : 's') }));
+      if (!full) { watch(); return; }
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn grow' + (d.on ? ' on' : ''), id: 'mapon', 'aria-pressed': d.on ? 'true' : 'false', text: d.on ? 'Mapping on' : 'Mapping off',
+          onclick: function () { send({ action: 'on', on: !d.on }); } }),
+        h('button', { class: 'btn grow' + (d.edit.on ? ' on' : ''), id: 'mapedit', 'aria-pressed': d.edit.on ? 'true' : 'false', text: d.edit.on ? 'Editing on the display' : 'Edit on the display',
+          onclick: function () { send({ action: 'edit', on: !d.edit.on }); } })));
+      body.appendChild(h('div', { class: 'row' }, [['quad', '+ Quad'], ['triangle', '+ Triangle'], ['grid', '+ Grid']].map(function (t) {
+        return h('button', { class: 'btn small grow', id: 'mapadd-' + t[0], text: t[1], disabled: d.surfaces.length >= d.limits.surfaces,
+          onclick: function () { send({ action: 'add', type: t[0] }); } });
+      })));
+      body.appendChild(h('div', { class: 'row' }, [['screen', 'Screen corners'], ['picture', 'Picture corners']].map(function (t) {
+        return h('button', { class: 'btn small grow' + (d.edit.target === t[0] ? ' on' : ''), id: 'maptarget-' + t[0], text: t[1], 'aria-pressed': d.edit.target === t[0] ? 'true' : 'false',
+          onclick: function () { send({ action: 'edit', target: t[0] }); } });
+      })));
+      canvas = h('canvas', { class: 'mapcanvas', id: 'mapcanvas', tabindex: '0', 'aria-label': 'Mapping editor: drag a corner, or use the arrows below' });
+      body.appendChild(canvas);
+      canvas.addEventListener('pointerdown', function (e) {
+        var pt = toModel(e), hit = nearest(pt);
+        if (hit) {
+          drag = { s: hit.s, i: hit.i };
+          if (hit.s.id !== d.edit.selected || hit.i !== d.edit.corner) { d.edit.selected = hit.s.id; d.edit.corner = hit.i; mapUi.whole = false; paint(); }
+          try { canvas.setPointerCapture(e.pointerId); } catch (x) { /* older browsers */ }
+          e.preventDefault();
+          return;
+        }
+        if (pt.gm.pic) return;
+        var under = d.surfaces.filter(function (s) { return inside(pt, mapOutline(s)); })[0];
+        if (under && under.id !== d.edit.selected) send({ action: 'edit', selected: under.id });
+      });
+      canvas.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        var pt = toModel(e), p = corners(drag.s, pt.gm.pic)[drag.i];
+        p[0] = pt.gm.pic ? Math.min(1, Math.max(0, pt.x)) : Math.round(pt.x);
+        p[1] = pt.gm.pic ? Math.min(1, Math.max(0, pt.y)) : Math.round(pt.y);
+        paint(); place(false);
+      });
+      canvas.addEventListener('pointerup', function () { if (drag) { place(true); drag = null; } });
+      canvas.addEventListener('keydown', function (e) {
+        var k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+        if (k && selected()) { e.preventDefault(); nudge(k[0], k[1]); }
+      });
+      function nudge(dx, dy) {
+        var s1 = selected();
+        if (!s1) return say('Add or choose a surface first.', true);
+        send({ action: 'move', id: s1.id, target: d.edit.target, corner: mapUi.whole ? -1 : d.edit.corner, dx: dx * mapUi.step, dy: dy * mapUi.step });
+      }
+      if (s) {
+        var n = corners(s, d.edit.target === 'picture').length;
+        body.appendChild(h('div', { class: 'k', id: 'mapsel', text: 'Chosen: ' + s.name + (mapUi.whole ? ', the whole surface' : ', corner ' + (d.edit.corner + 1) + ' of ' + n) }));
+        body.appendChild(h('div', { class: 'row nudge' },
+          h('button', { class: 'btn small', id: 'mapleft', text: '←', 'aria-label': 'Move left', onclick: function () { nudge(-1, 0); } }),
+          h('button', { class: 'btn small', id: 'mapup', text: '↑', 'aria-label': 'Move up', onclick: function () { nudge(0, -1); } }),
+          h('button', { class: 'btn small', id: 'mapdown', text: '↓', 'aria-label': 'Move down', onclick: function () { nudge(0, 1); } }),
+          h('button', { class: 'btn small', id: 'mapright', text: '→', 'aria-label': 'Move right', onclick: function () { nudge(1, 0); } }),
+          h('select', { class: 'text-input', id: 'mapstep', 'aria-label': 'Step in pixels' }, [1, 10, 50].map(function (v) {
+            return h('option', { value: String(v), text: v + ' px', selected: v === mapUi.step });
+          }))));
+        body.lastChild.lastChild.addEventListener('change', function (e) { mapUi.step = +e.target.value; });
+        body.appendChild(h('div', { class: 'row' },
+          h('button', { class: 'btn small grow', id: 'mapnext', text: 'Next corner', disabled: mapUi.whole,
+            onclick: function () { send({ action: 'edit', corner: (d.edit.corner + 1) % n }); } }),
+          h('button', { class: 'btn small grow' + (mapUi.whole ? ' on' : ''), id: 'mapwhole', 'aria-pressed': mapUi.whole ? 'true' : 'false', text: 'Move the whole surface',
+            onclick: function () { mapUi.whole = !mapUi.whole; draw(d); } })));
+        var nm = h('input', { class: 'text-input', id: 'mapname', 'aria-label': 'Surface name', maxlength: 40, value: s.name });
+        body.appendChild(h('div', { class: 'row' }, nm, h('button', { class: 'btn small', id: 'maprename', text: 'Rename',
+          onclick: function () { send({ action: 'rename', id: s.id, name: nm.value.trim() }); } })));
+        if (s.type === 'grid') {
+          var sizes = [1, 2, 3, 4, 5, 6, 7, 8];
+          var cols = h('select', { class: 'text-input', id: 'mapcols', 'aria-label': 'Columns' }, sizes.map(function (v) { return h('option', { value: String(v), text: v + ' columns', selected: v === s.cols }); }));
+          var rows = h('select', { class: 'text-input', id: 'maprows', 'aria-label': 'Rows' }, sizes.map(function (v) { return h('option', { value: String(v), text: v + ' rows', selected: v === s.rows }); }));
+          body.appendChild(h('div', { class: 'row' }, cols, rows, h('button', { class: 'btn small', id: 'mapgrid', text: 'Set grid',
+            onclick: function () { send({ action: 'grid', id: s.id, cols: +cols.value, rows: +rows.value }); } })));
+          body.appendChild(h('div', { class: 'k', text: 'Changing the grid size spreads the points evenly again.' }));
+        }
+      }
+      if (d.surfaces.length) body.appendChild(h('div', { class: 'k', text: 'Surfaces (the first is on top)' }));
+      d.surfaces.forEach(function (x, i) {
+        body.appendChild(h('div', { class: 'item map-entry' + (x.id === d.edit.selected ? ' on' : '') },
+          h('button', { class: 'linkish', text: x.name + ' (' + x.type + (x.type === 'grid' ? ' ' + x.cols + 'x' + x.rows : '') + ')' + (x.on ? '' : ', hidden'), 'aria-label': 'Choose ' + x.name,
+            onclick: function () { send({ action: 'edit', selected: x.id }); } }),
+          h('span', { class: 'row' },
+            h('button', { class: 'btn small', text: '↑', 'aria-label': 'Bring ' + x.name + ' forward', disabled: i === 0, onclick: function () { send({ action: 'order', id: x.id, dir: 'up' }); } }),
+            h('button', { class: 'btn small', text: '↓', 'aria-label': 'Send ' + x.name + ' back', disabled: i === d.surfaces.length - 1, onclick: function () { send({ action: 'order', id: x.id, dir: 'down' }); } }),
+            h('button', { class: 'btn small', text: x.on ? 'Hide' : 'Show', 'aria-label': (x.on ? 'Hide ' : 'Show ') + x.name, onclick: function () { send({ action: 'show', id: x.id, on: !x.on }); } }),
+            h('button', { class: 'btn small', text: 'Remove', 'aria-label': 'Remove ' + x.name, onclick: function () { send({ action: 'remove', id: x.id }); } }))));
+      });
+      body.appendChild(h('div', { class: 'k', text: 'Saved mappings (' + d.sets.length + ' of ' + d.limits.sets + ')' }));
+      if (d.sets.length) {
+        var pick = h('select', { class: 'text-input', id: 'mapsets', 'aria-label': 'Saved mapping' }, d.sets.map(function (n) { return h('option', { value: n, text: n }); }));
+        body.appendChild(h('div', { class: 'row' }, pick,
+          h('button', { class: 'btn small', id: 'mapload', text: 'Load', onclick: function () { send({ action: 'load', name: pick.value }); } }),
+          h('button', { class: 'btn small', id: 'mapdelete', text: 'Delete', onclick: function () { send({ action: 'delete', name: pick.value }); } })));
+      }
+      var setName = h('input', { class: 'text-input', id: 'mapsetname', 'aria-label': 'Name for this mapping', placeholder: 'Name, e.g. Main stage', maxlength: 40, value: mapUi.name });
+      setName.addEventListener('input', function () { mapUi.name = setName.value; });
+      body.appendChild(h('div', { class: 'row' }, setName, h('button', { class: 'btn small', id: 'mapsave', text: 'Save',
+        onclick: function () { send({ action: 'save', name: mapUi.name.trim() }).then(function (r) { if (r.ok) mapUi.name = ''; }); } })));
+      body.appendChild(h('div', { class: 'k', text: 'Masks: use the overlay picture above (a PNG, black where no light should fall). Map at 1920x1080 or less on a Pi 4; at 2560x1440 it drops frames.' }));
+      requestAnimationFrame(paint);
+      watch();
+    }
+    api('GET', '/api/mapper').then(function (r) {
+      if (!document.getElementById('mapcard')) return;
       if (r.ok) draw(r.data); else { body.textContent = ''; body.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' })); }
     });
     return card;

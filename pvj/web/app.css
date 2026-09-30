@@ -108,3 +108,9 @@ input.seek { width: 100%; margin: 10px 0 4px; accent-color: var(--ac); height: 2
 .row.transport { margin-top: 8px; }
 .row.transport .btn { min-height: 44px; }
 
+/* Projection mapping editor: the display drawn small; touch drags a corner, never scrolls the page */
+canvas.mapcanvas { display: block; width: 100%; margin: 8px 0; border: 1px solid var(--ln); border-radius: 8px; touch-action: none; background: #111; }
+canvas.mapcanvas:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+.row.nudge .btn { min-width: 44px; min-height: 44px; font-size: 18px; }
+.list .item.map-entry.on { box-shadow: inset 3px 0 0 var(--ac); padding-left: 8px; }
+button.linkish { background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
