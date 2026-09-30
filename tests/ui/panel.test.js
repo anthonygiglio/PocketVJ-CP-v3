@@ -120,7 +120,7 @@ function startServer() {
 
     // System: modules, appearance, guest link
     await page.click('nav >> text=System');
-    await page.waitForSelector('text=Modules');
+    await page.waitForSelector('h1:has-text("System")');
     assert(await page.isVisible('text=NDI'), 'NDI module listed');
     assert(await page.isVisible('text=Not built yet'), 'planned modules are labelled');
     // Network: switch the module on, preview, apply, watch the countdown, confirm
@@ -296,7 +296,7 @@ function startServer() {
     await page.click('.map-entry >> button:has-text("Remove")');
     await page.waitForFunction(() => !document.querySelector('.map-entry'));
     await page.click('nav >> text=System');
-    await page.waitForSelector('text=Modules');
+    await page.waitForSelector('h1:has-text("System")');
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');

@@ -24,10 +24,12 @@ Each surface shows a part of the picture: its **picture corners** (0 to 1 across
 2. Press **Edit on the display**: the projector shows every surface's outline (the chosen one yellow, the chosen corner as a pink dot).
 3. Drag a corner on the small screen in the card, or choose it and use the arrows (1, 10 or 50 pixels a press; the arrow keys work too when the drawing has focus). **Next corner** steps through them; **Move the whole surface** moves all corners together.
 4. Switch between **Screen corners** (where it lands) and **Picture corners** (what it shows).
-5. Press **Edit on the display** again to finish. The show picture is then prepared in the background (about 1 to 2 seconds on a Pi 4) and replaces the editing view.
+5. Press **Edit on the display** again to finish. The show picture is then prepared in the background and replaces the editing view: on a Pi 4, under a second for a few quads and about 1.5 seconds for a 64-cell grid at 1920x1080 (up to 2 seconds at 2560x1440; unusual shapes, such as many long thin triangles, take longer). Until it is ready the previous picture stays.
 6. **Mapping on** keeps it on for the show; it comes back by itself after a restart or a player crash.
 
 Save a finished set-up under a name (up to 8). A saved mapping keeps its place in proportion if the screen size changes (a different projector).
+
+**The picture** is the whole frame of the clip, stretched to the screen while a mapping is shown (so a 4:3 clip fills the width too; choose picture corners to keep its shape). This is needed because the mapping is in screen pixels: with the usual letterboxing, every surface moved into the clip's own area (seen on the Pi with a 720x576 clip). The Mix sliders for size and position still move the picture under the mapping.
 
 **Masks**: use the overlay picture on the same screen (a PNG, black where no light should fall, transparent elsewhere). It is drawn over the mapped picture, in screen space.
 
@@ -45,10 +47,13 @@ Measured on a Raspberry Pi 4 (Debian 13, mpv 0.40) playing a 1080p H.264 film:
 
 So map at 1920 x 1080 or less on a Pi 4. The old manual recommended 1280 x 720 video for the mapper, which is still a good idea for heavy files.
 
+While a mapping is shown the player uses 8-bit buffers between its GPU passes (with its usual 16-bit ones, the extra pass alone dropped 8 frames a second at 2560 x 1440); without a mapping it is back to normal. The table holds picture points to about 1/2048 of the picture (under a pixel of a 1920-wide clip), and across a sharp bend in a grid the interpolation is off by up to about half a pixel.
+
 ## Safety
 
 - Only numbers from validated surfaces go into the shader; names never do. Corners must stay convex (a folded or flat surface is refused), coordinates are bounded, and the whole list is checked on every change.
-- The shader files are written to the player's runtime folder with fresh names (never over a file in use) and removed when replaced, including files left by an earlier run.
+- The shader files are written to the player's runtime folder with fresh names (never over a file in use) and removed when replaced, including files left by an earlier run; a newer change's file is never removed by an older one.
+- One background build at a time: a drag that sends many changes builds only the newest, and a build that has been overtaken stops early. The panel sends a dragged corner one request at a time, and only the final position unless you are editing on the display.
 - A module switched off takes the mapping off the screen at once.
 
 ## API

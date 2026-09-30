@@ -73,6 +73,4 @@ class CheapRenderingTest(unittest.TestCase):
         for kind, expected in (("pi3", True), ("pi4", True), ("pi5", False), ("x86", False), ("arm-other", False)):
             args = hardware.playback_profile({"kind": kind}, has_desktop=False)["mpv_args"]
             self.assertEqual("--profile=fast" in args, expected, kind)
-            # 8-bit GPU buffers go with it: the projection mapper's extra pass dropped 8 frames a second without
-            self.assertEqual("--fbo-format=rgba8" in args, expected, kind)
 

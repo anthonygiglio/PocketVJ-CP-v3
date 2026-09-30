@@ -165,11 +165,17 @@ def validate_surface(s):
     if not isinstance(tex, list) or len(tex) != tneed:
         raise MapperError("a %s needs %d picture corners" % (kind, tneed))
     out["tex"] = [_point(p, 1.0, "a picture corner (0 to 1)") for p in tex]
+    turn = None
     for cell in cells(out):            # fails now, not at draw time, on a folded or flat surface
         if len(cell[0]) == 4 and not _convex(cell[0]):
             raise MapperError("surface %s: its corners cross or bend inwards; move a corner" % out["name"])
         if len(cell[0]) == 3 and not _convex(cell[0]):
             raise MapperError("surface %s: its corners are in a line" % out["name"])
+        (x0, y0), (x1, y1), (x2, y2) = cell[0][:3]
+        t = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1) > 0
+        if turn is not None and t != turn:     # a cell turned over: the grid folds over itself
+            raise MapperError("surface %s: the grid folds over itself; move a point back" % out["name"])
+        turn = t
     return out
 
 
@@ -217,6 +223,9 @@ def cells(s):
 
 
 def _f(x):
+    """A GLSL float literal. Only finite numbers: an inf or nan would not even be valid GLSL."""
+    if not isinstance(x, (int, float)) or isinstance(x, bool) or not math.isfinite(x):
+        raise MapperError("not a finite number")
     s = "%.9g" % x
     return s if ("." in s or "e" in s) else s + ".0"
 
@@ -415,7 +424,7 @@ def _uv_at(p, cellmaps):
     return best
 
 
-def warp_table(surfaces, width, height, step=TABLE_STEP):
+def warp_table(surfaces, width, height, step=TABLE_STEP, stop=None):
     """(table width, table height, [uA, vA, dA, dB, uB, vB] per cell, row by row from the top).
 
     Each table cell holds two layers: A, the top surface at (or within a few pixels of) that screen point, and B, the
@@ -423,7 +432,7 @@ def warp_table(surfaces, width, height, step=TABLE_STEP):
     outside (-) that surface's edge, in pixels. The GPU interpolates the table between cells, so every pixel costs the
     same few texture reads whatever the number of surfaces, and the two distances keep every edge smooth: against black,
     and where one surface lies over another (measured on the Pi: with one layer, such a join followed the 4 pixel
-    table grid in visible steps)."""
+    table grid in visible steps). `stop`, if given, is asked now and then; when it says True, None is returned."""
     lw, lh = max(1, math.ceil(width / step)), max(1, math.ceil(height / step))
     tw, th = width / lw, height / lh
     n = lw * lh
@@ -448,6 +457,8 @@ def warp_table(surfaces, width, height, step=TABLE_STEP):
                 base = ex * fy - ey * fx
                 flat = abs(k2) < 1e-9 * max(abs(base), 1e-12)
                 for j in range(j0, j1 + 1):
+                    if stop is not None and stop():
+                        return None
                     hy = (j + 0.5) * th - ay
                     for i in range(i0, i1 + 1):
                         hx = (i + 0.5) * tw - ax
@@ -486,6 +497,8 @@ def warp_table(surfaces, width, height, step=TABLE_STEP):
             a0, a1, a2, a3, a4, a5, a6, a7, a8 = a
             b0, b1, b2, b3, b4, b5, b6, b7, b8 = b
             for j in range(j0, j1 + 1):
+                if stop is not None and stop():
+                    return None
                 py = (j + 0.5) * th
                 row = j * lw
                 for i in range(i0, i1 + 1):
@@ -532,7 +545,9 @@ def warp_table(surfaces, width, height, step=TABLE_STEP):
              for scr, cm in m] for m in maps]
     boxes = [(min(x for x, _ in pl) - EDGE, max(x for x, _ in pl) + EDGE, min(y for _, y in pl) - EDGE, max(y for _, y in pl) + EDGE)
              for pl in polys]
-    for k in band:
+    for count, k in enumerate(band):
+        if stop is not None and count % 256 == 0 and stop():
+            return None
         i, j = k % lw, k // lw
         p = ((i + 0.5) * tw, (j + 0.5) * th)
         layers = []                                 # (signed distance, uv), top first
@@ -669,6 +684,8 @@ class Engine:
         self._serial = 0                       # file names
         self._lock = threading.Lock()          # the counters and the status
         self._apply_lock = threading.Lock()    # the newest-change check and the switch, together
+        self._job = None                       # the newest build waiting for the worker
+        self._building = False
 
     @property
     def settings(self):
@@ -689,10 +706,23 @@ class Engine:
         saved = self.settings.data["mapper"].get("screen")
         return tuple(saved) if saved else (1920, 1080)
 
+    def placed(self, size=None):
+        """(surfaces, screen they are in): the saved surfaces moved to the current screen in proportion, or, if that
+        would put a point out of range (a far larger screen), left where they were, so they can still be edited."""
+        cfg = self.settings.data["mapper"]
+        size = tuple(size or self.screen())
+        moved = scaled(cfg["surfaces"], cfg.get("screen"), size)
+        if moved is cfg["surfaces"]:
+            return moved, size
+        try:
+            validate_mapping({"surfaces": moved})
+            return moved, size
+        except MapperError:
+            return cfg["surfaces"], tuple(cfg["screen"])
+
     def current(self):
         """The surfaces placed for the current screen."""
-        cfg = self.settings.data["mapper"]
-        return scaled(cfg["surfaces"], cfg.get("screen"), self.screen())
+        return self.placed()[0]
 
     def state(self):
         cfg = self.settings.data["mapper"]
@@ -704,43 +734,60 @@ class Engine:
 
     # -- writing to the player --
     def _write(self, text):
+        """Write a shader file for the player under a new name (never over a file that may be in use)."""
         rundir = self.api.player.rundir
         with self._lock:
             self._serial += 1
             name = os.path.join(rundir, "mapper-%d-%d.glsl" % (os.getpid(), self._serial))
         tmp = name + ".tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o640)
-        with os.fdopen(fd, "w") as f:
-            os.fchmod(f.fileno(), 0o640)
-            f.write(text)
-        os.replace(tmp, name)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o640)
+        try:
+            with os.fdopen(fd, "w") as f:
+                os.fchmod(f.fileno(), 0o640)
+                f.write(text)
+            os.replace(tmp, name)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return name
 
-    def _use(self, path):
-        """Tell the player to use shader `path` (None: no mapping), then remove every other mapping file in the runtime
-        folder, including ones left by an earlier run of this service. The file in use is kept: mpv may read it again."""
-        self.api.player.set_shaders([path] if path else [])
+    def _cleanup(self, keep, limit):
+        """Remove the mapping files this process wrote up to serial `limit` (taken when the switch was decided, so a
+        file a newer change is writing or about to use is never touched), except `keep`, the file now in use (mpv may
+        read it again), and every mapping file left by an earlier run of the service."""
         rundir = self.api.player.rundir
-        with self._lock:
+        try:
+            names = os.listdir(rundir)
+        except OSError:
+            return
+        for n in names:
+            m = re.fullmatch(r"mapper-(\d+)-(\d+)\.glsl(\.tmp)?", n)
+            full = os.path.join(rundir, n)
+            if not m or full == keep:
+                continue
+            if int(m.group(1)) == os.getpid() and (m.group(3) or int(m.group(2)) > limit):
+                continue
             try:
-                names = os.listdir(rundir)
+                os.unlink(full)
             except OSError:
-                names = []
-            for n in names:
-                full = os.path.join(rundir, n)
-                if re.fullmatch(r"mapper-\d+-\d+\.glsl", n) and full != path:
-                    try:
-                        os.unlink(full)
-                    except OSError:
-                        pass
+                pass
 
-    def _set_status(self, state, message=""):
+    def _set_status(self, state, message="", gen=None):
+        """Record the state; with `gen`, only if that change is still the newest (an older one never overwrites)."""
         with self._lock:
+            if gen is not None and gen != self._gen:
+                return
             self.status = {"state": state, "message": message}
 
     def _commit(self, gen, path, state, message=""):
         """Switch the player to `path` (None: no mapping) and set the status, only if `gen` is still the newest change.
-        Check and switch happen under one lock, so an older build can never land after a newer change."""
+        Check and switch happen under one lock, so an older build can never land after a newer change. While a mapping
+        is shown the player stretches the picture to the whole screen (surfaces are in screen pixels, and the shader
+        only sees the picture's own area) and uses 8-bit GPU buffers (measured on a Pi 4: with 16-bit ones the extra
+        pass dropped 8 frames a second at 2560x1440)."""
         with self._apply_lock:
             if gen != self._gen:
                 if path:
@@ -749,21 +796,29 @@ class Engine:
                     except OSError:
                         pass
                 return False
+            with self._lock:
+                limit = self._serial
             try:
-                self._use(path)
+                self.api.player.set_mapping_mode(bool(path))
+                self.api.player.set_shaders([path] if path else [])
             except Exception as e:      # the player is down or restarting: it gets the mapping when it comes back
                 self._set_status("error", "the player did not take the mapping (%s); it is tried again when the player restarts" % e)
                 return False
+            self._cleanup(path, limit)
             self._set_status(state, message)
             return True
 
-    def apply(self, wait=False):
+    def apply(self):
         """Make the screen match. Never raises for a player that is down (the status says so)."""
         with self._lock:
             self._gen += 1
             gen = self._gen
         cfg = self.settings.data["mapper"]
-        surfaces = self.current() if self.enabled() else []
+        try:
+            surfaces = validate_mapping({"surfaces": self.current()}) if self.enabled() else []
+        except MapperError as e:
+            self._set_status("error", "the saved mapping does not fit this screen: %s" % e, gen)
+            return
         editing = self.edit["on"] and self.enabled()
         try:
             if not surfaces or not (cfg["on"] or editing):
@@ -772,25 +827,35 @@ class Engine:
             if editing:
                 self._commit(gen, self._write(shader(surfaces, self.edit)), "editing")
                 return
-        except Exception as e:           # the player is down or restarting; it is applied again when it comes back
-            self._set_status("error", "the player did not take the mapping: %s" % e)
+        except Exception as e:
+            self._set_status("error", "could not write the mapping: %s" % e, gen)
             return
-        self._set_status("building")
-        size = self.screen()
+        self._set_status("building", "", gen)
+        with self._lock:
+            self._job = (gen, surfaces, self.screen())
+            start = not self._building
+            self._building = True
+        if start:
+            threading.Thread(target=self._builder, name="mapper-build", daemon=True).start()
 
-        def build():
+    def _builder(self):
+        """The one build worker: always builds the newest job, and gives up on one that a newer change has overtaken.
+        A drag that sends many changes costs one build at a time, not one thread each."""
+        while True:
+            with self._lock:
+                job, self._job = self._job, None
+                if job is None:
+                    self._building = False
+                    return
+            gen, surfaces, size = job
             try:
-                text = warp_shader(*warp_table(surfaces, size[0], size[1]))
-                if gen != self._gen:
-                    return                       # something newer is on its way; do not even write it
-                self._commit(gen, self._write(text), "on")
+                table = warp_table(surfaces, size[0], size[1], stop=lambda: gen != self._gen)
+                if table is None:
+                    continue                     # overtaken
+                self._commit(gen, self._write(warp_shader(*table)), "on")
             except Exception as e:
-                self._set_status("error", "could not build the mapping: %s" % e)
+                self._set_status("error", "could not build the mapping: %s" % e, gen)
                 self.log("pvj-web: mapper: %s" % e)
-        if wait:
-            build()
-        else:
-            threading.Thread(target=build, name="mapper-build", daemon=True).start()
 
     # -- requests from the panel --
     def handle(self, body):
@@ -798,10 +863,10 @@ class Engine:
         if not isinstance(body, dict):
             raise MapperError("send an object")
         action = body.get("action")
-        size = self.screen()
         with self.settings.lock:
             cfg = self.settings.data["mapper"]
-            surfaces = [dict(s) for s in scaled(cfg["surfaces"], cfg.get("screen"), size)]
+            placed, size = self.placed()
+            surfaces = [dict(s) for s in placed]
             sets = dict(cfg["sets"])
             on = cfg["on"]
             edit = dict(self.edit)

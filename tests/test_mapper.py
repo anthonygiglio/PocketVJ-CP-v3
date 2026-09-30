@@ -117,11 +117,14 @@ class ValidationTest(unittest.TestCase):
             {"surfaces": [dict(grid(2, 2), cols=9)]},
             {"surfaces": [grid(8, 8), grid(1, 1)]},                                         # 65 cells
             {"surfaces": [dict(quad(sq), on="yes")]},
+            {"surfaces": [dict(grid(2, 1), vertices=[[0, 0], [100, 0], [50, 0], [0, 100], [100, 100], [50, 100]])]},  # folded
         ]
         for b in bad:
             with self.assertRaises(M.MapperError, msg=str(b)[:80]):
                 M.validate_mapping(b)
-
+        for x in (float("inf"), float("nan")):
+            with self.assertRaises(M.MapperError):
+                M._f(x)
 
 class TableTest(unittest.TestCase):
     """The warp table, checked against the direct method by emulating what the GPU does with it."""
@@ -220,10 +223,16 @@ class EngineTest(unittest.TestCase):
         def __init__(self, rundir):
             self.rundir = rundir
             self.shaders = []
+            self.mode = False
             self.fail = False
 
         def osd_size(self):
             return (W, H)
+
+        def set_mapping_mode(self, on):
+            if self.fail:
+                raise OSError("player down")
+            self.mode = on
 
         def set_shaders(self, paths):
             if self.fail:
@@ -275,9 +284,10 @@ class EngineTest(unittest.TestCase):
         with open(self.api.player.shaders[0]) as f:
             self.assertIn("//!TEXTURE PVJWARPA", f.read())
         self.assertEqual(len(self.files()), 1)                               # old files are removed
+        self.assertTrue(self.api.player.mode)                                # stretched, 8-bit buffers
         self.assertEqual(oct(os.stat(self.api.player.shaders[0]).st_mode & 0o777), "0o640")
         self.e.handle({"action": "on", "on": False})
-        self.assertEqual((self.api.player.shaders, self.files()), ([], []))
+        self.assertEqual((self.api.player.shaders, self.files(), self.api.player.mode), ([], [], False))
 
     def test_changes_are_saved_and_survive_a_reload(self):
         sid = self.e.handle({"action": "add", "type": "grid"})["surfaces"][0]["id"]
@@ -355,6 +365,67 @@ class EngineTest(unittest.TestCase):
         while any(t.name == "mapper-build" for t in threading.enumerate()) and time.monotonic() < end:
             time.sleep(0.05)
         self.assertEqual((self.api.player.shaders, self.files()), ([], []))
+
+    def test_a_drag_costs_one_build_at_a_time(self):
+        """Review finding: every change while the mapping was on started its own build thread (25 at once)."""
+        sid = self.e.handle({"action": "add", "type": "grid"})["surfaces"][0]["id"]
+        self.e.handle({"action": "grid", "id": sid, "cols": 8, "rows": 8})
+        self.e.handle({"action": "on", "on": True})
+        peak = 0
+        for k in range(40):
+            self.e.handle({"action": "move", "id": sid, "corner": 0, "dx": 1 if k % 2 else -1, "dy": 0})
+            peak = max(peak, sum(1 for t in threading.enumerate() if t.name == "mapper-build"))
+        self.assertLessEqual(peak, 1)
+        self.wait_state("on")
+        with open(self.api.player.shaders[0]) as f:
+            text = f.read()
+        final = M.validate_mapping({"surfaces": self.e.current()})
+        self.assertEqual(text, M.warp_shader(*M.warp_table(final, W, H)))        # the last change is what is shown
+
+    def test_an_old_build_stops_early(self):
+        calls = []
+
+        def stop():
+            calls.append(1)
+            return len(calls) > 3
+        self.assertIsNone(M.warp_table(M.validate_mapping({"surfaces": [grid(8, 8)]}), W, H, stop=stop))
+        self.assertEqual(len(calls), 4)
+
+    def test_cleanup_never_removes_a_newer_file(self):
+        """Review finding: an older switch's cleanup removed the file a newer change was about to use."""
+        self.e.handle({"action": "add", "type": "quad"})
+        self.e.handle({"action": "edit", "on": True})
+        written = []
+        real = self.api.player.set_mapping_mode
+
+        def meanwhile(on):                              # another request writes its file during this switch
+            if not written:
+                written.append(self.e._write("// newer"))
+            real(on)
+        self.api.player.set_mapping_mode = meanwhile
+        path = self.e._write("// this one")
+        self.assertTrue(self.e._commit(self.e._gen, path, "editing"))
+        self.assertTrue(os.path.exists(written[0]))
+        self.assertEqual(sorted(self.files()), sorted([os.path.basename(path), os.path.basename(written[0])]))
+        # and a switch for an older change gives up without touching anything
+        self.assertFalse(self.e._commit(self.e._gen - 1, None, "off"))
+        self.assertTrue(os.path.exists(written[0]))
+
+    def test_status_of_an_older_change_never_overwrites_a_newer_one(self):
+        self.e._gen = 5
+        self.e._set_status("editing", "", 5)
+        self.e._set_status("building", "", 4)
+        self.assertEqual(self.e.status["state"], "editing")
+
+    def test_a_screen_too_large_to_scale_to_does_not_lock_the_mapping(self):
+        """Review finding: scaled past the coordinate limit, every later change was refused."""
+        sid = self.e.handle({"action": "add", "type": "quad"})["surfaces"][0]["id"]
+        self.e.handle({"action": "move", "id": sid, "corner": -1, "dx": 1500, "dy": 0})
+        before = self.e.state()["surfaces"][0]["vertices"]
+        self.api.player.osd_size = lambda: (W * 20, H * 20)
+        st = self.e.handle({"action": "move", "id": sid, "corner": 0, "dx": -10, "dy": 0})    # still accepted
+        self.assertEqual(st["surfaces"][0]["vertices"][0], [before[0][0] - 10, before[0][1]])   # left where it was
+        self.assertEqual(self.e.handle({"action": "remove", "id": sid})["surfaces"], [])
 
     def test_files_from_an_earlier_run_are_removed(self):
         stale = os.path.join(self.rundir, "mapper-1-1.glsl")

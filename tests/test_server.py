@@ -41,7 +41,7 @@ class FakePlayer:
         self.running = True
 
     def __getattr__(self, name):
-        if name in ("set_shaders", "pause", "seek", "seek_to", "playlist_step", "shuffle", "flip", "overlay_remove", "overlay_file", "play_pipe", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
+        if name in ("set_shaders", "set_mapping_mode", "pause", "seek", "seek_to", "playlist_step", "shuffle", "flip", "overlay_remove", "overlay_file", "play_pipe", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
             def call(*args):
                 self.calls.append((name,) + args)
                 return True if name in ("pause", "playlist_step") else None

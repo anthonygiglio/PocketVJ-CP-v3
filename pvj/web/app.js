@@ -497,15 +497,33 @@
       }
       return c;
     }
+    // One request at a time, the newest position next: the box never gets a flood, and an old position can never
+    // land after the last one. While not editing, only the final position is sent (each change rebuilds the show).
+    var inflight = false, queued = null;
     function place(final) {
       var now = Date.now();
-      if (!final && now - lastSend < 120) return;
+      if (!final && (!d.edit.on || now - lastSend < 120)) return;
       lastSend = now;
       var s = drag.s, p = corners(s, d.edit.target === 'picture')[drag.i];
-      api('POST', '/api/mapper', { action: 'place', id: s.id, target: d.edit.target, corner: drag.i, x: p[0], y: p[1] }).then(function (r) {
-        if (!r.ok) { say(r.data.error || 'Could not move that corner', true); api('GET', '/api/mapper').then(function (x) { if (x.ok) draw(x.data); }); }
-        else if (final) { say(''); draw(r.data); }
+      var b = { action: 'place', id: s.id, target: d.edit.target, corner: drag.i, x: p[0], y: p[1] };
+      queued = { b: b, final: final || !!(queued && queued.final) };
+      if (!inflight) sendQueued();
+    }
+    function sendQueued() {
+      var q = queued;
+      queued = null;
+      if (!q) { inflight = false; return; }
+      inflight = true;
+      api('POST', '/api/mapper', q.b).then(function (r) {
+        if (queued) return sendQueued();      // a newer position arrived meanwhile: send that, show its answer
+        inflight = false;
+        after(r, q.final);
       });
+    }
+    function after(r, final) {
+      if (!document.getElementById('mapcard')) return;
+      if (!r.ok) { say(r.data.error || 'Could not move that corner', true); api('GET', '/api/mapper').then(function (x) { if (x.ok) draw(x.data); }); }
+      else if (final) { say(''); draw(r.data); }
     }
     function draw(data) {
       d = data;
