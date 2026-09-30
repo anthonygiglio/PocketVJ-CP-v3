@@ -137,7 +137,8 @@ class Api:
         self._ip_json = ip_json or self._run_ip
         self._upload_lock = threading.Lock()  # one upload at a time: protects the SD card and the threads
         self._media_lock = threading.Lock()   # rename, delete and publishing an upload never interleave
-        self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
+        self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "position_y": 0, "rotate": 0,
+                    "flip_h": False, "flip_v": False}
         self.fader = Fader(self._apply_opacity)
         self._preview_lock = threading.Lock()
         self._control_lock = threading.RLock()
@@ -719,7 +720,15 @@ class Api:
             self._player_call(p.size, self.mix["size"])
         elif action == "position":
             self.mix["position"] = number(body, "value", -100, 100)
-            self._player_call(p.position, self.mix["position"] * 10)
+            self._player_call(p.position, self.mix["position"] * 10, self.mix["position_y"] * 10)
+        elif action == "position_y":
+            self.mix["position_y"] = number(body, "value", -100, 100)
+            self._player_call(p.position, self.mix["position"] * 10, self.mix["position_y"] * 10)
+        elif action in ("flip_h", "flip_v"):
+            if not isinstance(body.get("value"), bool):
+                raise bad("value must be true or false")
+            self.mix[action] = body["value"]
+            self._player_call(p.flip, action == "flip_h", body["value"])
         elif action == "rotate":
             degrees = number(body, "value", 0, 270, integer=True)
             if degrees not in (0, 90, 180, 270):
@@ -746,7 +755,10 @@ class Api:
         elif action == "volume_step":
             self._player_call(p.volume_step, number(body, "value", -50, 50))
         elif action == "reset":
-            self.mix.update(opacity=100, size=100, position=0, rotate=0)
+            flipped = [k for k in ("flip_h", "flip_v") if self.mix[k]]
+            self.mix.update(opacity=100, size=100, position=0, position_y=0, rotate=0, flip_h=False, flip_v=False)
+            for k in flipped:
+                self._player_call(p.flip, k == "flip_h", False)
             self.fader.cancel()
             # During a blackout the screen must stay dark: reset changes the stored mix, not the picture.
             shown = 0 if self.mix["blackout"] else 255
@@ -923,6 +935,66 @@ class Api:
             raise ApiError(409, str(e))
         self.settings.save()
         return self.osc.status()
+
+    # --- a picture over the video ---------------------------------------------------
+    def apply_overlay(self):
+        """Make the screen match settings["overlay"]. Called when it changes and when the player restarts (a restart
+        loses what was drawn). Returns the state. Raises ApiError when the picture cannot be shown."""
+        from . import overlay as overlay_mod
+        cfg = self.settings.data["overlay"]
+        player = self.player
+        try:
+            player.overlay_remove(overlay_mod.OVERLAY_ID)
+        except PlayerError:
+            pass
+        if not cfg["on"] or not cfg["file"]:
+            return self.overlay_state()
+        src = self.resolve_media(cfg["file"])
+        size = self._player_call(player.osd_size)
+        if size is None:
+            raise ApiError(503, "the player has no screen size yet")
+        out = os.path.join(player.rundir, "overlay.bgra")
+        try:
+            overlay_mod.convert(src, size[0], size[1], out, getattr(player, "mpv_bin", "mpv"))
+        except overlay_mod.OverlayError as e:
+            raise ApiError(409, str(e))
+        self._player_call(player.overlay_file, overlay_mod.OVERLAY_ID, out, size[0], size[1])
+        return self.overlay_state()
+
+    def overlay_state(self):
+        cfg = self.settings.data["overlay"]
+        return {"file": cfg["file"], "on": cfg["on"],
+                "choices": [n for n in self.media_list() if n.lower().endswith(".png")]}
+
+    def get_overlay(self, body, device, client):
+        return self.overlay_state()
+
+    def set_overlay(self, body, device, client):
+        """{"on": bool, "file": "logo.png"}: a PNG from the media folder over the video, fitted to the screen."""
+        cfg = dict(self.settings.data["overlay"])
+        if "file" in body:
+            f = body["file"]
+            if f != "" and (not valid_name(f) or not f.lower().endswith(".png")):
+                raise bad("choose a PNG picture from the media folder")
+            cfg["file"] = f
+        if "on" in body:
+            if not isinstance(body["on"], bool):
+                raise bad("on must be true or false")
+            cfg["on"] = body["on"]
+        if cfg["on"] and not cfg["file"]:
+            raise bad("choose a picture first")
+        previous = self.settings.data["overlay"]
+        with self.settings.lock:
+            self.settings.data["overlay"] = cfg
+        try:
+            state = self.apply_overlay()
+        except ApiError:
+            with self.settings.lock:
+                self.settings.data["overlay"] = previous
+            raise
+        with self.settings.lock:
+            self.settings.save()
+        return state
 
     # --- audio output --------------------------------------------------
     def _audio_devices(self):
@@ -1285,6 +1357,8 @@ class Api:
             ("POST", "/api/access/code"): ("full", self.make_join_code),
             ("POST", "/api/access/cancel"): ("full", self.cancel_join_code),
             ("POST", "/api/access/screen"): ("full", self.show_access),
+            ("GET", "/api/overlay"): ("view", self.get_overlay),
+            ("POST", "/api/overlay"): ("live", self.set_overlay),
             ("GET", "/api/audio"): ("view", self.get_audio),
             ("POST", "/api/audio"): ("full", self.set_audio),
             ("GET", "/api/autostart"): ("view", self.get_autostart),

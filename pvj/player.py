@@ -363,6 +363,20 @@ class Player:
     def overlay_remove(self, oid):
         self.ipc.request("overlay-remove", oid)
 
+    def overlay_file(self, oid, path, width, height):
+        """Draw a ready raw BGRA file (width x height, at 0, 0) over the picture until overlay_remove(oid)."""
+        self.ipc.request("overlay-add", oid, 0, 0, path, 0, "bgra", int(width), int(height), int(width) * 4)
+
+    def flip(self, horizontal, on):
+        """Mirror the picture left-right or upside down (a video filter; about half a core more on a Pi 4 at 1080p)."""
+        label = "@pvjfliph" if horizontal else "@pvjflipv"
+        try:
+            self.ipc.request("vf", "remove", label)
+        except PlayerError:
+            pass
+        if on:
+            self.ipc.request("vf", "add", "%s:%s" % (label, "hflip" if horizontal else "vflip"))
+
     def volume_step(self, delta):
         self.ipc.request("add", "volume", float(delta))
 
@@ -377,7 +391,7 @@ class Player:
         self._set("video-zoom", math.log2(max(1, min(400, float(percent))) / 100.0))
 
     def position(self, x, y=0):
-        """Shift the picture; units are thousandths of the picture width/height."""
+        """Shift the picture; units are thousandths of the picture width and height (y positive moves it down)."""
         self._set("video-pan-x", max(-3000, min(3000, float(x))) / 1000.0)
         self._set("video-pan-y", max(-3000, min(3000, float(y))) / 1000.0)
 

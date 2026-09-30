@@ -27,6 +27,9 @@ class FakePlayer:
 
     TEST_PATTERN = "av://lavfi:smptehdbars=size=1920x1080:rate=25"
 
+    def osd_size(self):
+        return (1920, 1080)
+
     def status(self):
         return {"running": self.running, "path": None}
 
@@ -36,7 +39,7 @@ class FakePlayer:
         self.running = True
 
     def __getattr__(self, name):
-        if name in ("pause", "seek", "seek_to", "playlist_step", "shuffle", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
+        if name in ("pause", "seek", "seek_to", "playlist_step", "shuffle", "flip", "overlay_remove", "overlay_file", "speed", "volume", "opacity", "size", "position", "rotate", "loop", "mute", "clear", "volume_step"):
             def call(*args):
                 self.calls.append((name,) + args)
                 return True if name in ("pause", "playlist_step") else None
