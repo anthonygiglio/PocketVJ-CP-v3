@@ -27,6 +27,8 @@ class FakePlayer:
 
     TEST_PATTERN = "av://lavfi:smptehdbars=size=1920x1080:rate=25"
 
+    TEST_TONES = {"left": "av://lavfi:aevalsrc=L", "right": "av://lavfi:aevalsrc=R", "both": "av://lavfi:aevalsrc=B"}
+
     def osd_size(self):
         return (1920, 1080)
 

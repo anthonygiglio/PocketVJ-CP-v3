@@ -410,6 +410,10 @@ class Player:
         self._set("video-rotate", int(degrees))
 
     TEST_PATTERN = "av://lavfi:smptehdbars=size=1920x1080:rate=25"
+    # 5 s of 440 Hz, on the left, the right or both channels (the old Settings tab's test tones)
+    TEST_TONES = {"left": "av://lavfi:aevalsrc=0.5*sin(440*2*PI*t)|0:s=48000:d=5",
+                  "right": "av://lavfi:aevalsrc=0|0.5*sin(440*2*PI*t):s=48000:d=5",
+                  "both": "av://lavfi:aevalsrc=0.5*sin(440*2*PI*t)|0.5*sin(440*2*PI*t):s=48000:d=5"}
 
     def status(self):
         if not self.is_running():
