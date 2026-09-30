@@ -4,6 +4,20 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (USB, MIDI, audio, playback on the real Pi 4)
+
+Verified on the board:
+- USB drive (exFAT, 58 GB, three 3 to 5 GB films): auto-mounted read-only with `nosuid,nodev,noexec` at `/media/pvj/NXLX-USB`, `/media/usb` link made. Three MIDI controllers (Korg nanoKONTROL2, Akai MIDI Mix, Novation Launchpad Mini) and a USB HDMI capture adapter all enumerate. The MIDI module reads a controller through the systemd sandbox (`connected: true`), which confirms the unit fix from the earlier PR; 112 messages in a few seconds were handled.
+- 1080p23.976 H.264 plays through the panel from the USB drive: software decode, about 109 percent of one of four cores, 41 C, no throttling, zero decoder drops, A/V sync steady.
+
+Found on the board and fixed in this PR:
+1. **Nothing on a USB drive could be played from the panel** (only the media folder was allowed). Added a USB list on the Media screen, `POST /api/play {"usb": "LABEL/name"}` with strict path checks, and made the old `startmasterusb` presets work.
+2. **Choppy video**: 15 dropped frames a second scaling 1080p to 2560x1440. `--profile=fast` on Pi 3 and 4 by default cured it (0.0 a second).
+3. **No sound on an HDMI monitor**: mpv's default output on a Pi is the headphone jack. New Sound output setting; "Automatic" picks the HDMI port with the screen on it; re-applied whenever the player restarts. Owner confirmed audio is good.
+4. **The live screen preview hurt playback** (4.7 dropped frames a second with it open, 1.3 with a snapshot every 5 s). Replaced by a snapshot on request (D20).
+
+Not verified: HEVC or 4K decode, 24 fps judder on a 75 Hz screen (the monitor offers 75, 60 and 50 Hz only), the second and third MIDI controllers' messages, the read-only root, streams, the Network module (needs a keyboard on the box).
+
 ## 2026-09-30 (screen viewer, more hardware results)
 
 Done, on the real Pi 4 (Debian 13):

@@ -98,6 +98,11 @@ def playback_profile(board, has_desktop):
     notes = []
     if not has_desktop:
         args += ["--vo=gpu", "--gpu-context=drm"]
+    if kind in ("pi3", "pi4"):
+        # mpv's own cheap-rendering profile (bilinear scaling, no dither, no peak detection). Measured on a Pi 4 at
+        # 2560x1440: playing 1080p H.264 dropped 15 frames a second with the default scalers and none with these.
+        args.append("--profile=fast")
+        notes.append("Cheap scaling is on (--profile=fast); the default scalers drop frames on a Pi at 1440p.")
     if kind == "pi5":
         notes.append("Pi 5 has no hardware H.264 decode; use HEVC files or expect software decode.")
     if kind == "pi3":

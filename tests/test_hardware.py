@@ -64,3 +64,13 @@ class HardwareTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheapRenderingTest(unittest.TestCase):
+    """--profile=fast: 1080p H.264 dropped 15 frames a second on a Pi 4 at 2560x1440 without it and none with it."""
+
+    def test_pis_that_struggle_get_the_fast_profile_others_do_not(self):
+        for kind, expected in (("pi3", True), ("pi4", True), ("pi5", False), ("x86", False), ("arm-other", False)):
+            args = hardware.playback_profile({"kind": kind}, has_desktop=False)["mpv_args"]
+            self.assertEqual("--profile=fast" in args, expected, kind)
+
