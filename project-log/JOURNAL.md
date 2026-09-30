@@ -4,6 +4,13 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (screenshots)
+
+Done:
+- Added `tests/ui/screenshots.js` (cropped element shots of each screen and card, phone and desktop, from the real panel and the test harness), a non-blocking CI step that uploads them, `docs/images/ui/` (16 images, about 1.4 MB), `docs/UI.md` and a "What it looks like" section in the README. The pictures use test clips and a fake network; the docs say so.
+- Taking the pictures showed two real layout bugs at phone width and both are fixed: the buttons in a list row wrapped mid-word ("Pla / y"), and stream addresses were shown in the small-caps label style (mangling them). Also shortened the network "revert" option, which was cut off.
+- The inline `<style>` a screenshot script tried to add was refused by the panel's strict CSP, which is the CSP doing its job.
+
 ## 2026-09-29 (device plan)
 
 Done:

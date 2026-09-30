@@ -2,7 +2,17 @@
 
 **nxlx.mastercontrol** is a project of NXLX.Systems. It began as a fork of PocketVJ CP v3 (the repository was formerly named `PocketVJ-CP-v3`, after the last version maintained upstream). It is a modernization of that control panel, a control panel for playing, mixing and mapping video on small computers. It is built for artists who run visuals at gigs: raves, concerts and installations.
 
-> **Status: work in progress.** The `master` branch still holds the legacy v3 code, which targets Raspberry Pi 3B+ on Raspbian Jessie. The state before the fork work began is tagged `legacy-v3`. Do not expose the legacy code to an untrusted network; see [SECURITY.md](SECURITY.md).
+> **Status: work in progress.** The new core (Python 3, in `pvj/`) is in place and has been tested in containers and CI only; **nothing has been booted on a real board yet**. The `master` branch also still holds the legacy v3 code, which targets Raspberry Pi 3B+ on Raspbian Jessie. The state before the fork work began is tagged `legacy-v3`. Do not expose the legacy code to an untrusted network; see [SECURITY.md](SECURITY.md).
+
+## What it looks like
+
+The panel is made for a phone in one hand at a gig: big pads, one screen for what is playing, and everything else a tap away. These pictures are taken by the test suite from the real panel (`tests/ui/screenshots.js`), with test clips and a fake network, so the clips, addresses and hardware shown are not real.
+
+| Live | Mix | Media |
+| --- | --- | --- |
+| ![Live: pads, now playing, fade, freeze and blackout](docs/images/ui/live.png) | ![Mix: opacity, size, position, speed, transitions](docs/images/ui/mix.png) | ![Media: upload, play, rename, delete](docs/images/ui/media.png) |
+
+More screens, with the beta modules (schedule, streams, DMX, MIDI, network), are in [docs/UI.md](docs/UI.md).
 
 ## Goals
 

@@ -671,7 +671,7 @@
         });
       }
       out.secs = h('select', { class: 'text-input', id: 'netsecs', 'aria-label': 'Revert automatically after' },
-        [30, 60, 120, 300].map(function (n) { return h('option', { value: n, text: 'Revert by itself after ' + n + ' s unless confirmed', selected: n === 60 }); }));
+        [30, 60, 120, 300].map(function (n) { return h('option', { value: n, text: 'Revert after ' + n + ' s unless confirmed', selected: n === 60 }); }));
       out.preview = h('pre', { class: 'mono', id: 'netplan', hidden: true });
       out.msg = h('div', { class: 'msg', id: 'netresult', role: 'status' });
       drawModes(); drawFields();
