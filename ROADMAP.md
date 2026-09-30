@@ -20,7 +20,7 @@ Legacy v3 items are kept below the line for reference.
 | NDI | First-class. Free proprietary runtime, fetched and kept current by the module updater. Main route for Resolume and MadMapper output. |
 | SRT, RTSP, RTMP | Fully open. Via ffmpeg or mpv. |
 | AES67 / Dante audio | Dante devices interoperate through AES67 mode. Native Dante on Linux needs the community Inferno project or a Dante hardware card; to be evaluated. |
-| SMPTE ST 2110 | Needs PTP time sync and a capable NIC, so x86 only. Candidates: Intel Media Transport Library, GStreamer. Not for Pi. |
+| SMPTE ST 2110 | Not planned as a native input (D30). HD 2110-20 video needs 1.2 to 2.6 Gbps, more than the Pi's 1 GbE; a Pi 4 has no hardware PTP; broadcast plants expect NMOS IS-04/IS-05. Use a gateway: 2110 to HDMI into the capture input, or 2110 to NDI. Revisit only for x86 with a 10 GbE card if a user with a 2110 plant needs direct ingest. |
 
 ### Legacy v3 list (upstream, 2022)
 
