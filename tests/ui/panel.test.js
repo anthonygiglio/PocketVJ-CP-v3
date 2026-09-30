@@ -151,6 +151,20 @@ function startServer() {
     await page.waitForFunction(() => /Listening on UDP/.test(document.getElementById('oscline').textContent));
     await page.click('#osctoggle');
     await page.waitForFunction(() => document.getElementById('oscline').textContent === 'Off');
+    // Autostart: reject a missing clip, then save "play every clip" and see it summarised
+    await page.waitForSelector('#autoline:has-text("Off")');
+    await page.selectOption('#automode', 'file');
+    await page.selectOption('#autofile', { index: 0 });
+    await page.fill('#autodelay', '999');
+    await page.click('#autosave');
+    await page.waitForFunction(() => /delay must be/.test(document.getElementById('msg').textContent));
+    await page.fill('#autodelay', '3');
+    await page.selectOption('#automode', 'all');
+    await page.click('#autosave');
+    await page.waitForFunction(() => /Play every clip.*after 3 s/.test(document.getElementById('autoline').textContent));
+    await page.selectOption('#automode', 'off');
+    await page.click('#autosave');
+    await page.waitForFunction(() => /^Off/.test(document.getElementById('autoline').textContent));
     // DMX: switch the module on, reject a bad universe, turn it on and off
     await page.click('.item:has-text("DMX over the network") >> button');
     await page.waitForSelector('#dmxline:has-text("Off")');

@@ -122,6 +122,7 @@ class Api:
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
         self.scheduler = None     # Scheduler or None
+        self.autostart = None     # Autostart or None
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -674,6 +675,32 @@ class Api:
         self.settings.save()
         return self.osc.status()
 
+    # --- autostart -----------------------------------------------------
+    def get_autostart(self, body, device, client):
+        if self.autostart is None:
+            raise ApiError(404, "autostart is not available")
+        return self.autostart.status()
+
+    def set_autostart(self, body, device, client):
+        from . import autostart as autostart_mod   # imported here: autostart itself imports this module
+        if self.autostart is None:
+            raise ApiError(404, "autostart is not available")
+        with self.settings.lock:
+            try:
+                new = autostart_mod.validate(body, self.settings.data["autostart"])
+            except autostart_mod.AutostartError as e:
+                raise bad(str(e))
+            self.settings.data["autostart"] = new
+            self.settings.save()
+        return self.autostart.status()
+
+    def test_autostart(self, body, device, client):
+        """Run it now (what a reboot would do), to check it without restarting the box."""
+        if self.autostart is None:
+            raise ApiError(404, "autostart is not available")
+        message = self.autostart.run_now()
+        return dict(self.autostart.status(), message=message)
+
     # --- DMX and MIDI input --------------------------------------------
     def _need_control(self, module, manager):
         if manager is None or not self.registry.enabled(module):
@@ -845,6 +872,9 @@ class Api:
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/mix"): ("live", self.set_mix),
+            ("GET", "/api/autostart"): ("view", self.get_autostart),
+            ("POST", "/api/autostart"): ("full", self.set_autostart),
+            ("POST", "/api/autostart/test"): ("live", self.test_autostart),
             ("GET", "/api/dmx"): ("full", self.get_dmx),
             ("POST", "/api/dmx"): ("full", self.set_dmx),
             ("GET", "/api/midi"): ("full", self.get_midi),
