@@ -90,4 +90,8 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px
 .addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
 /* The screen preview keeps the picture's shape and never overflows the card. */
 #preview { display: block; width: 100%; height: auto; margin-top: 8px; border-radius: 6px; background: #000; }
+/* Transport: the position slider is the full card width and easy to hit with a thumb */
+input.seek { width: 100%; margin: 10px 0 4px; accent-color: var(--ac); height: 28px; }
+.row.transport { margin-top: 8px; }
+.row.transport .btn { min-height: 44px; }
 

@@ -293,6 +293,9 @@ class Api:
         """Player status with stream passwords hidden and the saved stream's name added."""
         status = dict(self.player.status())
         path = status.get("path")
+        if path == getattr(self.player, "TEST_PATTERN", None):
+            status["path"], status["test_pattern"] = None, True
+            return status
         if isinstance(path, str) and "://" in path:
             for st in self.settings.data.get("streams", []):
                 if st["url"] == path:
@@ -644,6 +647,11 @@ class Api:
             self._player_call(p.mute, body["value"])
         elif action == "stop":
             self._player_call(p.clear)
+        elif action == "seek_to":
+            self._player_call(p.seek_to, number(body, "value", 0, 24 * 3600))
+        elif action in ("next", "prev"):
+            if not self._player_call(p.playlist_step, action == "next"):
+                raise ApiError(409, "no %s clip in the playlist" % ("next" if action == "next" else "previous"))
         elif action == "volume_step":
             self._player_call(p.volume_step, number(body, "value", -50, 50))
         elif action == "reset":
@@ -671,6 +679,31 @@ class Api:
         self._player_call(self.player.status)
         self.fader.ramp(self.mix["opacity"], 0, seconds)
         return {"ok": True}
+
+    def fadein(self, body, device, client):
+        """From black (a blackout, or a faded-out picture) up to the mix opacity over `seconds`. The legacy panel had
+        a fade in; until now the only way back from black here was an instant Show."""
+        seconds = number(body, "seconds", 0.1, 30)
+        self._player_call(self.player.status)
+        self.fader.cancel()
+        self.mix["blackout"] = False
+        self._apply_opacity(0)
+        self.fader.ramp(0, self.mix["opacity"], seconds)
+        return {"ok": True}
+
+    def test_pattern(self, body, device, client):
+        """Show colour bars (for lining up a projector), or stop them. They come from the player itself, no file."""
+        on = body.get("on")
+        if not isinstance(on, bool):
+            raise bad("on must be true or false")
+        if not on:
+            self._player_call(self.player.clear)
+            return {"test_pattern": False}
+        self.fader.cancel()
+        self._player_call(self.player.play, [self.player.TEST_PATTERN], True, None, False, self.spawn)
+        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        self._started_playing()
+        return {"test_pattern": True}
 
     def set_mix(self, body, device, client):
         mode, duration = body.get("transition"), body.get("duration")
@@ -1088,6 +1121,8 @@ class Api:
             ("POST", "/api/control"): ("live", self.control),
             ("POST", "/api/blackout"): ("live", self.blackout),
             ("POST", "/api/fadeout"): ("live", self.fadeout),
+            ("POST", "/api/fadein"): ("live", self.fadein),
+            ("POST", "/api/testpattern"): ("live", self.test_pattern),
             ("POST", "/api/mix"): ("live", self.set_mix),
             ("GET", "/api/audio"): ("view", self.get_audio),
             ("POST", "/api/audio"): ("full", self.set_audio),

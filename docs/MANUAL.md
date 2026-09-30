@@ -44,7 +44,11 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Sound output** (System): on a Raspberry Pi "Automatic" sends the sound to the HDMI port that has the screen on it (the player's own default is the 3.5 mm headphone jack, which is silent on a monitor). Pick another output, such as the headphones or a USB sound device, in System > Sound output. The choice is remembered and re-applied if the player restarts.
 
-**Mix** has opacity, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
+**Now playing** (Live) has the controls of a normal player: a **position slider** (drag and release to jump), **Prev** and **Next** (when several clips are playing as a list, for example Play all), **- 10 s** and **+ 10 s**, **Fade in** (from a blackout or a fade out, over 2 s) and **Test pattern** (SMPTE colour bars from the player itself, for lining up a projector; tap again to stop).
+
+**Quick play** (Media) plays the whole folder, looping or once, or the clips whose names start with a number (`01_intro.mp4` is clip 01), like the old Video tab.
+
+**Mix** has opacity, volume, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 
 ![Mix screen](images/ui/mix.png)
 

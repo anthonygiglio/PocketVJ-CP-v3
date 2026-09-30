@@ -285,6 +285,24 @@ class Player:
     def seek(self, seconds):
         self.ipc.request("seek", float(seconds), "relative")
 
+    def seek_to(self, seconds):
+        """Jump to an absolute position in the current clip."""
+        self.ipc.request("seek", max(0.0, float(seconds)), "absolute")
+
+    def playlist_step(self, forward):
+        """Next or previous clip in the playlist. Returns False when there is nothing in that direction."""
+        count = self.ipc.request("get_property", "playlist-count") or 0
+        pos = self.ipc.request("get_property", "playlist-pos")
+        if count <= 1 or pos is None or pos < 0:
+            return False
+        looping = self.ipc.request("get_property", "loop-playlist") not in (False, "no", None)
+        if forward and pos >= count - 1 and not looping:
+            return False
+        if not forward and pos <= 0 and not looping:
+            return False
+        self.ipc.request("playlist-next" if forward else "playlist-prev", "force")
+        return True
+
     def speed(self, factor):
         self._set("speed", min(4.0, max(0.1, float(factor))))
 
@@ -333,6 +351,8 @@ class Player:
         if degrees not in (0, 90, 180, 270):
             raise PlayerError("rotation must be 0, 90, 180 or 270")
         self._set("video-rotate", int(degrees))
+
+    TEST_PATTERN = "av://lavfi:smptehdbars=size=1920x1080:rate=25"
 
     def status(self):
         if not self.is_running():
