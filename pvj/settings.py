@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 8
+SCHEMA = 9
 
 
 class SettingsError(Exception):
@@ -45,6 +45,7 @@ def default_settings():
         "control": default_control(),
         "autostart": {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0},
         "audio": {"device": "auto"},
+        "overlay": {"file": "", "on": False},
     }
 
 
@@ -87,7 +88,12 @@ def _v7_to_v8(data):
     control["midi"] = {"enabled": bool(old.get("enabled", False)), "builtin": True, "map": []}
 
 
-MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8}
+def _v8_to_v9(data):
+    """9: a picture over the video (logo or mask). Off."""
+    data.setdefault("overlay", {"file": "", "on": False})
+
+
+MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

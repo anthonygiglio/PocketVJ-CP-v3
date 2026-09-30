@@ -345,6 +345,7 @@
         slider('mo', 'Opacity', 0, 100, 1, m.opacity === undefined ? 100 : m.opacity, function (v) { return v + '%'; }, ctl('opacity')),
         slider('ms', 'Size', 1, 200, 1, m.size === undefined ? 100 : m.size, function (v) { return v + '%'; }, ctl('size')),
         slider('mp', 'Position X', -100, 100, 1, m.position === undefined ? 0 : m.position, function (v) { return String(v); }, ctl('position')),
+        slider('mpy', 'Position Y', -100, 100, 1, m.position_y === undefined ? 0 : m.position_y, function (v) { return String(v); }, ctl('position_y')),
         slider('mv', 'Speed', 25, 200, 5, Math.round((pl.speed || 1) * 100), function (v) { return (v / 100).toFixed(2) + 'x'; },
           function (v) { ctl('speed')(v / 100); }),
         slider('mvol', 'Volume', 0, 130, 1, Math.round(pl.volume === undefined || pl.volume === null ? 100 : pl.volume), function (v) { return v + '%'; }, ctl('volume'))),
@@ -354,6 +355,14 @@
           m.transition, function (v) { setMix({ transition: v }); }),
         h('div', { class: 'k', text: 'Duration' }),
         choice([0.5, 1, 2, 5].map(function (d) { return { label: d + 's', value: d }; }), m.duration, function (v) { setMix({ duration: v }); })),
+      h('div', { class: 'card' },
+        h('div', { class: 'k', text: 'Mirror (for rear projection or a mirror rig; costs the box some work)' }),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn grow' + (m.flip_h ? ' on' : ''), id: 'fliph', text: 'Flip left-right', 'aria-pressed': m.flip_h ? 'true' : 'false', disabled: !can('live'),
+            onclick: function () { act('POST', '/api/control', { action: 'flip_h', value: !m.flip_h }, function () { poll(); setTimeout(render, 200); }); } }),
+          h('button', { class: 'btn grow' + (m.flip_v ? ' on' : ''), id: 'flipv', text: 'Flip upside down', 'aria-pressed': m.flip_v ? 'true' : 'false', disabled: !can('live'),
+            onclick: function () { act('POST', '/api/control', { action: 'flip_v', value: !m.flip_v }, function () { poll(); setTimeout(render, 200); }); } }))),
+      overlayCard(),
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Rotate' }),
         choice([0, 90, 180, 270].map(function (d) { return { label: d + '°', value: d }; }), m.rotate === undefined ? 0 : m.rotate,
@@ -366,6 +375,30 @@
         h('button', { class: 'btn grow', text: 'Reset mix', disabled: !can('live'),
           onclick: function () { act('POST', '/api/control', { action: 'reset' }, function () { poll(); setTimeout(render, 200); }); } })),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }));
+  }
+
+  // A picture over the video: a PNG from the media folder (logo, watermark, mask), fitted to the screen.
+  function overlayCard() {
+    var body = h('div', { class: 'list', id: 'overlaybody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'overlaycard' }, h('div', { class: 'k', text: 'Overlay picture (logo or mask over the video)' }), body);
+    function draw(d) {
+      body.textContent = '';
+      if (!d.choices.length) { body.appendChild(h('div', { class: 'k', id: 'overlaynone', text: 'Upload a PNG (transparent where the video should show) on the Media screen to use it here.' })); return; }
+      var sel = h('select', { class: 'text-input', id: 'overlayfile', 'aria-label': 'Overlay picture', disabled: !can('live') },
+        d.choices.map(function (n) { return h('option', { value: n, text: n, selected: n === d.file }); }));
+      body.appendChild(sel);
+      body.appendChild(h('button', { class: 'btn' + (d.on ? ' on' : ''), id: 'overlaytoggle', 'aria-pressed': d.on ? 'true' : 'false', disabled: !can('live'),
+        text: d.on ? 'Overlay is on. Turn off' : 'Show overlay',
+        onclick: function (e) {
+          e.target.disabled = true; e.target.textContent = d.on ? 'Turning off...' : 'Preparing the picture...';
+          act('POST', '/api/overlay', { file: sel.value, on: !d.on }, function (data) { say(''); draw(data); }).then(function (r) { if (!r.ok) draw(d); });
+        } }));
+    }
+    api('GET', '/api/overlay').then(function (r) {
+      if (!document.getElementById('overlaycard')) return;
+      if (r.ok) draw(r.data); else { body.textContent = ''; body.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' })); }
+    });
+    return card;
   }
 
   // ---- media ----------------------------------------------------------

@@ -68,6 +68,10 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Audio files** (mp3, wav, flac, ogg, m4a, aac, opus) can be uploaded and played like clips; the screen stays black while they play.
 
+**Overlay picture** (Mix): put a PNG from the media folder over the video, like the old panel's overlay.png: a logo, a watermark, or a mask that blacks out the parts of the picture that miss the screen. Make it transparent where the video should show. It is fitted to the screen once (about a second on a Pi 4), stays on top of the video, and comes back by itself if the player restarts. It cost no measurable playback on a Pi 4 with a 1080p film.
+
+**Mirror and position** (Mix): Flip left-right or upside down for rear projection or a mirror rig (live, no reboot; on a Pi 4 it costs about half a processor core at 1080p, and dropped no frames in the test), and Position Y next to Position X.
+
 **Mix** has opacity, volume, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 
 ![Mix screen](images/ui/mix.png)

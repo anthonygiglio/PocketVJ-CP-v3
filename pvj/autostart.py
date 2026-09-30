@@ -132,6 +132,12 @@ class Autostart:
                 apply_audio()
             except Exception as e:
                 self.log("pvj-web: could not set the sound output: %s" % e)
+        apply_overlay = getattr(self.api, "apply_overlay", None)
+        if apply_overlay and self.settings.data.get("overlay", {}).get("on"):   # a restarted player lost the picture
+            try:
+                apply_overlay()
+            except Exception as e:
+                self.log("pvj-web: could not put the overlay back: %s" % e)
         cfg = self.settings.data["autostart"]
         if cfg["mode"] == "off":
             return False

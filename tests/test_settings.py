@@ -116,6 +116,12 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(data["control"]["dmx"]["enabled"])                                          # DMX untouched
         self.assertEqual(self.read(self.path + ".bak-v7")["control"]["midi"]["device"], "/dev/snd/midiC1D0")
 
+    def test_real_migration_from_schema_8_adds_the_overlay_off(self):
+        with open(self.path, "w") as f:
+            json.dump({"schema": 8, "audio": {"device": "auto"}}, f)
+        data = Settings(self.path).load()
+        self.assertEqual((data["schema"], data["overlay"]), (settings.SCHEMA, {"file": "", "on": False}))
+
     def test_newer_file_is_never_rewritten(self):
         with open(self.path, "w") as f:
             json.dump({"schema": 99, "precious": True}, f)
