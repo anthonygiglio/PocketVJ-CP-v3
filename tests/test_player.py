@@ -263,3 +263,13 @@ class SocketOpenerTest(unittest.TestCase):
             proc.kill()
             proc.wait()
 
+
+class HardeningFlagsTest(unittest.TestCase):
+    """A file is judged by its content: a hostile USB drive can hold an "mp4" that is really a playlist or an EDL."""
+
+    def test_the_player_will_not_follow_references_or_load_sidecars_or_scripts(self):
+        args = Player(rundir=tempfile.mkdtemp()).mpv_command()
+        for flag in ("--access-references=no", "--load-unsafe-playlists=no", "--sub-auto=no", "--audio-file-auto=no",
+                     "--ytdl=no", "--load-scripts=no", "--load-auto-profiles=no"):
+            self.assertIn(flag, args)
+

@@ -18,7 +18,7 @@ The web panel listens on port 80. Connect the box and your phone to the same net
 
 ## 2. Pair your phone
 
-Open `http://<address of the box>/` in a browser. The box makes a new four digit PIN every time it starts. Until the first device has paired, the box draws the PIN and its address on its own screen whenever nothing is playing; after that it never appears on screen again, so it cannot show at a gig. You can always read it with `sudo pvj-pin`, and any full-access device can make a new PIN or a guest link in System.
+Open `http://<address of the box>/` in a browser. The box makes a new four digit PIN every time it starts. Until the first device has paired, the box draws the PIN and its address on its own screen whenever nothing is playing; after that it stays off, so it cannot show at a gig. If every paired device is later removed it comes back, which is the way in for a box nobody can reach; a clip that starts clears it at once. You can always read it with `sudo pvj-pin`, and any full-access device can make a new PIN or a guest link in System.
 
 ![Connect screen](images/ui/connect.png)
 
@@ -73,6 +73,8 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 - **Updates** are signed bundles installed with `sudo pvj-update` (from a USB stick, no internet needed) and roll back by themselves if the panel does not come back. See [pvj/README.md](../pvj/README.md#updates-and-rollback). There is no update button in the panel.
 - **Player stuck?** System > Restart player asks it to quit and systemd brings it back. If mpv ignores that, run `sudo systemctl restart pvj-player` on the box.
 - **Network changes** always revert by themselves unless you confirm them. Test them with a keyboard and monitor on the box, never over SSH on the only link.
+
+**Hostile drives and files.** A USB stick or an upload can hold a file that is named `.mp4` but is really a playlist or a script for the player. The player is started so that it plays media only: it does not follow references inside files (playlists, EDL), load sidecar subtitle or audio files, load scripts or run youtube-dl. This was tested on a Raspberry Pi 4 with fake playlists. A drive is also mounted read-only with `nosuid,nodev,noexec`, and only the top level of a drive is listed, up to a limit.
 
 ## 7. Troubleshooting
 

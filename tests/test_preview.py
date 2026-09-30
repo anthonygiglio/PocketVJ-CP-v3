@@ -68,7 +68,18 @@ class PreviewTest(ServerBase):
         self.next_bytes = b"\xff\xd8" + b"x" * (api_mod.PREVIEW_MAX_BYTES + 10)
         self.assertEqual(self.call("GET", "/api/preview.jpg", token=self.full)[0], 503)
 
-    def test_a_link_in_the_runtime_folder_is_not_followed(self):
+    def test_a_link_planted_before_the_snapshot_is_removed_and_never_written_through(self):
+        target = os.path.join(self.tmp, "victim.txt")
+        with open(target, "w") as f:
+            f.write("do not overwrite")
+        os.symlink(target, os.path.join(self.rundir, "preview.jpg"))       # planted by someone in group pvj
+        st, body, _ = self.call("GET", "/api/preview.jpg", token=self.full)
+        self.assertEqual((st, body), (200, JPEG))
+        with open(target) as f:
+            self.assertEqual(f.read(), "do not overwrite")
+        self.assertFalse(os.path.islink(os.path.join(self.rundir, "preview.jpg")))
+
+    def test_a_link_created_during_the_snapshot_is_not_followed(self):
         target = os.path.join(self.tmp, "secret.jpg")
         with open(target, "wb") as f:
             f.write(JPEG)
@@ -77,7 +88,31 @@ class PreviewTest(ServerBase):
         def screenshot(path, quality=60):
             os.symlink(target, link)
         self.player.screenshot = screenshot
-        self.assertEqual(self.call("GET", "/api/preview.jpg", token=self.full)[0], 500)
+        st, body, _ = self.call("GET", "/api/preview.jpg", token=self.full)
+        self.assertNotEqual(st, 200)
+        self.assertNotEqual(body, JPEG)
+
+    def test_a_fifo_at_the_path_cannot_hang_the_reader(self):
+        link = os.path.join(self.rundir, "preview.jpg")
+
+        def screenshot(path, quality=60):
+            os.mkfifo(link)
+        self.player.screenshot = screenshot
+        started = time.monotonic()
+        st, _, _ = self.call("GET", "/api/preview.jpg", token=self.full)
+        self.assertNotEqual(st, 200)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_a_failure_is_remembered_so_requests_do_not_queue_behind_a_slow_player(self):
+        calls = []
+
+        def slow_fail(path, quality=60):
+            calls.append(1)
+            raise PlayerError("nothing playing")
+        self.player.screenshot = slow_fail
+        for _ in range(5):
+            self.assertEqual(self.call("GET", "/api/preview.jpg", token=self.full)[0], 503)
+        self.assertEqual(len(calls), 1)
 
     def test_query_string_is_ignored_and_other_methods_do_not_reach_it(self):
         token = self.invite("view")

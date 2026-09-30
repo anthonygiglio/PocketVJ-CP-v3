@@ -11,6 +11,7 @@ or a path unchecked.
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import threading
@@ -26,6 +27,14 @@ from .themes import ThemeError
 MEDIA_EXTENSIONS = VIDEO_EXTENSIONS + IMAGE_EXTENSIONS
 _NAME = re.compile(r"[^\x00-\x1f/\\]{1,120}")
 _USB_LABEL = re.compile(r"[A-Za-z0-9._-]{1,64}")
+USB_SCAN_LIMIT = 2000          # directory entries looked at per drive; a hostile drive can hold millions
+USB_CACHE_SECONDS = 2.0
+PRESET_MAX_FILES = 200         # files a preset will queue in the player
+
+
+def _usb_label_ok(label):
+    """A drive folder name: the safe characters, and never '.', '..' or a hidden name."""
+    return bool(_USB_LABEL.fullmatch(label)) and not label.startswith(".")
 _MODULE_ID = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
 
@@ -128,6 +137,8 @@ class Api:
         self.mix = {"opacity": 100, "blackout": False, "size": 100, "position": 0, "rotate": 0}
         self.fader = Fader(self._apply_opacity)
         self._preview_lock = threading.Lock()
+        self._control_lock = threading.RLock()
+        self._usb_cache = (0.0, [])
         self._preview = None      # (time, jpeg bytes) of the last frame
         self.scheduler = None     # Scheduler or None
         self.autostart = None     # Autostart or None
@@ -155,20 +166,28 @@ class Api:
         return path
 
     def usb_drives(self):
-        """Media files at the top level of each mounted USB drive: [{"drive": label, "files": [{"name", "size"}]}]."""
+        """Media files at the top level of each mounted USB drive: [{"drive": label, "files": [{"name", "size"}]}].
+        The drive is untrusted and can hold any number of files, so the scan stops after USB_SCAN_LIMIT entries and the
+        result is kept for a few seconds instead of being rebuilt for every request."""
+        now = time.monotonic()
+        if now - self._usb_cache[0] < USB_CACHE_SECONDS:
+            return self._usb_cache[1]
         out = []
         try:
-            labels = sorted(os.listdir(self.usb_root))
+            labels = sorted(os.listdir(self.usb_root))[:16]
         except OSError:
-            return out
+            labels = []
         for label in labels:
             base = os.path.join(self.usb_root, label)
-            if not _USB_LABEL.fullmatch(label) or os.path.islink(base) or not os.path.isdir(base):
+            if not _usb_label_ok(label) or os.path.islink(base) or not os.path.isdir(base):
                 continue
-            files = []
+            files, seen = [], 0
             try:
                 with os.scandir(base) as it:
                     for e in it:
+                        seen += 1
+                        if seen > USB_SCAN_LIMIT:
+                            break
                         if (e.name.startswith(".") or not e.name.lower().endswith(MEDIA_EXTENSIONS) or not valid_name(e.name)
                                 or e.is_symlink() or not e.is_file()):
                             continue
@@ -176,18 +195,20 @@ class Api:
             except OSError:
                 continue
             files.sort(key=lambda f: f["name"].lower())
-            out.append({"drive": label, "files": files[:200]})
+            out.append({"drive": label, "files": files[:200], "truncated": seen > USB_SCAN_LIMIT or len(files) > 200})
+        self._usb_cache = (now, out)
         return out
 
     def resolve_usb(self, ref):
         """A media file on a mounted USB drive, given as 'LABEL/name.mp4'; never a path outside that drive's folder."""
         parts = ref.split("/") if isinstance(ref, str) else []
-        if len(parts) != 2 or not _USB_LABEL.fullmatch(parts[0]) or not valid_name(parts[1]) or not parts[1].lower().endswith(MEDIA_EXTENSIONS):
+        if len(parts) != 2 or not _usb_label_ok(parts[0]) or not valid_name(parts[1]) or not parts[1].lower().endswith(MEDIA_EXTENSIONS):
             raise bad("invalid USB file")
         root = os.path.realpath(self.usb_root)
         base = os.path.join(root, parts[0])
         path = os.path.join(base, parts[1])
-        if os.path.islink(base) or os.path.islink(path) or os.path.dirname(os.path.realpath(path)) != base or not os.path.isfile(path):
+        if (os.path.islink(base) or os.path.islink(path) or os.path.realpath(base) != base
+                or os.path.dirname(os.path.realpath(path)) != base or not os.path.isfile(path)):
             raise ApiError(404, "file not found on the USB drive")
         return path
 
@@ -233,22 +254,38 @@ class Api:
 
     def preview_jpeg(self):
         """A JPEG of what the player is showing on the screen. One screenshot at a time; viewers who ask within
-        PREVIEW_MIN_INTERVAL of the last one get the same frame, so ten phones cost no more than one."""
+        PREVIEW_MIN_INTERVAL of the last one get the same frame, so ten phones cost no more than one. A failure
+        (no picture yet) is remembered for a few seconds too, so requests cannot queue up behind a slow player."""
         with self._preview_lock:
             now = time.monotonic()
             if self._preview and now - self._preview[0] < PREVIEW_MIN_INTERVAL:
+                if isinstance(self._preview[1], ApiError):
+                    raise ApiError(self._preview[1].status, self._preview[1].message)
                 return self._preview[1]
             path = os.path.join(self.player.rundir, "preview.jpg")
             try:
+                try:
+                    os.unlink(path)               # never write through a link someone left there
+                except FileNotFoundError:
+                    pass
                 self._player_call(self.player.screenshot, path)
-                if os.path.islink(path):
-                    raise ApiError(500, "preview file is a link")
-                with open(path, "rb") as f:
-                    data = f.read(PREVIEW_MAX_BYTES + 1)
+                fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        raise ApiError(500, "preview file is not a regular file")
+                    with os.fdopen(fd, "rb", closefd=False) as f:
+                        data = f.read(PREVIEW_MAX_BYTES + 1)
+                finally:
+                    os.close(fd)
+                if not data.startswith(b"\xff\xd8") or len(data) > PREVIEW_MAX_BYTES:
+                    raise ApiError(503, "the player did not produce a picture")
+            except ApiError as e:
+                self._preview = (time.monotonic(), e)
+                raise
             except OSError as e:
-                raise ApiError(503, "no picture to show: %s" % (e.strerror or e))
-            if not data.startswith(b"\xff\xd8") or len(data) > PREVIEW_MAX_BYTES:
-                raise ApiError(503, "the player did not produce a picture")
+                err = ApiError(503, "no picture to show: %s" % (e.strerror or e))
+                self._preview = (time.monotonic(), err)
+                raise err
             self._preview = (time.monotonic(), data)
             return data
 
@@ -451,22 +488,27 @@ class Api:
         return {"banks": self.settings.data["pads"]["banks"]}
 
     def play_preset(self, body, name):
-        """A legacy start script name (startlessonce05 ...) played from the media folder."""
+        """A legacy start script name (startlessonce05 ...) played from the media folder or, for the usb ones, the USB drive."""
         try:
             preset = presets.parse_legacy_name(name if isinstance(name, str) else "")
             files = presets.resolve_files(preset, self.media_dir, self.usb_link)
         except PlayerError as e:
             raise bad(str(e))
-        root = os.path.realpath(self.usb_link if preset["usb"] else self.media_dir)
-        if preset["usb"] and os.path.dirname(root) != os.path.realpath(self.usb_root):
-            raise ApiError(404, "no USB drive is mounted")     # the link must point at a mounted drive, nowhere else
+        if preset["usb"]:
+            root = os.path.realpath(self.usb_link)
+            # /media/usb is either a link to a mounted drive folder or (old images) a real folder the drive is mounted on
+            if os.path.islink(self.usb_link) and os.path.dirname(root) != os.path.realpath(self.usb_root):
+                raise ApiError(404, "no USB drive is mounted")
+        else:
+            root = os.path.realpath(self.media_dir)
         paths = [f for f in (os.path.realpath(f) for f in files)
-                 if os.path.dirname(f) == root and f.lower().endswith(MEDIA_EXTENSIONS)]
+                 if os.path.dirname(f) == root and f.lower().endswith(MEDIA_EXTENSIONS) and valid_name(os.path.basename(f))]
         if not paths:
             raise ApiError(404, "no playable files for that preset")
-        self._player_call(self.player.play, paths, preset["loop"], None, False, self.spawn)
+        self._player_call(self.player.play, paths[:PRESET_MAX_FILES], preset["loop"], None, False, self.spawn)
         self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
-        return {"playing": name, "files": len(paths)}
+        self._started_playing()
+        return {"playing": name, "files": len(paths[:PRESET_MAX_FILES])}
 
     def play(self, body, device, client):
         if "preset" in body:
@@ -511,6 +553,7 @@ class Api:
             self.fader.ramp(self.mix["opacity"], 0, transition["duration"] / 2, then=start)
         else:
             start()
+        self._started_playing()
         return {"playing": name}
 
     def _need_streams(self):
@@ -526,6 +569,7 @@ class Api:
         self.fader.cancel()
         self._player_call(self.player.play, [match[0]["url"]], False, None, False, self.spawn)
         self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        self._started_playing()
         return {"playing": match[0]["name"]}
 
     def get_streams(self, body, device, client):
@@ -764,6 +808,25 @@ class Api:
                     return want
         return "auto"
 
+    def _started_playing(self):
+        """Something is about to be on screen: take any on-screen pairing PIN off it at once."""
+        if self.pinscreen is not None:
+            self.pinscreen.clear()
+
+    def ensure_audio(self):
+        """Keep the player on the right sound output while the choice is Automatic or the saved output is missing:
+        a screen switched on after the Pi booted, or a USB sound device plugged in late, must not leave the sound on the
+        headphone jack until the player restarts. Cheap (one property read); does nothing when already right."""
+        try:
+            names = {d["name"] for d in self._audio_devices()}
+            chosen = self.settings.data["audio"]["device"]
+            target = chosen if chosen != "auto" and chosen in names else self._auto_audio(names)
+            if self.player.ipc.request("get_property", "audio-device") != target:
+                self.player.ipc.request("set_property", "audio-device", target)
+            return target
+        except (ApiError, PlayerError):
+            return None
+
     def apply_audio(self):
         """Point the player at the chosen output. Called when the setting changes and whenever the player restarts."""
         names = {d["name"] for d in self._audio_devices()}
@@ -821,23 +884,26 @@ class Api:
 
     def _set_control(self, key, module, manager, validate, error_type, body):
         self._need_control(module, manager)
-        with self.settings.lock:      # validate, assign, start, revert and save happen as one step
-            current = self.settings.data["control"][key]
-            try:
-                new = validate(body, current)
-            except error_type as e:
-                raise bad(str(e))
-            self.settings.data["control"][key] = new
+        with self._control_lock:      # one change at a time; the settings lock is NOT held while a receiver starts or stops,
+            with self.settings.lock:  # because stopping joins threads that may need that lock
+                current = self.settings.data["control"][key]
+                try:
+                    new = validate(body, current)
+                except error_type as e:
+                    raise bad(str(e))
+                self.settings.data["control"][key] = new
             try:
                 manager.apply()
             except Exception as e:
-                self.settings.data["control"][key] = current   # keep the last working configuration
+                with self.settings.lock:
+                    self.settings.data["control"][key] = current   # keep the last working configuration
                 try:
                     manager.apply()
                 except Exception:
                     pass
                 raise ApiError(409, str(e))
-            self.settings.save()
+            with self.settings.lock:
+                self.settings.save()
             return manager.status()
 
     def get_dmx(self, body, device, client):
@@ -872,19 +938,23 @@ class Api:
             current = list(self.settings.data["control"]["midi"]["map"])
             try:
                 if "add" in body:
-                    current = midi_mod.add_entry(current, body["add"])
+                    changed = midi_mod.add_entry(current, body["add"])
                 elif "remove" in body:
                     if not any(e["id"] == body["remove"] for e in current):
                         raise ApiError(404, "no such mapping")
-                    current = [e for e in current if e["id"] != body["remove"]]
+                    changed = [e for e in current if e["id"] != body["remove"]]
                 elif body.get("clear") is True:
-                    current = []
+                    changed = []
                 else:
                     raise bad("send add, remove or clear")
             except midi_mod.MidiError as e:
                 raise bad(str(e))
-            self.settings.data["control"]["midi"]["map"] = current
-            self.settings.save()
+            self.settings.data["control"]["midi"]["map"] = changed
+            try:
+                self.settings.save()
+            except Exception:
+                self.settings.data["control"]["midi"]["map"] = current    # memory and disk must not disagree
+                raise
         self.midi.cancel_learn()
         return self.midi.status()
 

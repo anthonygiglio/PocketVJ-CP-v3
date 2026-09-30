@@ -87,7 +87,7 @@ Tested with fake tools and fake `/proc/mounts`. Not tested on a real device: the
 | Path | Access | Purpose |
 | --- | --- | --- |
 | `GET /api/hello`, `POST /api/pair`, `POST /api/session` | none | discovery, PIN pairing, guest link |
-| `GET /api/preview.jpg` | view | a JPEG of what the screen is showing (one shared screenshot every 0.7 s at most) |
+| `GET /api/preview.jpg` | view | a JPEG of what the screen is showing (one shared screenshot every 3 s at most; failures are remembered for the same time) |
 | `GET /api/status`, `/api/media`, `/api/pads`, `/api/modules`, `/api/theme`, `/api/osc`, `/api/autostart`, `/api/schedule`, `/api/streams` | view | read state (a stream's saved address is shown with its login hidden) |
 | `POST /api/play`, `/api/control`, `/api/blackout`, `/api/fadeout`, `/api/mix`, `/api/autostart/test` | live | play and mix |
 | `POST /api/pads`, `/api/theme`, `/api/modules/<id>`, `/api/devices/invite`, `/api/devices/revoke`, `/api/pin/rotate`, `/api/player/restart`, `/api/osc`, `/api/autostart`, `/api/schedule`, `/api/streams`, `/api/dmx`, `/api/midi`, `/api/media/*`, `/api/network/*`, `GET /api/devices`, `/api/dmx`, `/api/midi`, `/api/network` | full | configure |

@@ -33,6 +33,8 @@ DEVICE_PATH = re.compile(r"/dev/snd/midiC([0-9]{1,3})D[0-9]{1,3}")
 SOURCE = re.compile(r"[A-Za-z0-9 ._-]{1,32}")
 MIN_INTERVAL = 0.05
 MAX_CALLS_PER_SECOND = 50.0
+TRIGGER_GAP = 0.25          # a pad or button cannot fire again within this many seconds, even if it bounces
+LEARN_QUIET = 0.6           # after a control is learned, its own next messages are ignored for this long
 MAX_MAP = 200
 LEARN_SECONDS = 20
 
@@ -128,11 +130,23 @@ def builtin_map():
         entries.append({"kind": "cc", "channel": 0, "number": n, "action": action})
     for e in entries:
         e["source"] = "*"
+        e["builtin"] = True
     return entries
 
 
-def validate_entry(e):
-    """A clean map entry from untrusted input. Raises MidiError."""
+_BUILTIN = None
+
+
+def builtin_cached():
+    global _BUILTIN
+    if _BUILTIN is None:
+        _BUILTIN = builtin_map()
+    return _BUILTIN
+
+
+def validate_entry(e, keep_id=False):
+    """A clean map entry from untrusted input. Raises MidiError. A client never chooses an id (keep_id is only for
+    re-checking an entry read back from our own settings file)."""
     if not isinstance(e, dict):
         raise MidiError("a mapping must be an object")
     kind, action = e.get("kind"), e.get("action")
@@ -149,7 +163,8 @@ def validate_entry(e):
         raise MidiError("bad controller name")
     if ACTIONS[action][0] == "level" and kind == "program":
         raise MidiError("a program change cannot drive a level")
-    out = {"id": e.get("id") if isinstance(e.get("id"), str) and re.fullmatch(r"[0-9a-f]{8}", e["id"]) else uuid.uuid4().hex[:8],
+    stored = keep_id and isinstance(e.get("id"), str) and re.fullmatch(r"[0-9a-f]{8}", e["id"])
+    out = {"id": e["id"] if stored else uuid.uuid4().hex[:8],
            "source": source, "kind": kind, "channel": e.get("channel", 0), "number": e["number"], "action": action}
     if action == "pad":
         for key, hi in (("bank", 2), ("index", 11)):
@@ -165,47 +180,52 @@ class MidiMapper:
 
     def __init__(self, do, entries, mix=None, clock=time.monotonic):
         self.do, self.entries, self.mix, self._clock = do, entries, mix or {}, clock
+        self._fired = {}        # (id, source, kind, number) -> time a trigger last fired
         self._last = {}         # (source, kind, number) -> time of the last applied level
         self.pending = {}       # same key -> newest level not yet applied
         self._pressed = {}      # same key -> was it "down" last time (so a held or repeated value fires once)
         self.last_message = None
 
     def matching(self, source, kind, channel, number):
-        return [e for e in self.entries if e["kind"] == kind and e["number"] == number
-                and e["source"] in ("*", source) and e["channel"] in (0, channel + 1)]
+        """Entries for this control. If the user has mapped it, only their entries apply: a learned mapping replaces
+        the built-in one for that control instead of firing next to it."""
+        found = [e for e in self.entries if e["kind"] == kind and e["number"] == number
+                 and e["source"] in ("*", source) and e["channel"] in (0, channel + 1)]
+        mine = [e for e in found if not e.get("builtin")]
+        return mine or found
 
-    def _trigger(self, e):
+    @staticmethod
+    def _trigger_calls(e):
         a = e["action"]
         if a == "pad":
-            return self.do("/api/play", {"pad": [e["bank"], e["index"]]})
-        if a == "pause":
-            return self.do("/api/control", {"action": "pause"})
-        if a == "stop":
-            return self.do("/api/control", {"action": "stop"})
-        if a == "reset":
-            return self.do("/api/control", {"action": "reset"})
+            return [("/api/play", {"pad": [e["bank"], e["index"]]})]
+        if a in ("pause", "stop", "reset"):
+            return [("/api/control", {"action": a})]
         if a == "fadeout":
-            return self.do("/api/fadeout", {"seconds": 2})
+            return [("/api/fadeout", {"seconds": 2})]
         if a == "blackout":
-            return self.do("/api/blackout", {"on": not self.mix.get("blackout", False)})
-        return False
+            return [("/api/blackout", {"on": None})]           # None: toggle, decided by the caller from the live state
+        return []
 
-    def _level(self, e, value, now):
+    @staticmethod
+    def _level_calls(e, value):
         a = e["action"]
         if a == "blackout_hold":
-            return self.do("/api/blackout", {"on": value >= 64})
+            return [("/api/blackout", {"on": value >= 64})]
         _, lo, hi = ACTIONS[a]
-        return self.do("/api/control", {"action": a, "value": round(lo + (hi - lo) * value / 127.0, 2)})
+        return [("/api/control", {"action": a, "value": round(lo + (hi - lo) * value / 127.0, 2)})]
 
-    def message(self, source, msg):
-        """Handle one parsed message. Returns the number of calls made."""
+    def plan(self, source, msg):
+        """What a message should do: a list of (path, body) calls. Nothing is called here, so a caller can release its
+        lock before making the (slow) calls into the player."""
         kind, channel, d1, d2 = msg
         if kind == "off":
             kind, d2 = "note", 0                       # a note-off is the release of the same control
         elif kind == "on":
             kind = "note"
         self.last_message = "%s %s %d %d" % (source, kind, d1, d2)
-        done = 0
+        calls = []
+        now = self._clock()
         for e in self.matching(source, kind, channel, d1):
             key = (e["id"] if "id" in e else e["action"], source, kind, d1)
             kind_of, _, _ = ACTIONS[e["action"]]
@@ -213,27 +233,39 @@ class MidiMapper:
                 down = d2 >= 64 if kind == "cc" else (d2 > 0 or kind == "program")
                 was = self._pressed.get(key, False)
                 self._pressed[key] = down if kind != "program" else False
-                if down and not was:
-                    done += int(bool(self._trigger(e)))
+                if down and not was and now - self._fired.get(key, -1e9) >= TRIGGER_GAP:
+                    self._fired[key] = now
+                    calls.extend(self._trigger_calls(e))
             else:
-                now = self._clock()
                 if now - self._last.get(key, 0.0) < MIN_INTERVAL:
                     self.pending[key] = (e, d2)         # a fader sweep: keep only the newest value
                     continue
                 self.pending.pop(key, None)
                 self._last[key] = now
-                done += int(bool(self._level(e, d2, now)))
+                calls.extend(self._level_calls(e, d2))
+        return calls
+
+    def message(self, source, msg):
+        """Handle one parsed message. Returns the number of calls made."""
+        done = 0
+        for path, body in self.plan(source, msg):
+            if path == "/api/blackout" and body.get("on") is None:
+                body = {"on": not self.mix.get("blackout", False)}
+            done += int(bool(self.do(path, body)))
         return done
 
-    def flush(self):
-        """Apply held-back fader values whose wait is over, so the last position is never lost."""
-        now, done = self._clock(), 0
+    def flush_calls(self):
+        """The held-back fader values whose wait is over, as calls (so the last position is never lost)."""
+        now, calls = self._clock(), []
         for key in list(self.pending):
             if now - self._last.get(key, 0.0) >= MIN_INTERVAL:
                 e, value = self.pending.pop(key)
                 self._last[key] = now
-                done += int(bool(self._level(e, value, now)))
-        return done
+                calls.extend(self._level_calls(e, value))
+        return calls
+
+    def flush(self):
+        return sum(int(bool(self.do(path, body))) for path, body in self.flush_calls())
 
 
 class MidiInput:
@@ -320,6 +352,7 @@ class MidiHub:
         self.mapper = MidiMapper(self._do, [], api.mix, clock)
         self.learn_until = 0.0
         self.captured = None
+        self._quiet = None
         self._quiet_until = 0.0
 
     # --- calls into the player ------------------------------------------
@@ -343,27 +376,48 @@ class MidiHub:
         return self.settings.data["control"]["midi"]
 
     def entries(self):
+        """The user's mappings (each re-checked: settings are a file a person may have edited) then the built-in map."""
         c = self.cfg()
-        return list(c["map"]) + (builtin_map() if c["builtin"] else [])    # the user's own entries first
+        mine = []
+        for e in c["map"]:
+            try:
+                mine.append(validate_entry(e, keep_id=True))
+            except MidiError:
+                continue
+        return mine + (builtin_cached() if c["builtin"] else [])
 
     # --- messages ---------------------------------------------------------
+    def _run_calls(self, calls):
+        """Make the calls a message planned. Called WITHOUT the hub lock: a play is many round trips to the player."""
+        for path, body in calls:
+            if path == "/api/blackout" and body.get("on") is None:
+                body = {"on": not self.api.mix.get("blackout", False)}
+            self._do(path, body)
+
     def on_message(self, source, msg):
         if msg is None:
             with self._lock:
-                self.mapper.flush()
+                calls = self.mapper.flush_calls()
+            self._run_calls(calls)
             return
         with self._lock:
             kind, channel, d1, d2 = msg
-            if self.learn_until and self._clock() < self.learn_until and self.captured is None:
+            now = self._clock()
+            if self.learn_until and now < self.learn_until and self.captured is None:
                 if kind == "cc" or (kind == "on" and d2 > 0) or kind == "program":
                     self.captured = {"source": source, "kind": "note" if kind == "on" else kind, "channel": channel + 1, "number": d1}
+                    self._quiet = (source, "note" if kind in ("on", "off") else kind, d1, now + LEARN_QUIET)
                     self.learn_until = 0.0
                 return                                                     # nothing is executed while learning
-            if self.learn_until and self._clock() >= self.learn_until:
+            if self.learn_until and now >= self.learn_until:
                 self.learn_until = 0.0
+            q = self._quiet                                                # the control just learned is still moving: let it settle
+            if q and now < q[3] and q[:3] == (source, "note" if kind in ("on", "off") else kind, d1):
+                return
             self.mapper.entries = self.entries()
             self.mapper.mix = self.api.mix
-            self.mapper.message(source, msg)
+            calls = self.mapper.plan(source, msg)
+        self._run_calls(calls)
 
     # --- learn ----------------------------------------------------------------
     def start_learn(self):
