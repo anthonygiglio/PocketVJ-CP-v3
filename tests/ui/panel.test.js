@@ -27,8 +27,9 @@ function startServer() {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const page = await ctx.newPage();
     const problems = [];
-    // The 401 before pairing, the 403 for the wrong PIN and the 400 for a refused upload are provoked on purpose.
-    const expected = /status of (400|401|403)/;
+    // The 401 before pairing, the 403 for the wrong PIN, the 400 for a refused upload and the 503 for a screen
+    // preview from a harness player with no window are provoked on purpose.
+    const expected = /status of (400|401|403|503)/;
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type()) && !expected.test(m.text())) problems.push(m.text()); });
     page.on('pageerror', (e) => problems.push('pageerror: ' + e.message));
     const base = 'http://127.0.0.1:' + info.port;
