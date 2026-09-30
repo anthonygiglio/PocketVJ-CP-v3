@@ -58,6 +58,37 @@ def expand_media(paths, extensions=VIDEO_EXTENSIONS + IMAGE_EXTENSIONS):
     return out
 
 
+def open_socket_when_ready(path, mode=0o660, timeout=15.0, poll=0.05):
+    """Wait for a unix socket to appear at `path` and give it `mode`. True if it did. The caller must have
+    removed any old socket first, or a stale file would be mistaken for the new one."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if stat.S_ISSOCK(os.stat(path).st_mode):
+                os.chmod(path, mode)
+                return True
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        time.sleep(poll)
+    return False
+
+
+def detach_socket_opener(path, mode=0o660):
+    """Start open_socket_when_ready in a fully detached grandchild, so the caller can exec mpv without leaving
+    a zombie: the first child exits at once and is reaped here, and init adopts the grandchild."""
+    pid = os.fork()
+    if pid == 0:
+        try:
+            if os.fork() == 0:
+                os.setsid()
+                os._exit(0 if open_socket_when_ready(path, mode) else 1)
+        finally:
+            os._exit(0)
+    os.waitpid(pid, 0)
+
+
 class Ipc:
     def __init__(self, path, timeout=2.0):
         self.path = path
@@ -137,6 +168,9 @@ class Player:
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
         args = self.mpv_command(audio_device, windowed)
+        # mpv creates its socket owner-only (0600) whatever the umask, so the web panel (another user, same
+        # group) could not reach it. A short-lived helper waits for the NEW socket and opens it to the group.
+        detach_socket_opener(self.socket_path)
         try:
             os.execvp(args[0], args)
         except FileNotFoundError:

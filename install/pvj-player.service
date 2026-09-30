@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 [Unit]
 Description=nxlx.mastercontrol player (mpv)
-After=multi-user.target systemd-udev-settle.service
-Wants=systemd-udev-settle.service
+# Not After=multi-user.target: this unit is WantedBy=multi-user.target (a target waits for what it wants) and
+# pvj-web is ordered after this unit, so that made a cycle and systemd silently deleted the start job. Found on a
+# real Pi 4 (2026-09-30). Not udev-settle either (deprecated, and slow); Restart=always covers a display that is
+# not ready yet.
+After=local-fs.target systemd-udevd.service
 StartLimitIntervalSec=0
 
 [Service]

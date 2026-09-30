@@ -3,10 +3,12 @@
 """Runs the real mpv headless (null video and audio). Skipped if mpv is missing."""
 import os
 import shutil
+import stat
 import tempfile
 import time
 import unittest
 
+from pvj import player
 from pvj.player import Player, PlayerError, expand_media
 
 HEADLESS = ["--vo=null", "--ao=null"]
@@ -198,3 +200,66 @@ class ServiceTest(unittest.TestCase):
         os.chmod(self.dir, 0o775)
         with self.assertRaises(PlayerError):
             player.runtime_dir()
+
+
+class SocketOpenerTest(unittest.TestCase):
+    """mpv makes its control socket owner-only; `serve` must open it to the group (found on a real Pi 4)."""
+
+    def test_waits_for_a_new_socket_and_ignores_a_stale_one_that_was_removed(self):
+        import socket as sk
+        import threading
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "player.sock")
+        result = []
+
+        def make_later():
+            time.sleep(0.3)
+            s = sk.socket(sk.AF_UNIX)
+            s.bind(path)
+            os.chmod(path, 0o600)
+            self.addCleanup(s.close)
+        t = threading.Thread(target=make_later)
+        t.start()
+        result.append(player.open_socket_when_ready(path, 0o660, timeout=5))
+        t.join()
+        self.assertEqual(result, [True])
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o660)
+
+    def test_gives_up_when_no_socket_appears(self):
+        self.assertFalse(player.open_socket_when_ready(os.path.join(tempfile.mkdtemp(), "none.sock"), timeout=0.2))
+
+    def test_serve_opens_the_socket_of_a_stand_in_mpv(self):
+        """Run the real serve() (which execs mpv) with a stand-in mpv that binds a 0600 socket like the real one."""
+        import subprocess
+        import sys
+        d = tempfile.mkdtemp()
+        fake = os.path.join(d, "fake-mpv")
+        with open(fake, "w") as f:
+            f.write("#!%s\nimport os, socket, sys, time\n"
+                    "path = [a.split('=', 1)[1] for a in sys.argv if a.startswith('--input-ipc-server=')][0]\n"
+                    "time.sleep(0.4)\ns = socket.socket(socket.AF_UNIX); s.bind(path); os.chmod(path, 0o600)\ntime.sleep(3)\n" % sys.executable)
+        os.chmod(fake, 0o755)
+        rundir = os.path.join(d, "run")
+        os.makedirs(rundir, mode=0o700)
+        sock = os.path.join(rundir, "player.sock")
+        open(sock, "w").close()                       # a stale file from the previous run must not fool it
+        code = ("import sys; sys.path.insert(0, %r); from pvj.player import Player; "
+                "Player(mpv_bin=%r, rundir=%r).serve()") % (os.path.join(os.path.dirname(__file__), ".."), fake, rundir)
+        proc = subprocess.Popen([sys.executable, "-c", code])
+        try:
+            deadline = time.time() + 6
+            mode = None
+            while time.time() < deadline:
+                try:
+                    if stat.S_ISSOCK(os.stat(sock).st_mode):
+                        mode = stat.S_IMODE(os.stat(sock).st_mode)
+                        if mode == 0o660:
+                            break
+                except FileNotFoundError:
+                    pass
+                time.sleep(0.05)
+            self.assertEqual(mode, 0o660)
+        finally:
+            proc.kill()
+            proc.wait()
+
