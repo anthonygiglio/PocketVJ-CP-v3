@@ -45,7 +45,7 @@ One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 25
 
 **Not verified on hardware (do not claim it works):**
 - MIDI Learn and the map (only against pipes and the browser test; needs a person at the controllers), and the PIN on screen (needs a fresh box or all devices removed).
-- Streams with a real SRT or RTSP source; HEVC, 4K and 1080p60 decode; 24 fps film judder on a 75 Hz display (the monitor offers only 75, 60 and 50 Hz; there is no display-mode setting yet); the second HDMI port; a projector.
+- Streams with a real SRT or RTSP source; HEVC, 4K and 1080p60 decode; 24 fps film judder on a 75 Hz display (the monitor offers only 75, 60 and 50 Hz; there is no display-mode setting yet); the second HDMI port; a projector (PJLink control is built and tested only against a fake projector).
 - The read-only root (`pvj-rootfs`), signed updates on a board, the Network module (must be tested with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
 - Pi 3, Pi 5 and x86 (nothing has run on them).
 

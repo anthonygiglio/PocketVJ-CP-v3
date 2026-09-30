@@ -39,9 +39,9 @@ Numbers use natural units, so set your controller's fader range to match (for ex
 
 ## Names kept from the old receiver
 
-`/stopall`, `/stopvideo` (both stop the clip), `/pause`, `/fastforward` (seek forward 10 s), `/volumeup`, `/volumedown` (10 percent steps), `/rotate0`, `/rotate90`, `/rotate180`, `/rotate270`, and every start preset: `/startmaster`, `/startmaster05`, `/startlessonce03`, `/startlesseronce07`, `/startseamless02`, ... (the same names and files as the old scripts; see the preset table in `pvj/presets.py`).
+`/stopall`, `/stopvideo` (both stop the clip), `/pause`, `/fastforward` (seek forward 10 s), `/volumeup`, `/volumedown` (10 percent steps), `/rotate0`, `/rotate90`, `/rotate180`, `/rotate270`, `/beameron` and `/beameroff` (every projector added under System > Projectors on or off, see [PROJECTORS.md](PROJECTORS.md)), and every start preset: `/startmaster`, `/startmaster05`, `/startlessonce03`, `/startlesseronce07`, `/startseamless02`, ... (the same names and files as the old scripts; see the preset table in `pvj/presets.py`).
 
-Not carried over: audio output switching, display power, clock, camera, image and PDF players, overlays, soft edge, Syphon, NDI, PiWall, projector power, and custom functions. They belong to modules that are not built yet.
+Not carried over: audio output switching, display power, clock, camera, image and PDF players, overlays, soft edge, Syphon, NDI, PiWall, and custom functions. They belong to modules that are not built yet.
 
 ## Tested
 

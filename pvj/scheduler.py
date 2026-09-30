@@ -6,12 +6,14 @@ The schedule lives in settings["schedule"]. A background thread checks the box's
 entries through the same Api handlers as the panel and OSC, so every value is validated the
 same way.
 
+Entries can also start a legacy start script (startlessonce01 and so on) and switch every projector on or off.
+
 Safety rules:
 - A schedule does nothing until both the Scheduler module and the schedule switch are on.
 - Entries fire at most once per minute, and only for minutes the thread actually watched. If the
   clock jumps (a Pi has no clock until the network sets it) or the thread stalls for more than
   two minutes, the skipped minutes are NOT replayed: a wrong clock must never fire old events.
-- Nothing dangerous is schedulable: only play, stop, blackout and show.
+- Nothing dangerous is schedulable: only play, stop, blackout, show, a start script and projector power.
 """
 
 import datetime
@@ -22,7 +24,7 @@ import uuid
 
 from .api import ApiError, MEDIA_EXTENSIONS, valid_name
 
-ACTIONS = ("play", "stop", "blackout", "show")
+ACTIONS = ("play", "stop", "blackout", "show", "preset", "projector_on", "projector_off")
 MAX_ENTRIES = 50
 MAX_CATCHUP_MINUTES = 2
 _TIME = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -79,6 +81,17 @@ def validate(body):
             if not isinstance(loop, bool):
                 raise ScheduleError(where + "loop must be true or false")
             item["file"], item["loop"] = name, loop
+        elif action == "preset":                      # a legacy start script, as the old cron timetable ran them
+            from . import presets
+            from .player import PlayerError
+            name = e.get("preset")
+            try:
+                if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,40}", name):
+                    raise PlayerError("x")
+                presets.parse_legacy_name(name)
+            except PlayerError:
+                raise ScheduleError(where + "enter a start script name such as startlessonce01")
+            item["preset"] = name
         clean.append(item)
     return {"enabled": enabled, "entries": clean}
 
@@ -124,12 +137,26 @@ class Scheduler:
         return fired
 
     def _run(self, entry, minute):
+        if entry["action"] in ("projector_on", "projector_off"):
+            # A projector that is off the network can take seconds to fail; the next entry must not wait for it.
+            threading.Thread(target=self._execute, args=(entry, minute), name="schedule-projector", daemon=True).start()
+        else:
+            self._execute(entry, minute)
+
+    def _execute(self, entry, minute):
         action = entry["action"]
         try:
             if action == "play":
                 self.api.play({"file": entry["file"], "loop": entry.get("loop", True)}, None, "schedule")
             elif action == "stop":
                 self.api.control({"action": "stop"}, None, "schedule")
+            elif action == "preset":
+                self.api.play({"preset": entry["preset"]}, None, "schedule")
+            elif action in ("projector_on", "projector_off"):
+                out = self.api.projector_action({"id": "all", "action": "on" if action == "projector_on" else "off"}, None, "schedule")
+                failed = [r["error"] for r in out["results"].values() if not r["ok"]]
+                if failed:
+                    raise ApiError(502, "; ".join(failed))
             else:
                 self.api.blackout({"on": action == "blackout"}, None, "schedule")
             result = {"ok": True, "message": "done"}

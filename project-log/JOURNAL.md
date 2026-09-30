@@ -4,6 +4,16 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (projectors and a broader schedule)
+
+Done:
+- Projector control over PJLink class 1, a beta module off by default (`pvj/projector.py`, System > Projectors, `/api/projectors`, `/api/projector`, settings schema 10): on, off, picture mute, state; All on and All off. Private addresses only, checked at add time and before every command; passwords never returned (D27). See `pvj/PROJECTORS.md`.
+- The schedule can now run a legacy start script (`preset`) and switch every projector on or off. The old OSC `/beameron` and `/beameroff` work again.
+- The fake projector in the tests found a real bug before it shipped: PJLink ends lines with a carriage return alone, and the client read with `readline()`, so it would have hung on every real projector. Also added an overall deadline per command and asked all projectors at once.
+- Independent review: no high findings. Fixed with tests: OSC and the schedule no longer wait for projectors (background); the name lookup when adding runs outside the settings lock; names DNS cannot encode give a 400, not a 500; an unexpected error gives a 502; one command at a time per projector; the connect shares the deadline; 169.254.169.254 refused; a typed password is no longer written into the page HTML; the docs state the real limits.
+
+Not verified: no real projector. The owner has none on the test network.
+
 ## 2026-09-30 (PIN on screen)
 
 Done: `pvj/pinscreen.py`. The pairing PIN and the panel's addresses are drawn by mpv on its idle screen every 3 seconds, only while no device has ever paired and nothing is playing, using a whitelist of characters (mpv expands `${...}`). Tests use a fake player.

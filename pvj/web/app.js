@@ -573,7 +573,7 @@
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals, boxCard()];
-    cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full));
+    cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full));
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -894,9 +894,78 @@
     });
     return card;
   }
+  // ---- projectors (PJLink) ---------------------------------------------
+  var projForm = { name: '', host: '', port: '4352', password: '' };  // survives redraws
+  function projectorsCard(full) {
+    var body = h('div', { class: 'list', id: 'projbody' });
+    var card = h('div', { class: 'card', id: 'projcard' }, h('h2', { text: 'Projectors' }), body);
+    var mod = S.modules.filter(function (m) { return m.id === 'projector'; })[0];
+    if (!mod || !mod.enabled) {
+      body.appendChild(h('div', { class: 'k', id: 'projmsg', text: 'Off. Switch on "Projector control" under Modules above (beta).' }));
+      return card;
+    }
+    var states = {};  // id -> the last answer shown under it
+    function run(pid, action, label, done) {
+      api('POST', '/api/projector', { id: pid, action: action }).then(function (r) {
+        if (!r.ok) return say(r.data.error || 'The projector did not answer', true);
+        var failed = [];
+        Object.keys(r.data.results).forEach(function (k) {
+          var x = r.data.results[k];
+          states[k] = x.ok ? (x.power ? 'Power: ' + x.power : label + ': done') : 'Failed: ' + x.error;
+          if (!x.ok) failed.push(x.error);
+        });
+        if (failed.length) say(failed.length + ' projector(s) did not answer: ' + failed[0], true); else say(label + ': done');
+        if (done) done();
+      });
+    }
+    function draw(d) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'projline', text: d.projectors.length ?
+        'Controlled over the network with PJLink, like the old Beamer On and Off buttons.' :
+        'No projectors added. Most network projectors speak PJLink; switch it on in the projector\'s network menu.' }));
+      if (d.projectors.length > 1 && can('live')) body.appendChild(h('div', { class: 'row' },
+        h('button', { class: 'btn small grow', id: 'projallon', text: 'All on', onclick: function () { run('all', 'on', 'All on', function () { draw(d); }); } }),
+        h('button', { class: 'btn small grow', id: 'projalloff', text: 'All off', onclick: function () { run('all', 'off', 'All off', function () { draw(d); }); } })));
+      d.projectors.forEach(function (p) {
+        var ctl = can('live') ? h('div', { class: 'row wrap' }, [['on', 'On'], ['off', 'Off'], ['mute', 'Picture mute'], ['unmute', 'Unmute'], ['state', 'Check']].map(function (a) {
+          return h('button', { class: 'btn small', text: a[1], 'aria-label': a[1] + ' ' + p.name, onclick: function () { run(p.id, a[0], a[1], function () { draw(d); }); } });
+        })) : null;
+        body.appendChild(h('div', { class: 'item proj-entry' },
+          h('span', {}, p.name, h('br'), h('span', { class: 'addr', text: p.host + (p.port !== 4352 ? ':' + p.port : '') + (p.has_password ? ' · password set' : '') }),
+            states[p.id] ? h('br') : null, states[p.id] ? h('span', { class: 'k', text: states[p.id] }) : null),
+          full ? h('button', { class: 'btn small', text: 'Remove', 'aria-label': 'Remove ' + p.name, onclick: function () {
+            act('POST', '/api/projectors', { remove: p.id }, draw);
+          } }) : null));
+        if (ctl) body.appendChild(ctl);
+      });
+      if (!full) return;
+      var name = h('input', { class: 'text-input', id: 'projname', 'aria-label': 'Projector name', placeholder: 'Name', maxlength: 40, value: projForm.name });
+      var host = h('input', { class: 'text-input mono', id: 'projhost', 'aria-label': 'Projector address', placeholder: '192.168.1.50', value: projForm.host, autocomplete: 'off' });
+      var port = h('input', { class: 'text-input mono', id: 'projport', type: 'number', min: 1, max: 65535, 'aria-label': 'Port', value: projForm.port });
+      var pw = h('input', { class: 'text-input mono', id: 'projpw', type: 'password', 'aria-label': 'PJLink password (if set on the projector)', placeholder: 'Password, if the projector has one', autocomplete: 'new-password' });
+      pw.value = projForm.password;     // the property, not an attribute: a typed password never becomes page HTML
+      name.addEventListener('input', function () { projForm.name = name.value; });
+      host.addEventListener('input', function () { projForm.host = host.value; });
+      port.addEventListener('input', function () { projForm.port = port.value; });
+      pw.addEventListener('input', function () { projForm.password = pw.value; });
+      body.appendChild(h('div', { class: 'k', text: 'Add a projector on this network (a private address only). The password is stored on the box and never shown again.' }));
+      body.appendChild(name); body.appendChild(host); body.appendChild(port); body.appendChild(pw);
+      body.appendChild(h('button', { class: 'btn on small', id: 'projadd', text: 'Add projector', onclick: function () {
+        act('POST', '/api/projectors', { add: { name: projForm.name || projForm.host, host: projForm.host, port: parseInt(projForm.port || '4352', 10), password: projForm.password } }, function (data) {
+          projForm = { name: '', host: '', port: '4352', password: '' }; say(''); draw(data);
+        });
+      } }));
+    }
+    api('GET', '/api/projectors').then(function (r) {
+      if (!document.getElementById('projcard')) return;
+      if (!r.ok) { body.textContent = ''; body.appendChild(h('div', { class: 'k', id: 'projmsg', text: r.data.error || 'Not available' })); return; }
+      draw(r.data);
+    });
+    return card;
+  }
   // ---- schedule -------------------------------------------------------
   var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var schedForm = { time: '18:00', days: [0, 1, 2, 3, 4, 5, 6], action: 'play', file: '', label: '' };  // survives redraws
+  var schedForm = { time: '18:00', days: [0, 1, 2, 3, 4, 5, 6], action: 'play', file: '', preset: '', label: '' };  // survives redraws
   function scheduleCard() {
     var body = h('div', { class: 'list', id: 'schedbody' });
     var card = h('div', { class: 'card', id: 'schedcard' }, h('h2', { text: 'Schedule' }), body);
@@ -912,7 +981,8 @@
       });
     }
     function describe(e) {
-      var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'stop' ? 'Stop' : e.action === 'blackout' ? 'Blackout' : 'Show screen';
+      var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'preset' ? 'Start script ' + e.preset :
+        ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off' })[e.action] || e.action;
       return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · ' + what;
     }
     function draw(d) {
@@ -942,22 +1012,26 @@
         } });
       }));
       var action = h('select', { class: 'text-input', id: 'schedaction', 'aria-label': 'What to do' },
-        [['play', 'Play a clip'], ['stop', 'Stop the clip'], ['blackout', 'Blackout'], ['show', 'Show screen']].map(function (a) {
+        [['play', 'Play a clip'], ['preset', 'Run a legacy start script'], ['stop', 'Stop the clip'], ['blackout', 'Blackout'], ['show', 'Show screen'],
+          ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off']].map(function (a) {
           return h('option', { value: a[0], text: a[1], selected: a[0] === schedForm.action });
         }));
       var file = h('select', { class: 'text-input', id: 'schedfile', 'aria-label': 'Clip to play', hidden: schedForm.action !== 'play' },
         S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === schedForm.file }); }));
       if (!schedForm.file && S.media.length) schedForm.file = S.media[0];
-      action.addEventListener('change', function () { schedForm.action = action.value; file.hidden = action.value !== 'play'; });
+      var preset = h('input', { class: 'text-input mono', id: 'schedpreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: schedForm.preset, hidden: schedForm.action !== 'preset', autocomplete: 'off' });
+      preset.addEventListener('input', function () { schedForm.preset = preset.value; });
+      action.addEventListener('change', function () { schedForm.action = action.value; file.hidden = action.value !== 'play'; preset.hidden = action.value !== 'preset'; });
       file.addEventListener('change', function () { schedForm.file = file.value; });
       var label = h('input', { class: 'text-input', id: 'schedlabel', 'aria-label': 'Label (optional)', placeholder: 'Label (optional)', maxlength: 40, value: schedForm.label });
       label.addEventListener('input', function () { schedForm.label = label.value; });
       body.appendChild(h('div', { class: 'k', text: 'Add an entry' }));
-      body.appendChild(time); body.appendChild(days); body.appendChild(action); body.appendChild(file); body.appendChild(label);
+      body.appendChild(time); body.appendChild(days); body.appendChild(action); body.appendChild(file); body.appendChild(preset); body.appendChild(label);
       body.appendChild(h('button', { class: 'btn on small', id: 'schedadd', text: 'Add entry', onclick: function () {
         if (!schedForm.days.length) return say('Choose at least one day.', true);
         var entry = { time: schedForm.time, days: schedForm.days.slice(), action: schedForm.action, label: schedForm.label };
         if (schedForm.action === 'play') { if (!schedForm.file) return say('Upload a clip first.', true); entry.file = schedForm.file; }
+        if (schedForm.action === 'preset') { if (!schedForm.preset) return say('Type the start script name.', true); entry.preset = schedForm.preset.trim(); }
         save({ enabled: d.enabled, entries: d.entries.concat(entry) });
       } }));
     }
