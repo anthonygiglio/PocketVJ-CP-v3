@@ -64,7 +64,7 @@ function startServer() {
 
     for (let i = 0; i < 4; i++) await page.fill(`input[aria-label="PIN digit ${i + 1}"]`, info.pin[i]);
     await page.fill('#devname', 'Anthony\'s phone');
-    await page.click('text=Pair this device');
+    await page.click('#pairbtn');
     await page.waitForSelector('.pads');
 
     // A believable show: labelled pads across a bank, one playing.
