@@ -36,7 +36,7 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 ## 4. Play
 
-**Live** has three banks of twelve pads. **Edit pads** (full access) assigns a clip to a pad. Tap a pad to play it. **Fade out**, **Freeze** (pause) and **Blackout** are always at the bottom.
+**Live** has three banks of twelve pads. **Edit pads** (full access) assigns a clip to a pad. Tap a pad to play it. **Fade out**, **Freeze** (pause), **Stop** (end the clip and leave the screen black and the player ready) and **Blackout** (black without stopping) are always at the bottom.
 
 ![Live screen](images/ui/live.png)
 
