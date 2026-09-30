@@ -23,7 +23,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import autostart as autostart_mod, dmx as dmx_mod, hardware, midi as midi_mod, pinscreen as pinscreen_mod, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
+from . import autostart as autostart_mod, dmx as dmx_mod, hardware, midi as midi_mod, pinscreen as pinscreen_mod, sysd as sysd_mod, netd as netd_mod, osc as osc_mod, scheduler as scheduler_mod, themes as themes_mod
 from .api import Api, ApiError
 from .auth import Auth
 from .modules import Registry
@@ -350,6 +350,7 @@ def build(env=None, player=None):
     api = Api(player, settings, auth, registry, themes, media, board,
               spawn=env.get("PVJ_DEV_SPAWN") == "1", on_pin=lambda pin: write_pin_file(rundir, pin))
     api.net = netd_mod.NetdClient(os.path.join(rundir, "netd.sock"))
+    api.sysd = sysd_mod.SysdClient(os.path.join(rundir, "sysd.sock"))
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)
