@@ -132,7 +132,16 @@ if [ "$REAL" = 1 ]; then
 	getent group pvj >/dev/null || run groupadd --system pvj
 	if ! id "$PVJ_USER" >/dev/null 2>&1; then
 		log "creating system user $PVJ_USER"
-		run useradd --system --create-home --home-dir /var/lib/pvj --shell /usr/sbin/nologin --gid pvj "$PVJ_USER"
+		run useradd --system --create-home --home-dir /var/lib/pvj-player --shell /usr/sbin/nologin --gid pvj "$PVJ_USER"
+	fi
+	# Older installs made /var/lib/pvj the player's home, which let the player account replace settings.json.
+	# Give it its own home, changing only the home entry: nothing is moved out of /var/lib/pvj.
+	if [ "$(getent passwd "$PVJ_USER" | cut -d: -f6)" = /var/lib/pvj ]; then
+		log "moving the home of $PVJ_USER from /var/lib/pvj to /var/lib/pvj-player (no files are moved)"
+		run mkdir -p /var/lib/pvj-player
+		run chown "$PVJ_USER":pvj /var/lib/pvj-player
+		run chmod 0750 /var/lib/pvj-player
+		run usermod -d /var/lib/pvj-player "$PVJ_USER"
 	fi
 	for g in pvj video render audio input; do
 		getent group "$g" >/dev/null && run usermod -aG "$g" "$PVJ_USER"
@@ -210,8 +219,11 @@ fi
 run mkdir -p "$ROOT$MEDIA"
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ]; then
 	chown "$PVJ_USER":pvj "$MEDIA"; chmod 2775 "$MEDIA"
-	# settings.json lives in /var/lib/pvj and is written by the web panel (group pvj)
-	mkdir -p /var/lib/pvj; chgrp pvj /var/lib/pvj; chmod 2775 /var/lib/pvj
+	# settings.json lives in /var/lib/pvj and only the web panel may write there. The player (group pvj) may pass
+	# through to the media folder and read, but not create, rename or replace files: 2750, owned by pvj-web.
+	mkdir -p /var/lib/pvj; chown pvj-web:pvj /var/lib/pvj; chmod 2750 /var/lib/pvj
+	[ -e /var/lib/pvj/settings.json ] && chown pvj-web:pvj /var/lib/pvj/settings.json* 2>/dev/null
+	true
 fi
 if [ "$DRY" = 0 ]; then
 	printf '{"version": "%s", "prefix": "%s", "user": "%s", "installed": "%s"}\n' \

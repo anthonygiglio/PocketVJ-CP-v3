@@ -83,5 +83,24 @@ class PlayerUnitTest(unittest.TestCase):
         self.assertEqual(load_units()["pvj-web.service"]["Group"], ["pvj"])
 
 
+class InstallerOwnershipTest(unittest.TestCase):
+    """The player account must not be able to replace settings.json (found by the join-code review)."""
+
+    def setUp(self):
+        with open(os.path.join(REPO, "install", "install.sh")) as f:
+            self.sh = f.read()
+
+    def test_the_player_gets_its_own_home_and_old_installs_are_moved_without_moving_files(self):
+        self.assertIn("--home-dir /var/lib/pvj-player", self.sh)
+        self.assertNotIn("--home-dir /var/lib/pvj ", self.sh)
+        self.assertRegex(self.sh, r"usermod -d /var/lib/pvj-player")
+        self.assertNotRegex(self.sh, r"usermod[^\n]*\s-m\b")                     # -m would move settings and media
+
+    def test_the_state_folder_belongs_to_the_web_user_and_is_not_group_writable(self):
+        self.assertIn("chown pvj-web:pvj /var/lib/pvj;", self.sh)
+        self.assertIn("chmod 2750 /var/lib/pvj", self.sh)
+        self.assertNotIn("chmod 2775 /var/lib/pvj;", self.sh)
+
+
 if __name__ == "__main__":
     unittest.main()
