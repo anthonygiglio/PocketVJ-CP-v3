@@ -34,6 +34,15 @@ class PlayerTest(unittest.TestCase):
         self.assertFalse(self.player.status()["running"])
         self.assertFalse(os.path.exists(self.player.socket_path))
 
+    def test_stopping_a_looping_clip_leaves_no_loop_behind(self):
+        self.player.play([SRC], loop=True)
+        self.assertEqual(self.player.ipc.request("get_property", "loop-file"), "inf")
+        self.player.clear()
+        st = self.player.status()
+        self.assertTrue(st["running"])
+        self.assertIn(st["loop_file"], ("no", False))
+        self.assertIn(st["loop_playlist"], ("no", False))
+
     def test_clip_change_keeps_same_process(self):
         self.player.play([SRC])
         pid1 = self.player.ipc.request("get_property", "pid")
