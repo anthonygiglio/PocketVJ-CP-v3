@@ -148,6 +148,7 @@ class Api:
         self.autostart = None     # Autostart or None
         self.pinscreen = None     # PinScreen or None
         self.sysd = None          # SysdClient or None (reboot, power off, set the clock)
+        self.capture = None       # Capture or None (live input from a USB capture device)
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
 
@@ -314,6 +315,10 @@ class Api:
         path = status.get("path")
         if path == getattr(self.player, "TEST_PATTERN", None):
             status["path"], status["test_pattern"] = None, True
+            return status
+        if self.capture is not None and path == self.capture.fifo:
+            cur = self.capture.status(devices=False)["current"] or {}
+            status["path"], status["capture"] = None, cur or True
             return status
         for channel, url in getattr(self.player, "TEST_TONES", {}).items():
             if path == url:
@@ -610,6 +615,8 @@ class Api:
             return self.play_stream(body)
         if "slideshow" in body:
             return self.play_slideshow(body)
+        if "capture" in body:
+            return self.play_capture(body)
         if "pad" in body:
             pad = body["pad"]
             if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in pad)):
@@ -750,6 +757,7 @@ class Api:
             self._player_call(p.mute, body["value"])
         elif action == "stop":
             self._player_call(p.clear)
+            self._stop_capture()
         elif action == "seek_to":
             self._player_call(p.seek_to, number(body, "value", 0, 24 * 3600))
         elif action == "shuffle":
@@ -904,6 +912,7 @@ class Api:
             raise bad("on must be true or false")
         if not on:
             self._player_call(self.player.clear)
+            self._stop_capture()
             return {"test_pattern": False}
         self.fader.cancel()
         self._player_call(self.player.play, [self.player.TEST_PATTERN], True, None, False, self.spawn)
@@ -925,6 +934,7 @@ class Api:
     def stop_player(self, body, device, client):
         # The systemd unit (Restart=always) brings the player straight back.
         self._player_call(self.player.ipc.request, "quit")
+        self._stop_capture()
         return {"ok": True}
 
     def get_modules(self, body, device, client):
@@ -1117,10 +1127,51 @@ class Api:
                     return want
         return "auto"
 
-    def _started_playing(self):
-        """Something is about to be on screen: take any on-screen pairing PIN off it at once."""
+    def _started_playing(self, capture=False):
+        """Something is about to be on screen: take any on-screen pairing PIN off it at once, and stop a live input
+        that is no longer shown (its helper must not keep the device busy)."""
         if self.pinscreen is not None:
             self.pinscreen.clear()
+        if not capture:
+            self._stop_capture()
+
+    def play_capture(self, body):
+        """{"capture": {"device": "video0", "mode": "720p30"}}: a live input, read by a separate helper process."""
+        from . import capture as capture_mod
+        if self.capture is None:
+            raise ApiError(404, "live inputs are not available")
+        spec = body.get("capture")
+        if not isinstance(spec, dict):
+            raise bad("capture must be an object")
+        mode = spec.get("mode", "720p30")
+        with self.capture.lock:            # prepare, load and start as one step: a double tap cannot leak a helper
+            try:
+                w, h, fps = self.capture.prepare(spec.get("device"), mode)
+            except capture_mod.CaptureError as e:
+                raise bad(str(e))
+            self.fader.cancel()
+            try:
+                self._player_call(self.player.play_pipe, self.capture.fifo, w, h, fps)
+            except ApiError:
+                self.capture.stop()
+                raise
+            try:
+                self.capture.start(spec["device"], mode)
+            except capture_mod.CaptureError as e:
+                raise ApiError(409, str(e))
+        self._apply_opacity(0 if self.mix["blackout"] else self.mix["opacity"])
+        self._started_playing(capture=True)
+        return {"playing": "capture", "device": spec["device"], "mode": mode}
+
+    def _stop_capture(self):
+        if self.capture is not None:
+            with self.capture.lock:
+                self.capture.stop()
+
+    def get_inputs(self, body, device, client):
+        if self.capture is None:
+            return {"running": False, "current": None, "devices": [], "modes": []}
+        return self.capture.status()
 
     def ensure_audio(self):
         """Keep the player on the right sound output while the choice is Automatic or the saved output is missing:
@@ -1466,6 +1517,7 @@ class Api:
             ("POST", "/api/access/code"): ("full", self.make_join_code),
             ("POST", "/api/access/cancel"): ("full", self.cancel_join_code),
             ("POST", "/api/access/screen"): ("full", self.show_access),
+            ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
             ("GET", "/api/audio"): ("view", self.get_audio),
