@@ -278,6 +278,7 @@
     var tp = document.getElementById('testpattern');
     if (tp) { tp.textContent = pl.test_pattern ? 'Test pattern off' : 'Test pattern'; tp.className = 'btn small grow' + (pl.test_pattern ? ' on' : ''); }
     if (pl.test_pattern) np.textContent = 'Test pattern (colour bars)';
+    if (pl.test_tone) np.textContent = 'Test tone (' + pl.test_tone + ')';
     var temp = typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : '';
     document.getElementById('pill').textContent = [sys.board, temp, pl.running ? 'OK' : 'No player'].filter(Boolean).join(' · ');
     var f = document.getElementById('freeze'); if (f) f.textContent = pl.paused ? 'Resume' : 'Freeze';
@@ -402,6 +403,15 @@
   }
 
   // ---- media ----------------------------------------------------------
+  function describeClip(name, i) {
+    var parts = [];
+    if (i.codec) parts.push(i.codec.toUpperCase() + (i.width ? ' ' + i.width + 'x' + i.height : '') + (i.fps ? ' ' + i.fps + ' fps' : ''));
+    else parts.push('no picture');
+    parts.push(i.audio ? 'sound: ' + i.audio : 'no sound');
+    if (i.duration) parts.push(clock(i.duration));
+    if (i.container) parts.push(i.container.split(',')[0]);
+    return name + ': ' + parts.join(' \u00b7 ');
+  }
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
   function refreshMedia() {
     return api('GET', '/api/media').then(function (r) {
@@ -454,6 +464,10 @@
         h('span', {}, d.name, h('br'), h('span', { class: 'k', text: d.size ? megabytes(d.size) : '' })),
         h('span', { class: 'row' },
           h('button', { class: 'btn small', text: 'Play', disabled: !can('live'), onclick: function () { act('POST', '/api/play', { file: d.name }, function () { say('Playing ' + d.name); poll(); }); } }),
+          h('button', { class: 'btn small', text: 'Info', 'aria-label': 'Details of ' + d.name, onclick: function () {
+            say('Reading ' + d.name + '...');
+            act('POST', '/api/media/info', { name: d.name }, function (i) { say(describeClip(d.name, i)); });
+          } }),
           full ? h('button', { class: 'btn small', text: 'Rename', onclick: function () {
             var to = window.prompt('New name', d.name);
             if (to && to !== d.name) act('POST', '/api/media/rename', { name: d.name, new: to }, refreshMedia);
@@ -536,7 +550,7 @@
       kv('Temperature', typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : 'n/a'),
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
-    var cards = [vitals];
+    var cards = [vitals, boxCard()];
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full));
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
@@ -548,6 +562,31 @@
     return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'System' })),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }),
       h('div', { class: 'grid2' }, cards));
+  }
+  function gb(n) { return (n / 1073741824).toFixed(1) + ' GB'; }
+  // The old Settings and Display tabs' information buttons, on one card.
+  function boxCard() {
+    var body = h('div', { class: 'list', id: 'boxbody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'boxcard' }, h('h2', { text: 'Box' }), body);
+    api('GET', '/api/system').then(function (r) {
+      if (!document.getElementById('boxcard')) return;
+      body.textContent = '';
+      if (!r.ok) return body.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' }));
+      var d = r.data;
+      body.appendChild(kv('nxlx.mastercontrol', d.version));
+      body.appendChild(kv('Player', d.mpv || '?'));
+      body.appendChild(kv('System', d.os + ' \u00b7 ' + d.kernel));
+      if (d.disk) {
+        body.appendChild(kv('Media storage', gb(d.disk.free) + ' free of ' + gb(d.disk.total)));
+        body.appendChild(h('div', { class: 'progress', 'aria-hidden': 'true' }, (function () { var b = h('div', {}); b.style.width = Math.round(100 * d.disk.used / d.disk.total) + '%'; return b; })()));
+      }
+      if (d.output) body.appendChild(kv('Output now', d.output.width + ' x ' + d.output.height + (d.output.refresh ? ' at ' + d.output.refresh + ' Hz' : '')));
+      d.screens.forEach(function (sc) {
+        body.appendChild(kv(sc.connector, sc.connected ? 'connected' : 'nothing plugged in'));
+        if (sc.connected && sc.modes.length) body.appendChild(h('div', { class: 'k mono', text: 'Modes: ' + sc.modes.join(', ') }));
+      });
+    });
+    return card;
   }
   function kv(k, v) { return h('div', { class: 'row between' }, h('span', { text: k }), h('span', { class: 'k', text: String(v) })); }
   function modulesCard(full) {
@@ -716,6 +755,12 @@
       if (full) body.appendChild(h('button', { class: 'btn on small', id: 'audiosave', text: 'Save', onclick: function () {
         act('POST', '/api/audio', { device: sel.value }, function (data) { say(''); draw(data); });
       } }));
+      if (can('live')) {
+        body.appendChild(h('div', { class: 'k', text: 'Test tone (5 seconds, 440 Hz; stops what is playing)' }));
+        body.appendChild(h('div', { class: 'row' }, [['left', 'Left'], ['both', 'Both'], ['right', 'Right']].map(function (c) {
+          return h('button', { class: 'btn small grow', id: 'tone-' + c[0], text: c[1], onclick: function () { act('POST', '/api/testtone', { channel: c[0] }, function () { say('Playing a test tone: ' + c[1].toLowerCase()); poll(); }); } });
+        })));
+      }
     }
     api('GET', '/api/audio').then(function (r) {
       if (!document.getElementById('audiocard')) return;

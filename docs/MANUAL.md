@@ -72,6 +72,10 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Mirror and position** (Mix): Flip left-right or upside down for rear projection or a mirror rig (live, no reboot; on a Pi 4 it costs about half a processor core at 1080p, and dropped no frames in the test), and Position Y next to Position X.
 
+**Clip details** (Media > Info): codec, picture size, frame rate, length and sound of a clip, read by the player without showing it (the old Movie Codec and Movie Resolution buttons).
+
+**Box** (System): software versions, free space for media, what is connected to each screen output and the modes it offers, and the mode the player is using now. **Test tones** (System > Sound output): 5 seconds of 440 Hz on the left, right or both speakers.
+
 **Mix** has opacity, volume, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 
 ![Mix screen](images/ui/mix.png)

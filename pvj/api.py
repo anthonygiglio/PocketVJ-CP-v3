@@ -314,6 +314,10 @@ class Api:
         if path == getattr(self.player, "TEST_PATTERN", None):
             status["path"], status["test_pattern"] = None, True
             return status
+        for channel, url in getattr(self.player, "TEST_TONES", {}).items():
+            if path == url:
+                status["path"], status["test_tone"] = None, channel
+                return status
         if isinstance(path, str) and "://" in path:
             for st in self.settings.data.get("streams", []):
                 if st["url"] == path:
@@ -793,6 +797,64 @@ class Api:
         self._apply_opacity(0)
         self.fader.ramp(0, self.mix["opacity"], seconds)
         return {"ok": True}
+
+    def test_tone(self, body, device, client):
+        """5 seconds of a 440 Hz tone on the left, the right or both speakers, through the chosen sound output."""
+        channel = body.get("channel")
+        tones = getattr(self.player, "TEST_TONES", {})
+        if channel not in tones:
+            raise bad("channel must be left, right or both")
+        self.fader.cancel()
+        self._player_call(self.player.play, [tones[channel]], False, None, False, self.spawn, "stop")
+        self._started_playing()
+        return {"test_tone": channel}
+
+    def media_info(self, body, device, client):
+        """What is in a clip: {"name": file} from the media folder or {"usb": "LABEL/file"}."""
+        from . import probe
+        path = self.resolve_usb(body.get("usb")) if "usb" in body else self.resolve_media(body.get("name"))
+        try:
+            return probe.probe(path, getattr(self.player, "mpv_bin", "mpv"))
+        except probe.ProbeError as e:
+            raise ApiError(422, str(e))
+
+    def system_info(self, body, device, client):
+        """Versions, storage and screens: the old Settings and Display tabs' information buttons."""
+        import platform
+        import shutil
+        from . import __version__
+        try:
+            du = shutil.disk_usage(self.media_dir)
+            disk = {"total": du.total, "used": du.used, "free": du.free}
+        except OSError:
+            disk = None
+        screens = []
+        for c in hardware.drm_connectors():
+            modes = []
+            for m in c["modes"]:
+                if m not in modes:
+                    modes.append(m)
+            screens.append({"connector": c["connector"], "connected": c["status"] == "connected", "modes": modes[:24]})
+        out = {"version": __version__, "mpv": self._mpv_version(), "os": hardware.os_release().get("name", ""),
+               "kernel": platform.release(), "board": self.board.get("model") or self.board.get("kind"),
+               "disk": disk, "screens": screens, "output": None}
+        try:
+            size = self.player.osd_size()
+            fps = self.player.ipc.request("get_property", "display-fps")
+            if size:
+                out["output"] = {"width": size[0], "height": size[1], "refresh": round(fps, 2) if isinstance(fps, (int, float)) else None}
+        except (PlayerError, AttributeError):
+            pass
+        return out
+
+    def _mpv_version(self):
+        if not hasattr(self, "_mpv_ver"):
+            try:
+                r = subprocess.run([getattr(self.player, "mpv_bin", "mpv"), "--version"], capture_output=True, text=True, timeout=10)
+                self._mpv_ver = (r.stdout.splitlines() or [""])[0].split(" Copyright")[0].strip()
+            except (OSError, subprocess.TimeoutExpired):
+                self._mpv_ver = ""
+        return self._mpv_ver
 
     def test_pattern(self, body, device, client):
         """Show colour bars (for lining up a projector), or stop them. They come from the player itself, no file."""
@@ -1352,6 +1414,9 @@ class Api:
             ("POST", "/api/fadeout"): ("live", self.fadeout),
             ("POST", "/api/fadein"): ("live", self.fadein),
             ("POST", "/api/testpattern"): ("live", self.test_pattern),
+            ("POST", "/api/testtone"): ("live", self.test_tone),
+            ("POST", "/api/media/info"): ("view", self.media_info),
+            ("GET", "/api/system"): ("view", self.system_info),
             ("POST", "/api/mix"): ("live", self.set_mix),
             ("GET", "/api/access"): ("full", self.get_access),
             ("POST", "/api/access/code"): ("full", self.make_join_code),
