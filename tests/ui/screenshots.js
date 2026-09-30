@@ -75,7 +75,11 @@ function startServer() {
     await page.click('nav >> text=Media');
     await page.waitForSelector('#uploadbtn');
     await page.waitForTimeout(400);
-    await shot('media', (f) => shell().screenshot({ path: f }));
+    // Crop to the content: the list is short and the screen is tall.
+    await shot('media', async (f) => {
+      const bottom = await page.evaluate(() => { const c = document.querySelectorAll('.screen .card'); return Math.ceil(c[c.length - 1].getBoundingClientRect().bottom); });
+      await page.screenshot({ path: f, clip: { x: 0, y: 0, width: 390, height: bottom + 16 } });
+    });
 
     // Turn the beta modules on and give them something to show.
     for (const id of ['scheduler', 'control-dmx', 'control-midi', 'inputs-srt', 'network']) await api('POST', '/api/modules/' + id, { enabled: true });
@@ -103,6 +107,8 @@ function startServer() {
     await shot('control-osc', (f) => card('Control \\(OSC\\)').screenshot({ path: f }));
     await shot('appearance', (f) => card('Appearance').screenshot({ path: f }));
     await shot('access', (f) => card('Access').screenshot({ path: f }));
+
+    await page.evaluate(() => { document.querySelector('.tabs').style.removeProperty('display'); });
 
     // Another theme, and the wide layout.
     await api('POST', '/api/theme', { name: 'night-red', accent: null });
