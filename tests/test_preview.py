@@ -15,9 +15,11 @@ class PreviewTest(ServerBase):
     def setUp(self):
         super().setUp()
         self.shots = []
+        self.modes = []
 
-        def screenshot(path, quality=60):
+        def screenshot(path, quality=60, with_text=True):
             self.shots.append(path)
+            self.modes.append(with_text)
             with open(path, "wb") as f:
                 f.write(self.next_bytes)
         self.next_bytes = JPEG
@@ -50,12 +52,12 @@ class PreviewTest(ServerBase):
         for _ in range(5):
             self.assertEqual(self.call("GET", "/api/preview.jpg", token=token)[0], 200)
         self.assertEqual(len(self.shots), 1)
-        self.api._preview = (time.monotonic() - api_mod.PREVIEW_MIN_INTERVAL - 0.1, JPEG)   # the frame is now old
+        self.api._preview = (time.monotonic() - api_mod.PREVIEW_MIN_INTERVAL - 0.1, JPEG, True)   # the frame is now old
         self.call("GET", "/api/preview.jpg", token=token)
         self.assertEqual(len(self.shots), 2)
 
     def test_idle_or_missing_player_is_a_503_not_a_crash(self):
-        def broken(path, quality=60):
+        def broken(path, quality=60, with_text=True):
             raise PlayerError("player service is not running")
         self.player.screenshot = broken
         st, body, _ = self.call("GET", "/api/preview.jpg", token=self.full)
@@ -85,7 +87,7 @@ class PreviewTest(ServerBase):
             f.write(JPEG)
         link = os.path.join(self.rundir, "preview.jpg")
 
-        def screenshot(path, quality=60):
+        def screenshot(path, quality=60, with_text=True):
             os.symlink(target, link)
         self.player.screenshot = screenshot
         st, body, _ = self.call("GET", "/api/preview.jpg", token=self.full)
@@ -95,7 +97,7 @@ class PreviewTest(ServerBase):
     def test_a_fifo_at_the_path_cannot_hang_the_reader(self):
         link = os.path.join(self.rundir, "preview.jpg")
 
-        def screenshot(path, quality=60):
+        def screenshot(path, quality=60, with_text=True):
             os.mkfifo(link)
         self.player.screenshot = screenshot
         started = time.monotonic()
@@ -106,7 +108,7 @@ class PreviewTest(ServerBase):
     def test_a_failure_is_remembered_so_requests_do_not_queue_behind_a_slow_player(self):
         calls = []
 
-        def slow_fail(path, quality=60):
+        def slow_fail(path, quality=60, with_text=True):
             calls.append(1)
             raise PlayerError("nothing playing")
         self.player.screenshot = slow_fail
@@ -118,6 +120,57 @@ class PreviewTest(ServerBase):
         token = self.invite("view")
         self.assertEqual(self.call("GET", "/api/preview.jpg?t=123", token=token)[0], 200)
         self.assertEqual(self.call("POST", "/api/preview.jpg", {}, token=token)[0], 404)
+
+
+class AccessOnScreenSnapshotTest(PreviewTest):
+    """While the PIN or join codes are on the display, a snapshot must not show them to a device without full access."""
+
+    def show(self, showing):
+        class Ps:
+            def status(inner):
+                return {"showing": showing, "items": ["pin"], "seconds_left": 30}
+
+            def auto_wanted(inner):
+                return False
+        self.api.pinscreen = Ps()
+
+    def test_a_guest_gets_the_video_only_while_codes_are_shown_the_owner_gets_everything(self):
+        view = self.invite("view")
+        live = self.invite("live")
+        self.show(True)
+        self.call("GET", "/api/preview.jpg", token=view)
+        self.assertEqual(self.modes[-1], False)                              # video only: no text, no QR codes
+        self.call("GET", "/api/preview.jpg", token=live)
+        self.assertEqual(self.modes[-1], False)
+        self.call("GET", "/api/preview.jpg", token=self.full)
+        self.assertEqual(self.modes[-1], True)                               # the owner sees what is on the screen
+        self.show(False)
+        self.api._preview = None
+        self.call("GET", "/api/preview.jpg", token=view)
+        self.assertEqual(self.modes[-1], True)                               # nothing sensitive shown: the whole window
+
+    def test_a_cached_full_frame_is_never_handed_to_a_guest(self):
+        self.show(True)
+        self.call("GET", "/api/preview.jpg", token=self.full)               # a full frame (with the PIN) is now cached
+        n = len(self.modes)
+        self.call("GET", "/api/preview.jpg", token=self.invite("view"))
+        self.assertEqual(self.modes[n:], [False])                            # a fresh video-only grab, not the cached frame
+
+    def test_the_first_run_screen_counts_too_and_an_error_counts_as_shown(self):
+        class Ps:
+            def status(inner):
+                return {"showing": False}
+
+            def auto_wanted(inner):
+                return True
+        self.api.pinscreen = Ps()
+        self.assertTrue(self.api.access_on_screen())
+
+        class Broken:
+            def status(inner):
+                raise RuntimeError("x")
+        self.api.pinscreen = Broken()
+        self.assertTrue(self.api.access_on_screen())
 
 
 if __name__ == "__main__":

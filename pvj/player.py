@@ -313,12 +313,36 @@ class Player:
         """Stop the current clip but keep the player service and window alive."""
         self.ipc.request("stop")
 
-    def screenshot(self, path, quality=60):
-        """Save what the player is showing right now (the window, including brightness and size) as a JPEG.
-        Returns when the file is written; takes about 0.7 s at 2560x1440 on a Pi 4."""
+    def screenshot(self, path, quality=60, with_text=True):
+        """Save what the player is showing right now as a JPEG. With `with_text` it is the whole window (brightness,
+        size, on-screen text and pictures such as QR codes); without, only the video, so nothing drawn on top of it
+        can be read from the snapshot. Takes about 0.7 s at 2560x1440 on a Pi 4."""
         self._set("screenshot-format", "jpg")
         self._set("screenshot-jpeg-quality", int(quality))
-        self.ipc.request("screenshot-to-file", path, "window")
+        self.ipc.request("screenshot-to-file", path, "window" if with_text else "video")
+
+    def osd_size(self):
+        """(width, height) of the picture the player is drawing on, in pixels, or None if unknown."""
+        try:
+            w, h = self.ipc.request("get_property", "osd-width"), self.ipc.request("get_property", "osd-height")
+        except PlayerError:
+            return None
+        return (int(w), int(h)) if isinstance(w, (int, float)) and isinstance(h, (int, float)) and w > 0 and h > 0 else None
+
+    def overlay(self, oid, x, y, width, height, pixels):
+        """Draw a bitmap (raw BGRA, `width` x `height`) over the picture and the on-screen text, at x, y, until
+        overlay_remove(oid). The pixels go through a file in the runtime folder that the player reads."""
+        if not (isinstance(oid, int) and 0 <= oid < 64) or len(pixels) != width * height * 4:
+            raise PlayerError("bad overlay")
+        path = os.path.join(self.rundir, "overlay-%d.bgra" % oid)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o660)
+        with os.fdopen(fd, "wb") as f:
+            os.fchmod(f.fileno(), 0o660)          # on the open file: a name swapped for a link cannot redirect it
+            f.write(pixels)
+        self.ipc.request("overlay-add", oid, int(x), int(y), path, 0, "bgra", int(width), int(height), int(width) * 4)
+
+    def overlay_remove(self, oid):
+        self.ipc.request("overlay-remove", oid)
 
     def volume_step(self, delta):
         self.ipc.request("add", "volume", float(delta))

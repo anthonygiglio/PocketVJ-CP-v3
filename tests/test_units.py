@@ -101,6 +101,13 @@ class InstallerOwnershipTest(unittest.TestCase):
         self.assertIn("chmod 2750 /var/lib/pvj", self.sh)
         self.assertNotIn("chmod 2775 /var/lib/pvj;", self.sh)
 
+class WebUnitTest(unittest.TestCase):
+    def test_the_panel_may_read_the_boxs_addresses(self):
+        # `ip -j addr` needs a netlink socket; the sandbox refused it and the Network card showed no addresses on a Pi 4
+        families = words(load_units()["pvj-web.service"], "RestrictAddressFamilies")
+        self.assertIn("AF_NETLINK", families)
+        self.assertNotIn("AF_PACKET", families)
+
 
 if __name__ == "__main__":
     unittest.main()

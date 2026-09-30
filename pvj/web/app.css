@@ -90,6 +90,19 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px
 .addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
 /* The screen preview keeps the picture's shape and never overflows the card. */
 #preview { display: block; width: 100%; height: auto; margin-top: 8px; border-radius: 6px; background: #000; }
+/* Access: QR codes and join codes */
+img.qr { width: 96px; height: 96px; background: #fff; border-radius: 4px; flex: none; }
+.big-code { font-size: 22px; letter-spacing: .15em; }
+#printsheet { display: none; }
+@media print {
+  body.printing > *:not(#printsheet) { display: none !important; }
+  body.printing #printsheet { display: block; color: #000; background: #fff; font-family: Inter, system-ui, sans-serif; padding: 24px; }
+  #printsheet h1 { font-size: 28px; margin: 0 0 8px; }
+  #printsheet .sheet-row { display: flex; gap: 32px; flex-wrap: wrap; margin: 16px 0; }
+  #printsheet figure { margin: 0; text-align: center; }
+  #printsheet .qr-big { width: 60mm; height: 60mm; }
+  #printsheet figcaption { font-size: 14px; margin-top: 6px; }
+}
 /* Transport: the position slider is the full card width and easy to hit with a thumb */
 input.seek { width: 100%; margin: 10px 0 4px; accent-color: var(--ac); height: 28px; }
 .row.transport { margin-top: 8px; }

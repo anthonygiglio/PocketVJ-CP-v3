@@ -13,6 +13,7 @@ Security model, in one place:
 
 import json
 import os
+import re
 import signal
 import socket
 import sys
@@ -38,7 +39,43 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
 
-def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
+def host_allowed(host, names):
+    """Is the Host header one of ours? IP addresses (any), localhost, and the names in `names`. A web page on the
+    internet that rebinds its own name to the box's address (DNS rebinding) sends its own name here and is refused,
+    so it cannot drive the panel from a visitor's browser."""
+    import ipaddress
+    if host is None:
+        return True           # no Host header: an old HTTP/1.0 client or a script, never a browser (browsers always send it)
+    host = host.strip().lower()
+    if not host or len(host) > 255:
+        return False
+    if host.startswith("["):                                  # [v6] or [v6]:port
+        end = host.find("]")
+        if end < 0 or (host[end + 1:] and not re.fullmatch(r":[0-9]{1,5}", host[end + 1:])):
+            return False
+        name = host[1:end]
+    else:
+        name, _, port = host.partition(":")
+        if port and not port.isdigit():
+            return False
+    try:
+        ipaddress.ip_address(name.split("%")[0])
+        return True
+    except ValueError:
+        pass
+    return name.rstrip(".") in names
+
+
+def allowed_names(env=None):
+    env = os.environ if env is None else env
+    hostname = socket.gethostname().lower()
+    names = {"localhost", hostname, hostname.split(".")[0] + ".local"}
+    names.update(n.strip().lower() for n in env.get("PVJ_ALLOWED_HOSTS", "").split(",") if n.strip())
+    return names
+
+
+def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None):
+    host_names = allowed_names() if host_names is None else host_names
     static = {"/": "index.html"}
     if os.path.isdir(web_dir):
         for name in os.listdir(web_dir):
@@ -143,15 +180,36 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
         def _preview(self):
             """GET /api/preview.jpg: what the screen is showing (any paired device, even view-only)."""
             try:
-                api.require(auth.authenticate(self._token()), "view")
-                self._send(200, api.preview_jpeg(), "image/jpeg")
+                device = auth.authenticate(self._token())
+                api.require(device, "view")
+                self._send(200, api.preview_jpeg(device), "image/jpeg")
             except ApiError as e:
                 self._json(e.status, {"error": e.message})
 
+        def _qr(self):
+            """GET /api/qr.svg?for=panel|view|live (full access): a QR code to print or show."""
+            try:
+                api.require(auth.authenticate(self._token()), "full")
+                target = (parse_qs(urlsplit(self.path).query).get("for") or [""])[0]
+                self._send(200, api.access_qr(target, self.headers.get("Host", "")), "image/svg+xml")
+            except ApiError as e:
+                self._json(e.status, {"error": e.message})
+
+        def _host_ok(self):
+            if host_allowed(self.headers.get("Host"), host_names):
+                return True
+            self.close_connection = True
+            self._json(421, {"error": "unknown host name; open the box by its address or add the name to PVJ_ALLOWED_HOSTS"})
+            return False
+
         def do_GET(self):
+            if not self._host_ok():
+                return
             path = urlsplit(self.path).path
             if path == "/api/preview.jpg":
                 return self._preview()
+            if path == "/api/qr.svg":
+                return self._qr()
             if path.startswith("/api/"):
                 return self._api("GET", path, {})
             if path == "/theme.css":
@@ -203,6 +261,8 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0):
                 self._json(500, {"error": "internal error"})
 
         def do_POST(self):
+            if not self._host_ok():
+                return
             path = urlsplit(self.path).path
             if not path.startswith("/api/"):
                 return self._json(404, {"error": "not found"})
@@ -269,10 +329,10 @@ class PvjServer(ThreadingHTTPServer):
 def write_pin_file(rundir, pin):
     """Show-the-PIN channel: a tmpfs file the display or an admin can read. Cleared on reboot."""
     path = os.path.join(rundir, "pin")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o640)
     with os.fdopen(fd, "w") as f:
+        os.fchmod(f.fileno(), 0o640)
         f.write(pin + "\n")
-    os.chmod(path, 0o640)
 
 
 def build(env=None, player=None):
