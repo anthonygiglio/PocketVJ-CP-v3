@@ -472,8 +472,19 @@ class Api:
             fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         except OSError as e:
             raise ApiError(404, "cannot read that file: %s" % (e.strerror or e))
-        f = os.fdopen(fd, "rb")
-        size = os.fstat(f.fileno()).st_size
+        try:
+            f = os.fdopen(fd, "rb")
+        except OSError:
+            os.close(fd)
+            raise ApiError(404, "cannot read that file")
+        try:
+            size = os.fstat(f.fileno()).st_size
+        except OSError:
+            f.close()
+            raise ApiError(404, "cannot read that file")
+        if size == 0:
+            f.close()
+            raise bad("that file is empty")
         with self._import_lock:
             if self._import.get("active"):
                 f.close()
@@ -482,13 +493,20 @@ class Api:
         job = self._import
 
         def read(n):
-            chunk = f.read(n)
+            try:
+                chunk = f.read(n)
+            except OSError:
+                raise ApiError(503, "the USB drive stopped answering (pulled out, or damaged)")
             job["done"] += len(chunk)
             return chunk
+
+        token_device = device.get("id") if device else None
 
         def check():
             if job["cancel"]:
                 raise ApiError(499, "copy cancelled")
+            if token_device and not any(d["id"] == token_device for d in self.auth.list_devices()) and not device.get("remote"):
+                raise ApiError(403, "the device that started the copy was removed")
 
         def run():
             try:
@@ -496,8 +514,9 @@ class Api:
                 job.update(active=False, result=result)
             except ApiError as e:
                 job.update(active=False, error=e.message)
-            except Exception as e:           # a stick pulled out half-way, for example
-                job.update(active=False, error="the copy failed: %s" % e)
+            except Exception as e:           # something unexpected: logged, said plainly
+                print("pvj-web: USB copy failed: %s" % e)
+                job.update(active=False, error="the copy failed")
             finally:
                 f.close()
         threading.Thread(target=run, name="usb-import", daemon=True).start()

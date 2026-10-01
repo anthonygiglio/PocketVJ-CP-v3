@@ -140,9 +140,6 @@ class UsbMediaTest(ServerBase):
         self.assertEqual(self.play(usb="NXLX-USB/b.mkv")[0], 404)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class UsbImportTest(ServerBase):
     """Copy a clip from a USB drive into the media folder (the old "Loading from USB to internal")."""
@@ -187,6 +184,35 @@ class UsbImportTest(ServerBase):
         live = self.call("POST", "/api/devices/invite", {"name": "p", "role": "live"}, token=self.full)[1]["token"]
         self.assertEqual(self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=live)[0], 403)
 
+    def test_an_empty_file_and_a_stick_that_stops_answering(self):
+        open(os.path.join(self.usb, "SHOW", "empty.mp4"), "w").close()
+        st, body, _ = self.call("POST", "/api/media/import", {"usb": "SHOW/empty.mp4"}, token=self.full)
+        self.assertEqual((st, body["error"]), (400, "that file is empty"))
+        import io
+        from unittest import mock
+        real_fdopen = os.fdopen
+
+        class Failing(io.RawIOBase):            # a stick that stops answering half-way
+            def __init__(self, fd):
+                self.inner = real_fdopen(fd, "rb")
+                self.n = 0
+
+            def fileno(self):
+                return self.inner.fileno()
+
+            def read(self, n=-1):
+                self.n += 1
+                if self.n > 1:
+                    raise OSError(5, "Input/output error")
+                return self.inner.read(n)
+
+            def close(self):
+                self.inner.close()
+        with mock.patch("pvj.api.os.fdopen", lambda fd, mode="r", *a, **k: Failing(fd) if mode == "rb" else real_fdopen(fd, mode, *a, **k)):
+            self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=self.full)
+            self.assertIn("stopped answering", self.wait()["error"])
+        self.assertFalse([n for n in os.listdir(self.media) if n.startswith(".upload-")])      # the half file is gone
+
     def test_cancel(self):
         import threading
         gate = threading.Event()
@@ -203,3 +229,7 @@ class UsbImportTest(ServerBase):
         gate.set()
         self.assertIn("cancelled", self.wait()["error"])
         self.assertFalse(os.path.exists(os.path.join(self.media, "film.mp4")))
+
+
+if __name__ == "__main__":
+    unittest.main()

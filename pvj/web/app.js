@@ -807,11 +807,11 @@
       line.appendChild(document.createTextNode('Copying ' + d.name + ': ' + pct + '% (' + megabytes(d.done) + ' of ' + megabytes(d.size) + ') '));
       line.appendChild(h('button', { class: 'btn small', id: 'importcancel', text: 'Cancel', onclick: function () { act('POST', '/api/media/import/cancel', {}, watchImport); } }));
       importTimer = setTimeout(function () { api('GET', '/api/media/import').then(function (r) { if (r.ok) watchImport(r.data); }); }, 1000);
-    } else if (d.error) {
-      line.textContent = 'Copy of ' + d.name + ' stopped: ' + d.error;
-    } else if (d.result) {
-      line.textContent = d.name + ' is now on the box.';
-      refreshMedia();
+    } else if (d.error || d.result) {
+      // Kept after the list is redrawn, until the next copy (a redraw used to wipe it at once).
+      S.importNote = d.error ? 'Copy of ' + d.name + ' stopped: ' + d.error : d.name + ' is now on the box.';
+      line.textContent = S.importNote;
+      if (d.result && !d.seen) { d.seen = true; refreshMedia(); }
     }
   }
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
@@ -844,7 +844,11 @@
     });
   }
   function media() {
-    setTimeout(function () { api('GET', '/api/media/import').then(function (r) { if (r.ok && r.data.active) watchImport(r.data); }); }, 0);
+    setTimeout(function () {
+      var line = document.getElementById('importline');
+      if (line && S.importNote) line.textContent = S.importNote;
+      api('GET', '/api/media/import').then(function (r) { if (r.ok && r.data.active) watchImport(r.data); });
+    }, 0);
     var info = S.mediaInfo || {};
     var full = can('full');
     var details = info.details || S.media.map(function (n) { return { name: n, size: 0 }; });
@@ -945,6 +949,7 @@
                 can('full') ? h('button', { class: 'btn small', text: have ? 'Copy again' : 'Copy to the box', 'aria-label': 'Copy ' + f.name + ' to the box',
                   onclick: function () {
                     if (have && !window.confirm(f.name + ' is already on the box. Replace it?')) return;
+                    S.importNote = '';
                     act('POST', '/api/media/import', { usb: drive.drive + '/' + f.name, replace: have }, function (d) { watchImport(d); });
                   } }) : null));
           }) : h('div', { class: 'k', text: 'No video or image files at the top of this drive.' })));
