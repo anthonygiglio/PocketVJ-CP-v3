@@ -41,7 +41,12 @@ Numbers use natural units, so set your controller's fader range to match (for ex
 
 `/stopall`, `/stopvideo` (both stop the clip), `/pause`, `/fastforward` (seek forward 10 s), `/volumeup`, `/volumedown` (10 percent steps), `/rotate0`, `/rotate90`, `/rotate180`, `/rotate270`, `/beameron` and `/beameroff` (every projector added under System > Projectors on or off, see [PROJECTORS.md](PROJECTORS.md)), and every start preset: `/startmaster`, `/startmaster05`, `/startlessonce03`, `/startlesseronce07`, `/startseamless02`, ... (the same names and files as the old scripts; see the preset table in `pvj/presets.py`).
 
-Not carried over: audio output switching, display power, clock, camera, image and PDF players, overlays, soft edge, Syphon, NDI, PiWall, and custom functions. They belong to modules that are not built yet.
+Also from the old receiver: `/startmasteronce01` to `/startmasteronce99` (play the clip numbered so, once; these failed silently before), `/testscreen` and `/testscreenoff` (the test pattern), `/testtone`, `/testtoneleft`, `/testtoneright`, `/overlay` and `/stopoverlay` (the overlay picture chosen on the Mix screen), `/image` (the slideshow of the media folder) and `/stopimage`, `/fliph` and `/flipv` (each press switches the mirror over, like the old buttons).
+
+Not carried over:
+- on purpose, because they change settings or the system, which needs a full-access device: `/audiohdmiout`, `/audiojack`, `/audiousb`, `/audioboth` (System > Sound output), `/startslave` (System > Sync and video wall), `/reboot`, `/shutdown`, `/rebootall`, `/shutdownall`, `/customfunction1` and `/customfunction2` (they ran shell scripts);
+- not built yet: `/screenon` and `/screenoff` (display sleep), the clock (`/clockdisplay` and colours), `/imageusb` and `/imagemanual`, the audio player (`/startaudio...`, `/stopaudio`), the PDF presenter (`/startpdf...`), the camera and its effects, soft edge, `/getcontent`;
+- replaced: PiWall (`/piwallmaster`, `/piwallloop`) by Sync and video wall; Syphon (`/tcpsserver`) and `/ndisend`, `/ndireceiver` wait for NDI.
 
 ## Tested
 

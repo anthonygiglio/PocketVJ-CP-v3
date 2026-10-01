@@ -107,6 +107,7 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | --- | --- |
 | **Autostart**: what plays at power-up and after a crash | [pvj/AUTOSTART.md](../pvj/AUTOSTART.md) |
 | **Weekly schedule**: play, start scripts, stop, blackout, show and projector power at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
+| **Video wall and sync**: boxes play in step (server and client), each can show a tile of the picture | [pvj/SYNC.md](../pvj/SYNC.md) |
 | **Projection mapper**: quads, triangles and grids, lined up from the phone (card on Mix) | [pvj/MAPPER.md](../pvj/MAPPER.md) |
 | **Projector control**: on, off and picture mute over PJLink | [pvj/PROJECTORS.md](../pvj/PROJECTORS.md) |
 | **Streams**: SRT, RTSP, RTMP | [pvj/STREAMS.md](../pvj/STREAMS.md) |
@@ -158,6 +159,6 @@ System > Health says in plain words whether the box is well: the power supply (a
 
 ## 8. Not built yet
 
-Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, the presenter, the video wall, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, the presenter, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
 
 **SMPTE ST 2110** is not supported directly and not planned: use a converter from 2110 to HDMI into the live input (USB capture), or from 2110 to NDI once NDI is built.

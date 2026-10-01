@@ -18,6 +18,7 @@ Deliberate limits:
 """
 
 import ipaddress
+import re
 import socket
 import struct
 import threading
@@ -218,6 +219,11 @@ def pressed(args):
     return _number(v) and v > 0.5
 
 
+# Old names that start with /start but are not playback presets: sync and sound output need full access
+# (System > Sync and video wall, Sound output), the audio player and the PDF presenter are not built.
+NOT_HERE = {"/startslave", "/startaudio", "/startaudioslave", "/startaudiousb", "/startpdf", "/startpdfusb"}
+
+
 def translate(address, args, mix=None):
     """Map an OSC message to (api_path, body), or None if it means nothing here."""
     a = address.rstrip("/") if len(address) > 1 else address
@@ -291,6 +297,24 @@ def translate(address, args, mix=None):
         return control("volume_step", 10 if a == "/volumeup" else -10) if pressed(args) else None
     if a in ("/rotate0", "/rotate90", "/rotate180", "/rotate270"):
         return control("rotate", int(a[len("/rotate"):])) if pressed(args) else None
+    # Old names for things the new player does too (the old panel's TouchOSC layouts send these).
+    simple = {
+        "/testscreen": ("/api/testpattern", {"on": True}), "/testscreenoff": ("/api/testpattern", {"on": False}),
+        "/testtone": ("/api/testtone", {"channel": "both"}), "/testtoneleft": ("/api/testtone", {"channel": "left"}),
+        "/testtoneright": ("/api/testtone", {"channel": "right"}),
+        "/overlay": ("/api/overlay", {"on": True}), "/stopoverlay": ("/api/overlay", {"on": False}),
+        "/image": ("/api/play", {"slideshow": {"source": "media"}}), "/stopimage": control("stop"),
+    }
+    if a in simple:
+        return simple[a] if pressed(args) else None
+    if a in ("/fliph", "/flipv"):                     # the old buttons switched the mirror over each press
+        key = "flip_h" if a == "/fliph" else "flip_v"
+        return control(key, not (mix or {}).get(key, False)) if pressed(args) else None
+    m = re.fullmatch(r"/startmasteronce([0-9]{2})", a)
+    if m:                                             # the old receiver ran the startmasteroneNN scripts for these
+        return ("/api/play", {"preset": "startmasterone" + m.group(1)}) if pressed(args) else None
+    if a in NOT_HERE:
+        return None
     if a.startswith("/start") and pressed(args):
         return "/api/play", {"preset": a[1:]}
     return None

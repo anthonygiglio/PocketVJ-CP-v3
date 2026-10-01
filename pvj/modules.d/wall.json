@@ -3,7 +3,7 @@
   "name": "Video wall and sync",
   "version": "0.1.0",
   "type": "optional",
-  "channel": "stable",
+  "channel": "beta",
   "requires": [
     "core"
   ],
@@ -13,7 +13,7 @@
     "pi5",
     "x86"
   ],
-  "status": "planned",
-  "default_enabled": true,
-  "description": "Multi-box synchronised playback."
+  "status": "ready",
+  "default_enabled": false,
+  "description": "Several boxes play in step: one server leads, clients follow its clip, position, pause and blackout over the local network (same file names on every box). Each box can show one tile of the picture for a video wall, with bezel compensation."
 }

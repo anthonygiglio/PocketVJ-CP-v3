@@ -10,6 +10,22 @@ Done: System > Health (`pvj/health.py`, `GET /api/health`, any paired device): p
 
 Checked on the Pi: the alarm file exists (`/sys/class/hwmon/hwmon1`, `in0_lcrit_alarm` 0) and `vcgencmd get_throttled` agrees (0x0); `/dev/vcio` is root-only, so vcgencmd is not used. The card itself goes on the box after the sync branch merges (the box's settings are already at schema 13).
 
+## 2026-09-30 (old OSC names)
+
+Done: from the manual deep dive (three agents read the old manual against the build; their combined list is the order of the next work). `/startmasteronce01` to `99` failed silently (they were passed as a preset name the parser does not know; the old receiver ran startmasteroneNN): fixed. Old names for features that exist now are mapped (test screen, test tones, overlay, slideshow, flip as a toggle); old names that need full access or are not built are refused explicitly and listed in pvj/OSC.md.
+
+## 2026-09-30 (multi-box sync and video wall)
+
+Done:
+- Server and client sync (D31, `pvj/sync.py`, `pvj/SYNC.md`, System > Sync and video wall, `/api/sync`, the "Video wall and sync" module made ready, settings schema 13): the server sends its clip and position; clients follow by nudging their speed and jump only when far off. A per-box tile of the picture for a video wall, with bezel compensation.
+- Checked on the Pi 4: mpv's video-crop applied while playing (a screenshot showed exactly the chosen quarter) and cleared with an empty value; small speed changes apply at once. Two real headless players following each other over UDP on the Pi: median 0 ms, worst 40 ms (one frame at 25 fps). A simulator test covers the start, drift, seeks, looping, pause, stop and missing files.
+
+Also on the Pi through the panel: as a server it broadcast 10 messages a second on the home network; as a client its real player followed a stand-in server on the Mac (Wi-Fi) into a 1080p film on USB: three jumps in 6 s, then in step within 14 ms for the rest of the 40 s. Sync and the module were switched off again afterwards.
+
+Independent review: two high findings, both reproduced by the reviewer and fixed with tests: a sync thread could outlive a role change and run with the old settings (each thread now has its own stop signal); a client following a server at speed 2 or 0.25 jumped forever (it settled at its old speed; it now takes the server's speed at once and learns its jump lead per speed). Also fixed: clients ignored a restarted server for up to 100 s (a run id now), the wall crop was given up when the picture size was not known yet, `ip` ran ten times a second (cached), a clip started on a client was not replaced, live inputs and streams were sent as file names, paused seeks were not followed, no flood limit, a stray timer clear on the Access card stopped the sync card refreshing, and the docs. Re-measured on the Pi after the fixes: two headless players median 0 ms, worst 40 ms; the box's own player following the Mac: two jumps, then a speed catch-up, then within 5 ms.
+
+Not verified: two boxes on two screens (the Pi 3B needs its spare SD card), a wall with real bezels.
+
 ## 2026-09-30 (remote support)
 
 Done:
