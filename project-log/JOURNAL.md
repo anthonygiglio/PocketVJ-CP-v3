@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (update button)
+
+Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting one of two fixed update units; progress and outcome from a result file; `pvj-update inbox` and `--result`. Tests for the inbox, the result file, the helper command, the API, the upload limits and the units.
+
+Checked on the Pi: the full installer put the two units in place (not enabled); an unsigned upload was refused at the first check ("no valid SHA-256 given"), the inbox was emptied, and the card's data showed the failure. Not checked on the Pi: a signed update installing through the button. That needs a test key in /etc/pvj/allowed_signers, which the permission check (rightly) stopped; the owner can allow it or test with the real release key.
+
 ## 2026-09-30 (old OSC names)
 
 Done: from the manual deep dive (three agents read the old manual against the build; their combined list is the order of the next work). `/startmasteronce01` to `99` failed silently (they were passed as a preset name the parser does not know; the old receiver ran startmasteroneNN): fixed. Old names for features that exist now are mapped (test screen, test tones, overlay, slideshow, flip as a toggle); old names that need full access or are not built are refused explicitly and listed in pvj/OSC.md.
