@@ -10,6 +10,17 @@ Done:
 - Current master (aef29ab) installed on the test Pi 4 with the full offline installer by an agent; all four services active, unit files and code identical to master, player without the old 8-bit flag, settings schema 11, modules as before. Old test files cleaned out of the Pi's /tmp.
 - Stopping (including the test pattern's off) now resets the player's loop settings, so an idle player no longer reports the last clip's looping; the agent saw `loop_file: "inf"` on the idle box.
 
+## 2026-09-30 (panel screenshots refreshed)
+
+Done:
+- `tests/ui/screenshots.js` had stopped after the connect picture since the pairing button was renamed ("Pair with PIN", `#pairbtn`); the CI step is continue-on-error, so nobody noticed. Fixed.
+- New cropped pictures in `docs/images/ui`: live-transport, mix-mirror, mix-overlay, mapper, media-quickplay, slideshow, box, sound-output, projectors. Schedule (every kind of action) and access (guest and presenter codes with QR codes) show more now. All other pictures retaken from the same run. Tall screens show the tab bar at the bottom instead of over the middle.
+- Used in `docs/UI.md` and `docs/MANUAL.md`.
+
+Not captured: Live input (the CI runner has no capture device; the script skips it). The snapshot image itself (a headless player gives none), so the Screen card is shown before a tap.
+
+Seen in the pictures, not fixed (UI, for a later change): at phone width the Media list squeezes file names to a few letters per line; the Remove button of the mapping surface list and the Print access sheet button of the Access card run past the right edge of their cards. The browser test failed once on the mapper step (`#mapsel` "corner 1 of 4" not seen in 30 s) and passed on the next run.
+
 ## 2026-09-30 (projection mapper)
 
 Done:

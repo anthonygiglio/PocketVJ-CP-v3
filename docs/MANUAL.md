@@ -38,6 +38,8 @@ For a studio or a gig, the person running the show (a full-access device) opens 
 - **Print access sheet** prints a page to pin up: a QR code for the panel address (no access in it; people still need a code), and the current guest and presenter codes.
 - **Create guest link** makes a link that does not expire (until you remove the device), with its QR code; hand it to a resident operator.
 
+![Access card with a guest and a presenter code and their QR codes](images/ui/access.png)
+
 Tested on a Raspberry Pi 4: the codes and QR codes were drawn on the display, decoded off a snapshot of the screen by a real QR scanner (zbar), and a join with each code gave exactly guest or presenter access.
 
 ## 3. Put clips on it
@@ -60,11 +62,17 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Now playing** (Live) has the controls of a normal player: a **position slider** (drag and release to jump), **Prev** and **Next** (when several clips are playing as a list, for example Play all), **- 10 s** and **+ 10 s**, **Fade in** (from a blackout or a fade out, over 2 s) and **Test pattern** (SMPTE colour bars from the player itself, for lining up a projector; tap again to stop).
 
+![Now playing with the transport, and Take snapshot](images/ui/live-transport.png)
+
 **Quick play** (Media) plays the whole folder, looping or once, or in a random order (**Shuffle all**), or the clips whose names start with a number (`01_intro.mp4` is clip 01), like the old Video tab. Play all leaves audio files out.
+
+![Quick play](images/ui/media-quickplay.png)
 
 **When a clip ends.** Each pad has its own ending (Edit pads, then the pad): **Loop**, **Play once, then black**, or **Play once, hold the last frame** (for a sting that should stay on screen).
 
 **Slideshow** (Media, like the old Presenter tab): the pictures of the media folder or of a USB drive, each for 0.1 second to a minute, then start again, keep the last picture, or go black; optionally in a random order. Prev and Next on Live step through them.
+
+![Slideshow](images/ui/slideshow.png)
 
 **Live input** (Media): an HDMI capture stick or a webcam on USB, shown like a clip, at 720p or 1080p at 30 frames a second. Playing anything else, Stop, the test pattern switched off or Restart player ends it (switching away from it cuts straight to the next clip, without the dip to black). On a Raspberry Pi 4 with a USB3 HDMI capture stick both sizes played without dropping frames (720p60 dropped frames and is not offered); at 1080p the picture kept slightly behind real time in one test, so prefer 720p until that is checked with a real source. The device is read by a separate helper, so a crash in the capture code cannot stop the player (a fault in the kernel's USB or camera driver still could). Only webcams that can send YUYV are known to work; others are converted, untested. The input's sound is not played yet, and the delay from the source to the screen has not been measured.
 
@@ -72,11 +80,18 @@ Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo p
 
 **Overlay picture** (Mix): put a PNG from the media folder over the video, like the old panel's overlay.png: a logo, a watermark, or a mask that blacks out the parts of the picture that miss the screen. Make it transparent where the video should show. It is fitted to the screen once (about a second on a Pi 4), stays on top of the video, and comes back by itself if the player restarts. It cost no measurable playback on a Pi 4 with a 1080p film.
 
+![Overlay picture](images/ui/mix-overlay.png)
+
 **Mirror and position** (Mix): Flip left-right or upside down for rear projection or a mirror rig (live, no reboot; on a Pi 4 it costs about half a processor core at 1080p, and dropped no frames in the test), and Position Y next to Position X.
+
+![Mirror](images/ui/mix-mirror.png)
 
 **Clip details** (Media > Info): codec, picture size, frame rate, length and sound of a clip, read by the player without showing it (the old Movie Codec and Movie Resolution buttons).
 
 **Box** (System): software versions, free space for media, what is connected to each screen output and the modes it offers, the mode the player is using now, and the box clock. Full-access devices also get **Restart the box** and **Power off** (each asks first; neither is reachable over OSC, MIDI or DMX), and, while the clock has not been set from the network (a Pi has no clock battery, so a box with no internet starts at the time it was last shut down), **Set the box clock to this phone's time**. These go through a small helper, `pvj-sysd`, that runs as root with no capabilities of its own (systemd and timedated do the work), in its own folder that only root can change, and answers only root and the panel's account. A clock is only accepted up to 2036: a phone set to a far future year would otherwise stick, because the box saves its clock. If setting the clock goes wrong, the panel says so, including when network time could not be switched back on (the helper switches it back on at its next start). **Test tones** (System > Sound output): 5 seconds of 440 Hz on the left, right or both speakers.
+
+![Box](images/ui/box.png)
+![Sound output](images/ui/sound-output.png)
 
 **Mix** has opacity, volume, size, position, speed, rotate, loop and mute, and how one clip changes to the next: **Cut** or **Dip to black** (a real crossfade is not built; it needs a second player).
 
@@ -99,6 +114,15 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | **MIDI controller** (USB) | [pvj/MIDI.md](../pvj/MIDI.md) |
 | **OSC**: TouchOSC, Resolume, QLab and others | [pvj/OSC.md](../pvj/OSC.md) |
 | **Network settings** (wired) | [pvj/NETWORK.md](../pvj/NETWORK.md) |
+
+The Projection mapping card on Mix, with a grid and a quad:
+
+![Projection mapping](images/ui/mapper.png)
+
+Projectors and the schedule (here with projector power, a clip, a start script and a blackout):
+
+![Projectors](images/ui/projectors.png)
+![Schedule](images/ui/schedule.png)
 
 Check the box clock before relying on the schedule: a Pi has no battery clock, and until the network sets the time the clock is wrong.
 
