@@ -224,7 +224,11 @@ function startServer() {
       for (const tab of ['Live', 'Mix', 'Media', 'System']) {
         await page.click('nav >> text=' + tab);
         await page.waitForTimeout(1500);                      // cards that load their own data
+        // The tab bar is fixed to the bottom of the window; in a whole-page picture it would stop half-way down,
+        // over a card. Let it sit at the end of the page while the picture is taken.
+        await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.position = 'static'; });
         await shot(prefix + '-' + tab.toLowerCase(), (f) => page.screenshot({ path: f, fullPage: true }));
+        await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.removeProperty('position'); });
       }
     }
     await screens('screen-phone');
