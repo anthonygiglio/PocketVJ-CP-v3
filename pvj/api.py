@@ -151,6 +151,8 @@ class Api:
         self.capture = None       # Capture or None (live input from a USB capture device)
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
+        from . import health as health_mod
+        self.health = health_mod.Health(self, getattr(player, "rundir", "/run/pvj"))     # checks start in server.build
         from . import support as support_mod
         self.support = support_mod.SupportManager(settings, auth, None,      # the helper client is set by server.build
                                                   networks_in_use=self._support_clash_networks)
@@ -1117,6 +1119,9 @@ class Api:
             self.settings.save()
         return state
 
+    def get_health(self, body, device, client):
+        return self.health.report()
+
     # --- remote support (see support.py) --------------------------------------------------
     def _support_clash_networks(self):
         """The IPv4 networks this box is on (not the support tunnel itself), for refusing an overlapping support network."""
@@ -1686,6 +1691,7 @@ class Api:
             ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
+            ("GET", "/api/health"): ("view", self.get_health),
             ("GET", "/api/support"): ("view", self.get_support),
             ("POST", "/api/support/config"): ("full", self.set_support),
             ("POST", "/api/support/start"): ("full", self.start_support),

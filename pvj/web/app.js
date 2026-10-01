@@ -934,7 +934,7 @@
       kv('Temperature', typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : 'n/a'),
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
-    var cards = [vitals, boxCard()];
+    var cards = [vitals, healthCard(), boxCard()];
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full));
     if (full || (S.device && S.device.remote)) cards.push(supportCard());
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
@@ -948,6 +948,42 @@
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }),
       h('div', { class: 'grid2' }, cards));
   }
+  // ---- health (the old Powersupply, Check Services and GPU Usage buttons, in plain words) ----
+  var healthTimer = null;
+  function healthCard() {
+    var body = h('div', { class: 'list', id: 'healthbody' }, h('div', { class: 'k', text: 'Checking...' }));
+    var card = h('div', { class: 'card', id: 'healthcard' }, h('h2', { text: 'Health' }), body);
+    var mark = { ok: 'OK', warn: 'Check', bad: 'Problem', unknown: '?' };
+    function row(id, label, state, text) {
+      return h('div', { class: 'item health-' + (state || 'unknown'), id: id },
+        h('span', {}, h('b', { text: label }), h('br'), h('span', { class: 'k', text: text })),
+        h('span', { class: 'badge', text: mark[state] || '?' }));
+    }
+    function draw(d) {
+      clearTimeout(healthTimer);
+      healthTimer = setTimeout(refresh, 5000);
+      body.textContent = '';
+      body.appendChild(row('healthpower', 'Power', d.power.state, d.power.text));
+      body.appendChild(row('healthtemp', 'Temperature', d.temperature.state, d.temperature.text));
+      body.appendChild(row('healthplayer', 'Player', d.player.state, d.player.text));
+      var busy = d.cpu_percent !== null && d.cpu_percent >= 90;
+      body.appendChild(row('healthload', 'Load', busy ? 'warn' : 'ok',
+        (d.cpu_percent === null ? '?' : d.cpu_percent + '% of all cores') + (d.memory_percent === null ? '' : ' · memory ' + d.memory_percent + '% of ' + d.memory_mb + ' MB')));
+      d.helpers.forEach(function (x) {
+        body.appendChild(row('health-' + x.name, x.label, x.running ? 'ok' : (x.name === 'pvj-netd' ? 'unknown' : 'bad'),
+          x.running ? 'Running' : (x.name === 'pvj-netd' ? 'Not running (only needed for network settings)' : 'Not running')));
+      });
+      body.appendChild(h('div', { class: 'k', text: 'Open the panel from another device at:' }));
+      body.appendChild(h('div', { class: 'list mono', id: 'healthaddr' }, d.addresses.map(function (a) { return h('div', { class: 'item' }, h('span', { text: a })); })));
+      if (can('full')) body.appendChild(h('button', { class: 'btn small', id: 'healthshowaddr', text: 'Show the address on the display (2 minutes)', onclick: function () {
+        act('POST', '/api/access/screen', { show: true, items: ['address'], seconds: 120 }, function () { say('The address is on the display for 2 minutes.'); });
+      } }));
+    }
+    function refresh() { api('GET', '/api/health').then(function (r) { if (document.getElementById('healthcard') && r.ok) draw(r.data); }); }
+    refresh();
+    return card;
+  }
+
   function gb(n) { return (n / 1073741824).toFixed(1) + ' GB'; }
   // The old Settings and Display tabs' information buttons, on one card.
   function boxCard() {
@@ -1713,6 +1749,7 @@
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
     clearTimeout(accessTimer);
+    clearTimeout(healthTimer);
     keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
