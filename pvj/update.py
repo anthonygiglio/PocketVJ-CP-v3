@@ -353,6 +353,26 @@ class Updater:
         self._restart()
 
     # --- USB ------------------------------------------------------------
+    def inbox_bundles(self):
+        """Bundles uploaded through the panel (`<state>/update-inbox/pvj-N.N.N.tar.gz`), newest first. Untrusted:
+        check() copies each into a private folder before verifying its signature."""
+        inbox = self.real(self.state_dir + "/update-inbox")
+        found = []
+        for path in glob.glob(os.path.join(inbox, "pvj-*.tar.gz")):
+            m = re.search(r"pvj-(\d+\.\d+\.\d+)\.tar\.gz$", os.path.basename(path))
+            if m and not os.path.islink(path):
+                found.append((parse_version(m.group(1)), path))
+        return [p for _, p in sorted(found, reverse=True)]
+
+    def clear_inbox(self):
+        """Remove what was uploaded, whatever the outcome: a bundle is tried once."""
+        inbox = self.real(self.state_dir + "/update-inbox")
+        for path in glob.glob(os.path.join(inbox, "pvj-*")):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     def usb_bundles(self, base="/media/pvj"):
         found = []
         for path in glob.glob(os.path.join(base, "*", "pvj-update", "*.tar.gz")):
@@ -411,13 +431,34 @@ def main(argv=None):
         p.add_argument("--sha256")
         p.add_argument("--allow-unsigned", action="store_true", help="development only")
         p.add_argument("--force", action="store_true")
-    sub.add_parser("usb", help="apply the newest bundle in <usb>/pvj-update/")
+    for name, text in (("usb", "apply the newest bundle in <usb>/pvj-update/"),
+                       ("inbox", "apply the newest bundle uploaded through the panel")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--result", help="write the progress and outcome as JSON here (for the panel)")
     sub.add_parser("rollback")
     args = ap.parse_args(argv)
     if args.cmd != "status" and os.geteuid() != 0:
         print("pvj-update: run as root (sudo)", file=sys.stderr)
         return 1
     u = Updater()
+    result = getattr(args, "result", None)
+
+    def report(state, message, version=None):
+        if not result:
+            return
+        data = {"state": state, "message": message, "version": version, "at": int(time.time())}
+        tmp = result + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o644)
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, result)
+        except OSError:
+            pass
+
+    def log(text):
+        print(text, flush=True)
+        report("running", text)
     try:
         if args.cmd == "status":
             print(json.dumps(u.status(), indent=2))
@@ -427,15 +468,22 @@ def main(argv=None):
             print("ok: version %s, settings schema %d" % (info["version"], info["schema"]))
         elif args.cmd == "apply":
             u.apply(args.bundle, args.sha256, args.allow_unsigned, args.force)
-        elif args.cmd == "usb":
-            bundles = u.usb_bundles()
-            if not bundles:
-                raise UpdateError("no update bundle found in /media/pvj/*/pvj-update/")
-            print("using %s" % bundles[0])
-            u.apply(bundles[0])
+        elif args.cmd in ("usb", "inbox"):
+            report("running", "looking for an update")
+            bundles = u.usb_bundles() if args.cmd == "usb" else u.inbox_bundles()
+            try:
+                if not bundles:
+                    raise UpdateError("no update bundle found" + (" in pvj-update/ on a USB drive" if args.cmd == "usb" else " (upload one first)"))
+                log("using %s" % os.path.basename(bundles[0]))
+                version = u.apply(bundles[0], log=log)
+                report("done", "updated to %s" % version, version)
+            finally:
+                if args.cmd == "inbox":
+                    u.clear_inbox()
         elif args.cmd == "rollback":
             u.rollback()
     except UpdateError as e:
         print("pvj-update: %s" % e, file=sys.stderr)
+        report("failed", str(e))
         return 1
     return 0
