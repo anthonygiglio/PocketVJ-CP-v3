@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (autostart for installations)
+
+Done: from the manual deep dive (the old Autostart tab had a slideshow, USB and random order). Autostart now has a slideshow (seconds a picture), a pad, "play the USB stick" (also each time a drive with clips is plugged in, checked every 2 s; a drive already there at start is not played twice, a drive without clips is ignored), and shuffle for every clip, the slideshow and USB. Settings saved before these keys existed keep working with defaults (no schema change). Tests on a fake clock and fake drives, a browser step. Independent review: no high findings; fixed: the drive that is plugged in is the one that plays (it used the /media/usb link, which can point elsewhere), a stick mounted during boot is no longer missed, switching back to USB mode no longer interrupts a show, a drive that comes and goes within 10 s (bad contact) does not restart playback, a pad must exist and have a clip, and the Media screen says when plugging a stick in will start it. Not run on the Pi yet with a real stick swap.
+
 ## 2026-09-30 (prepare your clips)
 
 Done: a "Prepare your clips" section in docs/MANUAL.md from the manual deep dive and this project's own measurements (what was measured on the Pi 4, what was not: 1080p 50/60 fps, HEVC, 4K, Pi 5 and Pi 3), a HandBrake recipe, naming for Quick play, sync advice and power; Troubleshooting now covers https-first browsers and stutters. Media > Info adds plain-word advice per board (`probe.advice`): only warnings that were measured or plainly beyond the board, and "not tested" where it was not.
