@@ -915,6 +915,7 @@
       (info.usb || []).map(function (drive) {
         return h('div', { class: 'card usb-drive', 'data-drive': drive.drive },
           h('div', { class: 'k', text: 'USB drive: ' + drive.drive + ' (read only, plays straight from the drive)' }),
+          info.autostart_usb ? h('div', { class: 'k', text: 'Autostart is set to play USB sticks: plugging one in starts it, even during a show.' }) : null,
           h('div', { class: 'list' }, drive.files.length ? drive.files.map(function (f) {
             return h('div', { class: 'item' },
               h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) })),
