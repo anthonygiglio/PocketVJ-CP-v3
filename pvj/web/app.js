@@ -427,19 +427,30 @@
       return card;
     }
     var full = can('full'), d = null, canvas = null, drag = null, lastSend = 0, waiting = null;
+    // Answers can arrive out of order (the first state read can land after a change already drawn): each request is
+    // numbered, and an answer older than one already drawn is not drawn.
+    var asked = 0, shown = 0;
+    function mapApi(method, body) {
+      var n = ++asked;
+      return api(method, '/api/mapper', body).then(function (r) {
+        r.stale = n < shown;
+        if (r.ok && !r.stale) shown = n;
+        return r;
+      });
+    }
     function selected() { return d && d.surfaces.filter(function (s) { return s.id === d.edit.selected; })[0]; }
     function send(b) {
-      return api('POST', '/api/mapper', b).then(function (r) {
+      return mapApi('POST', b).then(function (r) {
         if (!document.getElementById('mapcard')) return r;
         if (!r.ok) { say(r.data.error || 'Could not change the mapping', true); if (d) draw(d); return r; }
-        say(''); draw(r.data); return r;
+        say(''); if (!r.stale) draw(r.data); return r;
       });
     }
     function watch() {       // the show picture is built in the background: follow it until it is on
       clearTimeout(waiting);
       if (!d || d.status.state !== 'building') return;
       waiting = setTimeout(function () {
-        api('GET', '/api/mapper').then(function (r) { if (r.ok && document.getElementById('mapcard')) draw(r.data); });
+        mapApi('GET').then(function (r) { if (r.ok && !r.stale && document.getElementById('mapcard')) draw(r.data); });
       }, 1200);
     }
     function geometry() {
@@ -514,7 +525,7 @@
       queued = null;
       if (!q) { inflight = false; return; }
       inflight = true;
-      api('POST', '/api/mapper', q.b).then(function (r) {
+      mapApi('POST', q.b).then(function (r) {
         if (queued) return sendQueued();      // a newer position arrived meanwhile: send that, show its answer
         inflight = false;
         after(r, q.final);
@@ -522,8 +533,8 @@
     }
     function after(r, final) {
       if (!document.getElementById('mapcard')) return;
-      if (!r.ok) { say(r.data.error || 'Could not move that corner', true); api('GET', '/api/mapper').then(function (x) { if (x.ok) draw(x.data); }); }
-      else if (final) { say(''); draw(r.data); }
+      if (!r.ok) { say(r.data.error || 'Could not move that corner', true); mapApi('GET').then(function (x) { if (x.ok && !x.stale) draw(x.data); }); }
+      else if (final && !r.stale) { say(''); draw(r.data); }
     }
     function draw(data) {
       d = data;
@@ -632,8 +643,8 @@
       requestAnimationFrame(paint);
       watch();
     }
-    api('GET', '/api/mapper').then(function (r) {
-      if (!document.getElementById('mapcard')) return;
+    mapApi('GET').then(function (r) {
+      if (!document.getElementById('mapcard') || r.stale) return;
       if (r.ok) draw(r.data); else { body.textContent = ''; body.appendChild(h('div', { class: 'k', text: r.data.error || 'Not available' })); }
     });
     return card;
@@ -1517,7 +1528,7 @@
           h('img', { class: 'qr', alt: 'QR code for the ' + roleName(c.role).toLowerCase() + ' code', src: '/api/qr.svg?for=' + c.role + '&t=' + Date.now() }),
           h('button', { class: 'btn small', text: 'Cancel', onclick: function () { act('POST', '/api/access/cancel', { code: c.code }, drawLive); } })));
       });
-      live.appendChild(h('div', { class: 'row' },
+      live.appendChild(h('div', { class: 'row wrap' },
         h('button', { class: 'btn small', id: 'newguest', text: 'New guest code', onclick: function () { act('POST', '/api/access/code', { role: 'view', minutes: 60 }, drawLive); } }),
         h('button', { class: 'btn small', id: 'newpresenter', text: 'New presenter code', onclick: function () { act('POST', '/api/access/code', { role: 'live', minutes: 60 }, drawLive); } }),
         h('button', { class: 'btn small', id: 'printsheet', text: 'Print access sheet', onclick: function () { printSheet(d); } })));
