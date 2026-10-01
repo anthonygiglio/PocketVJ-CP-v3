@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (live Pi updated, small fixes)
+
+Done:
+- Current master (aef29ab) installed on the test Pi 4 with the full offline installer by an agent; all four services active, unit files and code identical to master, player without the old 8-bit flag, settings schema 11, modules as before. Old test files cleaned out of the Pi's /tmp.
+- Stopping (including the test pattern's off) now resets the player's loop settings, so an idle player no longer reports the last clip's looping; the agent saw `loop_file: "inf"` on the idle box.
+
 ## 2026-09-30 (panel screenshots refreshed)
 
 Done:
