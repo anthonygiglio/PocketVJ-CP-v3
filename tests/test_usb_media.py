@@ -142,3 +142,64 @@ class UsbMediaTest(ServerBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsbImportTest(ServerBase):
+    """Copy a clip from a USB drive into the media folder (the old "Loading from USB to internal")."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile as _t
+        self.usb = _t.mkdtemp()
+        os.makedirs(os.path.join(self.usb, "SHOW"))
+        self.data = os.urandom(3 * 1024 * 1024 + 17)
+        with open(os.path.join(self.usb, "SHOW", "film.mp4"), "wb") as f:
+            f.write(self.data)
+        self.api.usb_root = self.usb
+        self.full = self.call("POST", "/api/pair", {"pin": self.pin, "name": "t"})[1]["token"]
+
+    def wait(self):
+        import time as _time
+        end = _time.monotonic() + 20
+        while _time.monotonic() < end:
+            st = self.call("GET", "/api/media/import", token=self.full)[1]
+            if not st.get("active"):
+                return st
+            _time.sleep(0.05)
+        self.fail("the copy did not finish")
+
+    def test_copy_then_refuse_a_second_copy_unless_replacing(self):
+        st, body, _ = self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=self.full)
+        self.assertEqual(st, 200, body)
+        done = self.wait()
+        self.assertEqual(done["result"], {"name": "film.mp4", "size": len(self.data)})
+        with open(os.path.join(self.media, "film.mp4"), "rb") as f:
+            self.assertEqual(f.read(), self.data)
+        self.assertFalse([n for n in os.listdir(self.media) if n.startswith(".upload-")])      # no temporary file left
+        self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=self.full)
+        self.assertIn("already exists", self.wait()["error"])
+        self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4", "replace": True}, token=self.full)
+        self.assertIn("result", self.wait())
+
+    def test_bad_references_and_roles(self):
+        for ref in ("../SHOW/film.mp4", "SHOW/../film.mp4", "SHOW", "SHOW/missing.mp4", "SHOW/notes.txt", 5):
+            self.assertIn(self.call("POST", "/api/media/import", {"usb": ref}, token=self.full)[0], (400, 404), ref)
+        live = self.call("POST", "/api/devices/invite", {"name": "p", "role": "live"}, token=self.full)[1]["token"]
+        self.assertEqual(self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=live)[0], 403)
+
+    def test_cancel(self):
+        import threading
+        gate = threading.Event()
+        real = self.api.upload
+
+        def slow_upload(name, length, read, replace=False, check=None):
+            def slow_read(n):
+                gate.wait(5)
+                return read(min(n, 4096))
+            return real(name, length, slow_read, replace=replace, check=check)
+        self.api.upload = slow_upload
+        self.call("POST", "/api/media/import", {"usb": "SHOW/film.mp4"}, token=self.full)
+        self.call("POST", "/api/media/import/cancel", {}, token=self.full)
+        gate.set()
+        self.assertIn("cancelled", self.wait()["error"])
+        self.assertFalse(os.path.exists(os.path.join(self.media, "film.mp4")))

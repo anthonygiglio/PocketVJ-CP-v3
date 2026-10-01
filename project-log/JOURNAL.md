@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (copy from USB)
+
+Done: from the manual deep dive (the old "Loading from USB to internal"): Media > USB drive > **Copy to the box** copies a clip into the media folder in the background (`POST /api/media/import`, progress at `GET /api/media/import`, `.../cancel`), through the same code as an upload, so the same checks apply (name, free space, size limit, a hidden temporary file, no overwrite unless asked, one at a time with uploads). Tests with a fake drive, including cancel and bad references. Not run on the Pi with the real stick yet.
+
 ## 2026-09-30 (multi-box sync and video wall)
 
 Done:
