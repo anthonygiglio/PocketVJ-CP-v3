@@ -6,7 +6,9 @@ Runs when the web service starts, and again whenever the player (mpv) has been r
 crash at a gig recovers on its own. It never plays again just because playback stopped: if the
 player process is still the one we saw, a Stop from the panel stays a stop.
 
-Modes: `off` (default), `file` (one clip), `all` (loop every clip in the media folder) and `preset`
+Modes: `off` (default), `file` (one clip), `all` (every clip in the media folder, in order or shuffled),
+`slideshow` (the pictures, a set time each), `pad` (what a pad plays), `usb` (the clips at the top of a USB drive,
+and again whenever a drive with clips is plugged in: a venue technician swaps the stick and it plays) and `preset`
 (a legacy start script name such as startlessonce05). It plays through the same Api calls as the panel.
 """
 
@@ -18,7 +20,7 @@ from . import presets
 from .api import ApiError, MEDIA_EXTENSIONS, valid_name
 from .player import PlayerError
 
-MODES = ("off", "file", "all", "preset")
+MODES = ("off", "file", "all", "slideshow", "pad", "usb", "preset")
 AUDIO_CHECK_EVERY = 5      # ticks (2 s each): the sound output is re-checked about every 10 seconds
 MAX_DELAY = 120
 
@@ -28,14 +30,14 @@ class AutostartError(Exception):
 
 
 def default_autostart():
-    return {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0}
+    return {"mode": "off", "file": "", "preset": "", "loop": True, "delay": 0, "shuffle": False, "seconds": 10, "pad": [0, 0]}
 
 
 def validate(body, current=None):
     """The new autostart settings from untrusted input."""
     if not isinstance(body, dict):
         raise AutostartError("autostart must be an object")
-    new = dict(current or default_autostart())
+    new = dict(default_autostart(), **(current or {}))      # settings saved before a key existed get its default
     mode = body.get("mode", new["mode"])
     if mode not in MODES:
         raise AutostartError("mode must be one of %s" % ", ".join(MODES))
@@ -59,6 +61,20 @@ def validate(body, current=None):
         if not isinstance(body["loop"], bool):
             raise AutostartError("loop must be true or false")
         new["loop"] = body["loop"]
+    if "shuffle" in body:
+        if not isinstance(body["shuffle"], bool):
+            raise AutostartError("shuffle must be true or false")
+        new["shuffle"] = body["shuffle"]
+    if "seconds" in body:
+        v = body["seconds"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not 1 <= v <= 3600:
+            raise AutostartError("a slide shows for 1 to 3600 seconds")
+        new["seconds"] = v
+    if "pad" in body:
+        pad = body["pad"]
+        if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x < 64 for x in pad)):
+            raise AutostartError("pad must be [bank, pad]")
+        new["pad"] = pad
     if "delay" in body:
         d = body["delay"]
         if isinstance(d, bool) or not isinstance(d, (int, float)) or d != d or not 0 <= d <= MAX_DELAY:
@@ -78,6 +94,7 @@ class Autostart:
         self.interval = interval
         self.seen_pid = None
         self._ticks = 0
+        self._usb_seen = None       # USB drives with clips at the last look (mode usb)
         self.last = None            # {"at": ..., "ok": bool, "message": str}
         self._stop = threading.Event()
         self._thread = None
@@ -96,11 +113,28 @@ class Autostart:
         cfg = self.settings.data["autostart"]
         if cfg["mode"] == "off":
             return "off"
+        cfg = dict(default_autostart(), **cfg)
         try:
             if cfg["mode"] == "file":
                 self.api.play({"file": cfg["file"], "loop": cfg["loop"]}, None, "autostart")
             elif cfg["mode"] == "all":
-                self.api.play({"preset": "startless" if cfg["loop"] else "startlessonce"}, None, "autostart")
+                body = {"preset": "startless" if cfg["loop"] else "startlessonce"}
+                if cfg["shuffle"]:
+                    body["shuffle"] = True
+                self.api.play(body, None, "autostart")
+            elif cfg["mode"] == "slideshow":
+                self.api.play({"slideshow": {"source": "media", "seconds": cfg["seconds"], "shuffle": cfg["shuffle"],
+                                             "ending": "loop" if cfg["loop"] else "stop"}}, None, "autostart")
+            elif cfg["mode"] == "pad":
+                self.api.play({"pad": list(cfg["pad"])}, None, "autostart")
+            elif cfg["mode"] == "usb":
+                drive = self._usb_with_clips()
+                if drive is None:
+                    raise ApiError(404, "no USB drive with clips yet; it plays when one is plugged in")
+                body = {"preset": "startmasterusb"}                # it loops
+                if cfg["shuffle"]:
+                    body["shuffle"] = True
+                self.api.play(body, None, "autostart")
             else:
                 self.api.play({"preset": cfg["preset"]}, None, "autostart")
             result = {"ok": True, "message": "started"}
@@ -113,6 +147,27 @@ class Autostart:
         self.log("pvj-web: autostart %s: %s" % (cfg["mode"], result["message"]))
         return result["message"]
 
+    def _usb_with_clips(self):
+        """The label of the newest USB drive that has clips at its top level, or None."""
+        try:
+            drives = [d for d in self.api.usb_drives() if d.get("files")]
+        except Exception:
+            return None
+        return drives[-1]["drive"] if drives else None
+
+    def _watch_usb(self):
+        """Mode usb: a drive with clips that was not there before is played (the stick was swapped)."""
+        try:
+            now = {d["drive"] for d in self.api.usb_drives() if d.get("files")}
+        except Exception:
+            return False
+        before, self._usb_seen = self._usb_seen, now
+        if before is None or not (now - before):
+            return False
+        self.log("pvj-web: autostart: USB drive %s plugged in" % ", ".join(sorted(now - before)))
+        self.run_now()
+        return True
+
     def tick(self):
         """Call regularly. Starts playback the first time it sees a player and after each player restart.
         Returns True if it ran."""
@@ -122,6 +177,8 @@ class Autostart:
             ensure = getattr(self.api, "ensure_audio", None)
             if ensure:
                 ensure()        # a screen switched on late, or a sound device plugged in later
+        if pid is not None and pid == self.seen_pid and self.settings.data["autostart"].get("mode") == "usb":
+            return self._watch_usb()
         if pid is None or pid == self.seen_pid:
             return False
         first_sight = self.seen_pid is None

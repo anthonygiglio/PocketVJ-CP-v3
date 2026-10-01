@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (autostart for installations)
+
+Done: from the manual deep dive (the old Autostart tab had a slideshow, USB and random order). Autostart now has a slideshow (seconds a picture), a pad, "play the USB stick" (also each time a drive with clips is plugged in, checked every 2 s; a drive already there at start is not played twice, a drive without clips is ignored), and shuffle for every clip, the slideshow and USB. Settings saved before these keys existed keep working with defaults (no schema change). Tests on a fake clock and fake drives, a browser step. Not run on the Pi yet with a real stick swap.
+
 ## 2026-09-30 (remote support)
 
 Done:

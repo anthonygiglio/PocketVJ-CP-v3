@@ -208,6 +208,15 @@ function startServer() {
     await page.selectOption('#automode', 'all');
     await page.click('#autosave');
     await page.waitForFunction(() => /Play every clip.*after 3 s/.test(document.getElementById('autoline').textContent));
+    await page.selectOption('#automode', 'slideshow');
+    assert(await page.isVisible('#autoseconds') && await page.isVisible('#autoshuffle') && !(await page.isVisible('#autofile')), 'slideshow fields');
+    await page.fill('#autoseconds', '8');
+    await page.selectOption('#autoshuffle', 'true');
+    await page.click('#autosave');
+    await page.waitForFunction(() => /Slideshow.*8 s a picture.*shuffled/.test(document.getElementById('autoline').textContent));
+    await page.selectOption('#automode', 'usb');
+    await page.click('#autosave');
+    await page.waitForFunction(() => /USB stick/.test(document.getElementById('autoline').textContent));
     await page.selectOption('#automode', 'off');
     await page.click('#autosave');
     await page.waitForFunction(() => /^Off/.test(document.getElementById('autoline').textContent));

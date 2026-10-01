@@ -1175,37 +1175,71 @@
   function autostartCard(full) {
     var body = h('div', { class: 'list', id: 'autobody' });
     var card = h('div', { class: 'card', id: 'autocard' }, h('h2', { text: 'Autostart' }), body);
-    var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['preset', 'Legacy start script']];
+    var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['slideshow', 'Slideshow of the pictures'],
+      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script']];
+    function padName(p) {
+      var b = (S.banks || [])[p[0]], pad = b && b.pads && b.pads[p[1]];
+      return 'Bank ' + (p[0] + 1) + ', pad ' + (p[1] + 1) + (pad && (pad.label || pad.file) ? ': ' + (pad.label || pad.file) : '');
+    }
     function draw(d) {
       body.textContent = '';
-      var c = autoForm || { mode: d.config.mode, file: d.config.file, preset: d.config.preset, loop: d.config.loop, delay: d.config.delay };
-      var line = d.config.mode === 'off' ? 'Off: the box waits for you at power-up.' :
-        'On: ' + MODES.filter(function (m) { return m[0] === d.config.mode; })[0][1] + (d.config.mode === 'file' ? ' (' + d.config.file + ')' : d.config.mode === 'preset' ? ' (' + d.config.preset + ')' : '') + ', after ' + d.config.delay + ' s.';
+      var cfg = d.config;
+      var c = autoForm || { mode: cfg.mode, file: cfg.file, preset: cfg.preset, loop: cfg.loop, delay: cfg.delay,
+        shuffle: !!cfg.shuffle, seconds: cfg.seconds || 10, pad: cfg.pad || [0, 0] };
+      var detail = cfg.mode === 'file' ? ' (' + cfg.file + ')' : cfg.mode === 'preset' ? ' (' + cfg.preset + ')' :
+        cfg.mode === 'pad' ? ' (' + padName(cfg.pad || [0, 0]) + ')' : cfg.mode === 'slideshow' ? ' (' + (cfg.seconds || 10) + ' s a picture)' : '';
+      var line = cfg.mode === 'off' ? 'Off: the box waits for you at power-up.' :
+        'On: ' + MODES.filter(function (m) { return m[0] === cfg.mode; })[0][1] + detail + (cfg.shuffle ? ', shuffled' : '') + ', after ' + cfg.delay + ' s.';
       body.appendChild(h('div', { class: 'k', id: 'autoline', text: line }));
       if (d.last) body.appendChild(h('div', { class: 'k', id: 'autolast', text: 'Last run ' + d.last.at + ': ' + (d.last.ok ? 'started' : 'failed, ' + d.last.message) }));
       if (!full) return;
       var mode = h('select', { class: 'text-input', id: 'automode', 'aria-label': 'What to play at power-up' },
         MODES.map(function (m) { return h('option', { value: m[0], text: m[1], selected: m[0] === c.mode }); }));
-      var file = h('select', { class: 'text-input', id: 'autofile', 'aria-label': 'Clip', hidden: c.mode !== 'file' },
+      var file = h('select', { class: 'text-input', id: 'autofile', 'aria-label': 'Clip' },
         S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === (c.file || S.media[0]) }); }));
-      var preset = h('input', { class: 'text-input mono', id: 'autopreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: c.preset, hidden: c.mode !== 'preset', autocomplete: 'off' });
-      var loop = h('select', { class: 'text-input', id: 'autoloop', 'aria-label': 'Loop', hidden: c.mode === 'off' || c.mode === 'preset' },
+      var preset = h('input', { class: 'text-input mono', id: 'autopreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: c.preset, autocomplete: 'off' });
+      var pads = [];
+      (S.banks || []).forEach(function (bk, bi) { (bk.pads || []).forEach(function (pd, pi) { if (pd.file) pads.push([bi, pi]); }); });
+      var pad = h('select', { class: 'text-input', id: 'autopad', 'aria-label': 'Pad' }, pads.length ? pads.map(function (p) {
+        return h('option', { value: p.join(','), text: padName(p), selected: p[0] === c.pad[0] && p[1] === c.pad[1] });
+      }) : [h('option', { value: '', text: 'No pad has a clip yet' })]);
+      var seconds = h('input', { class: 'text-input mono', id: 'autoseconds', type: 'number', min: 1, max: 3600, 'aria-label': 'Seconds a picture', value: c.seconds });
+      var shuffle = h('select', { class: 'text-input', id: 'autoshuffle', 'aria-label': 'Order' },
+        [[false, 'In name order'], [true, 'Shuffled']].map(function (o) { return h('option', { value: String(o[0]), text: o[1], selected: o[0] === c.shuffle }); }));
+      var loop = h('select', { class: 'text-input', id: 'autoloop', 'aria-label': 'Loop' },
         [[true, 'Loop'], [false, 'Play once']].map(function (o) { return h('option', { value: String(o[0]), text: o[1], selected: o[0] === c.loop }); }));
-      var delay = h('input', { class: 'text-input mono', id: 'autodelay', type: 'number', min: 0, max: 120, 'aria-label': 'Wait after power-up, seconds', value: c.delay, hidden: c.mode === 'off' });
-      function remember() { autoForm = { mode: mode.value, file: file.value, preset: preset.value, loop: loop.value === 'true', delay: parseFloat(delay.value || '0') }; }
-      function show() { file.hidden = mode.value !== 'file'; preset.hidden = mode.value !== 'preset'; loop.hidden = mode.value === 'off' || mode.value === 'preset'; delay.hidden = mode.value === 'off'; }
-      [mode, file, preset, loop, delay].forEach(function (el) { el.addEventListener('input', remember); el.addEventListener('change', function () { remember(); show(); }); });
-      body.appendChild(mode); body.appendChild(file); body.appendChild(preset); body.appendChild(loop);
-      body.appendChild(h('label', { class: 'k', for: 'autodelay', text: 'Wait after power-up (seconds)', hidden: false })); body.appendChild(delay);
+      var delay = h('input', { class: 'text-input mono', id: 'autodelay', type: 'number', min: 0, max: 120, 'aria-label': 'Wait after power-up, seconds', value: c.delay });
+      var secondsLabel = h('label', { class: 'k', for: 'autoseconds', text: 'Seconds a picture' });
+      var delayLabel = h('label', { class: 'k', for: 'autodelay', text: 'Wait after power-up (seconds)' });
+      function remember() {
+        autoForm = { mode: mode.value, file: file.value, preset: preset.value, loop: loop.value === 'true', delay: parseFloat(delay.value || '0'),
+          shuffle: shuffle.value === 'true', seconds: parseFloat(seconds.value || '10'), pad: pad.value ? pad.value.split(',').map(Number) : [0, 0] };
+      }
+      function show() {
+        var m = mode.value;
+        file.hidden = m !== 'file'; preset.hidden = m !== 'preset'; pad.hidden = m !== 'pad';
+        seconds.hidden = secondsLabel.hidden = m !== 'slideshow';
+        shuffle.hidden = ['all', 'slideshow', 'usb'].indexOf(m) < 0;
+        loop.hidden = ['file', 'all', 'slideshow'].indexOf(m) < 0;
+        delay.hidden = delayLabel.hidden = m === 'off';
+      }
+      [mode, file, preset, pad, seconds, shuffle, loop, delay].forEach(function (el) { el.addEventListener('input', remember); el.addEventListener('change', function () { remember(); show(); }); });
+      [mode, file, preset, pad, secondsLabel, seconds, shuffle, loop, delayLabel, delay].forEach(function (el) { body.appendChild(el); });
+      show();
       body.appendChild(h('div', { class: 'row' },
         h('button', { class: 'btn on small', id: 'autosave', text: 'Save', onclick: function () {
           remember();
-          act('POST', '/api/autostart', autoForm, function (data) { autoForm = null; say(''); draw(data); });
+          var b = { mode: autoForm.mode, loop: autoForm.loop, delay: autoForm.delay, shuffle: autoForm.shuffle };
+          if (autoForm.mode === 'file') b.file = autoForm.file;
+          if (autoForm.mode === 'preset') b.preset = autoForm.preset;
+          if (autoForm.mode === 'pad') b.pad = autoForm.pad;
+          if (autoForm.mode === 'slideshow') b.seconds = autoForm.seconds;
+          act('POST', '/api/autostart', b, function (data) { autoForm = null; say(''); draw(data); });
         } }),
         h('button', { class: 'btn small', id: 'autotest', text: 'Run it now', disabled: !can('live'), onclick: function () {
           act('POST', '/api/autostart/test', {}, function (data) { draw(data); });
         } })));
-      body.appendChild(h('div', { class: 'k', text: 'Runs when the box starts, and again if the player is restarted after a crash. A Stop from the panel is not undone.' }));
+      body.appendChild(h('div', { class: 'k', text: 'Runs when the box starts, and again if the player is restarted after a crash. A Stop from the panel is not undone. "Play the USB stick" also plays each new stick the moment it is plugged in.' }));
     }
     api('GET', '/api/autostart').then(function (r) {
       if (!document.getElementById('autocard')) return;
