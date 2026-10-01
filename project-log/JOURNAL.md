@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (health card and the box's address)
+
+Done: System > Health (`pvj/health.py`, `GET /api/health`, any paired device): power (the Pi's `rpi_volt` undervoltage alarm, readable without root, checked every 5 s and remembered in /run until a reboot, since a short drop is easy to miss), temperature with the Pi's slow-down points, the player (hardware or software decode, dropped frames a second), load and memory, whether the helpers answer, and the box's addresses; a full-access device can put the address alone on the display (a new "address" item for the access screen, with no code on it). From the manual deep dive (the old Powersupply, Check Services and GPU Usage buttons). Corrected NETWORK.md: `.local` already works.
+
+Checked on the Pi: the alarm file exists (`/sys/class/hwmon/hwmon1`, `in0_lcrit_alarm` 0) and `vcgencmd get_throttled` agrees (0x0); `/dev/vcio` is root-only, so vcgencmd is not used. The card itself goes on the box after the sync branch merges (the box's settings are already at schema 13).
+
 ## 2026-09-30 (old OSC names)
 
 Done: from the manual deep dive (three agents read the old manual against the build; their combined list is the order of the next work). `/startmasteronce01` to `99` failed silently (they were passed as a preset name the parser does not know; the old receiver ran startmasteroneNN): fixed. Old names for features that exist now are mapped (test screen, test tones, overlay, slideshow, flip as a toggle); old names that need full access or are not built are refused explicitly and listed in pvj/OSC.md.
