@@ -151,6 +151,8 @@ class Api:
         self.capture = None       # Capture or None (live input from a USB capture device)
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
+        from . import sync as sync_mod
+        self.sync = sync_mod.SyncManager(self, settings)            # started by server.build
         from . import support as support_mod
         self.support = support_mod.SupportManager(settings, auth, None,      # the helper client is set by server.build
                                                   networks_in_use=self._support_clash_networks)
@@ -955,6 +957,8 @@ class Api:
             raise ApiError(409, str(e))
         if module_id == "mapper":          # switching it off takes the mapping off the screen
             self.mapper.apply()
+        if module_id == "wall":            # starts or stops following or leading, and the wall crop
+            self.sync.apply()
         for mid, manager in (("control-dmx", self.dmx), ("control-midi", self.midi)):
             if module_id == mid and manager is not None:   # switching the module off stops the receiver
                 try:
@@ -1157,6 +1161,24 @@ class Api:
 
     def support_login(self, body, device, client):
         return self._support(lambda b, d, c: self.support.login(b, c), body, device, client)
+
+    # --- multi-box sync and the video wall (see sync.py) ------------------------------------
+    def get_sync(self, body, device, client):
+        return self.sync.status()
+
+    def set_sync(self, body, device, client):
+        from . import sync as sync_mod
+        if not self.registry.enabled("wall"):
+            raise ApiError(409, "turn on the Video wall and sync module in System first")
+        with self.settings.lock:
+            try:
+                cfg = sync_mod.validate(body, self.settings.data["sync"])
+            except sync_mod.SyncError as e:
+                raise bad(str(e))
+            self.settings.data["sync"] = cfg
+            self.settings.save()
+        self.sync.apply()
+        return self.sync.status()
 
     # --- projection mapping ------------------------------------------------------------
     def get_mapper(self, body, device, client):
@@ -1692,6 +1714,8 @@ class Api:
             ("POST", "/api/support/extend"): ("full", self.extend_support),
             ("POST", "/api/support/stop"): ("live", self.stop_support),
             ("POST", "/api/support/login"): (None, self.support_login),
+            ("GET", "/api/sync"): ("view", self.get_sync),
+            ("POST", "/api/sync"): ("full", self.set_sync),
             ("GET", "/api/mapper"): ("view", self.get_mapper),
             ("POST", "/api/mapper"): ("full", self.set_mapper),
             ("GET", "/api/projectors"): ("view", self.get_projectors),

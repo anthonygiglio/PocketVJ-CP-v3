@@ -350,7 +350,13 @@ class SyncManager:
 
         class P:
             def load(self, path, loop):
-                api.player.play([path], loop=loop, spawn=getattr(api, "spawn", True))
+                # the panel's own way to start a clip: fades cancelled, opacity kept, the PIN screen and a live
+                # input put away
+                start = getattr(api, "_start_list", None)
+                if start is not None:
+                    start([path], "loop" if loop else "stop", False)
+                else:
+                    api.player.play([path], loop=loop, spawn=getattr(api, "spawn", True))
                 mgr.crop_for = None
 
             def position(self):
