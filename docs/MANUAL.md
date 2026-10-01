@@ -152,4 +152,6 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 
 ## 8. Not built yet
 
-Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, ST 2110, the presenter, the video wall, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, the presenter, the video wall, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+
+**SMPTE ST 2110** is not supported directly and not planned: use a converter from 2110 to HDMI into the live input (USB capture), or from 2110 to NDI once NDI is built.

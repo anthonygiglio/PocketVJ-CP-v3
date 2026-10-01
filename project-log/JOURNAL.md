@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (ST 2110 removed)
+
+Done: removed the planned ST 2110 module and reworded README, ROADMAP, HANDOFF, the manual, pvj/README and pvj/STREAMS to "through a gateway" (D30), after a research report and the owner's go-ahead. Also corrected pvj/README, which still listed the mapper as not built. Nothing of ST 2110 was ever built or tested.
+
 ## 2026-09-30 (live Pi updated, small fixes)
 
 Done:
