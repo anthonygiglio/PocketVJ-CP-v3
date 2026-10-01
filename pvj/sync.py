@@ -5,15 +5,15 @@
 The old PocketVJ had a "master" box broadcasting its position over UDP and "slaves" that jumped when they drifted
 more than 50 ms (omxplayer-sync). Here, in the owner's words, a **server** box leads and **client** boxes follow:
 
-* The server sends, about ten times a second and at once when something changes, a small message to every local
+* The server sends, about ten times a second, a small message to every local
   network it is on (UDP broadcast, port 5577 unless changed): the clip's file name, the position, whether it is
   paused, the speed, whether it loops, and whether the screen is blacked out.
 * A client plays the clip with the same file name from its own media folder (or the top of a USB drive) and keeps
   in step: a small difference is corrected by playing up to 4 percent faster or slower for a moment (not visible,
   and the sound keeps its pitch); only a large one (over half a second: a clip change, a seek, a late start) makes it
   jump, aimed a little ahead to allow for the time a jump takes, and that allowance is learned from each jump.
-* Messages are only accepted from private network addresses and with the same group name, are small, rate limited
-  and strictly checked; a client follows one server at a time (the first it hears; another after 3 s of silence).
+* Messages are only accepted from private network addresses and with the same group name, are small and strictly
+  checked, and more than 40 a second are ignored; a client follows one server at a time (the first it hears; another after 3 s of silence).
   UDP senders can be forged on the same network, so keep the show network private (as for OSC and DMX).
 
 Video wall: any box (server or client) can show one tile of the picture: columns and rows of the wall, which tile
@@ -24,6 +24,7 @@ done by the player cropping the picture (mpv's video-crop), so all boxes play th
 import ipaddress
 import json
 import re
+import secrets
 import socket
 import statistics
 import threading
@@ -38,6 +39,7 @@ SEEK_AT = 0.5                    # seconds of difference that make a client jump
 TOLERANCE = 0.015                # within this, play at the server's speed
 GAIN = 0.5                       # speed change per second of difference (0.04 s off: 2 percent slower or faster)
 MAX_NUDGE = 0.04
+MAX_PER_SECOND = 40             # a server sends ten a second; more from the network is ignored
 FOLLOW_TIMEOUT = 3.0             # seconds of silence before another server may be followed
 SETTLE = 1.5                     # seconds after a jump before the difference counts again
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8")]
@@ -133,7 +135,10 @@ def decode(data, group):
     state = m.get("st")
     if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0 or state not in ("play", "stop"):
         return None
-    out = {"seq": seq, "state": state, "black": m.get("bk") is True}
+    run = m.get("r", "")
+    if not isinstance(run, str) or not re.fullmatch(r"[0-9a-f]{0,16}", run):
+        return None
+    out = {"seq": seq, "run": run, "state": state, "black": m.get("bk") is True}
     if state == "play":
         f, pos, speed = m.get("f"), m.get("p"), m.get("sp", 1.0)
         if not isinstance(f, str) or not NAME.fullmatch(f) or f in (".", ".."):
@@ -161,17 +166,20 @@ def private(addr):
 
 # ---- the client's control --------------------------------------------------------------------------------------
 class Follower:
-    """Keeps a player in step with server messages. `player` has: load(path, loop), position(), set_speed(x),
-    seek(seconds), pause(on), stop(), blackout(on). `find(name)` returns a local path or None. All time from `clock`."""
+    """Keeps a player in step with server messages. `player` has: load(path, loop), playing() (the file name it is
+    playing, or None), position(), set_speed(x), seek(seconds), pause(on), stop(), blackout(on). `find(name)` returns
+    a local path or None. All time from `clock`."""
 
     def __init__(self, player, find, clock=time.monotonic, log=print):
         self.player, self.find, self._clock, self.log = player, find, clock, log
         self.file = None             # the server's file name we are playing
-        self.lead = 0.25             # learned: how far ahead to aim a jump
+        self.local = None            # its file name here (the same name, maybe on a USB drive)
+        self.lead = 0.25             # learned: how far ahead (seconds of clip at speed 1) to aim a jump
         self.errors = []
         self.settle_until = 0.0
-        self.last_jump = None        # (time, aimed position) to learn the lead
-        self.speed = 1.0
+        self.last_jump = None        # the speed at the last jump, to learn the lead after it
+        self.speed = None            # the speed we last set
+        self.server_speed = None     # the server's speed in the last message
         self.paused = None
         self.black = None
         self.status = {"state": "waiting for a server"}
@@ -181,6 +189,21 @@ class Follower:
         if duration and abs(err) > duration / 2:          # one side looped already
             err -= duration if err > 0 else -duration
         return err
+
+    def _speed(self, x):
+        if self.speed is None or abs(x - self.speed) > 0.0005:
+            self.player.set_speed(x)
+            self.speed = x
+
+    def _jump(self, msg, now, aim_ahead=True):
+        target = msg["pos"] + (self.lead * msg["speed"] if aim_ahead else 0.0)
+        if msg["duration"]:
+            target %= msg["duration"]
+        self._speed(msg["speed"])                        # never settle at a nudged or old speed
+        self.player.seek(target)
+        self.last_jump = msg["speed"] if aim_ahead else None
+        self.settle_until = now + SETTLE
+        self.errors = []
 
     def apply(self, msg):
         now = self._clock()
@@ -193,61 +216,65 @@ class Follower:
                 self.file = None
             self.status = {"state": "server stopped"}
             return
-        if msg["file"] != self.file:
+        # The server's clip, and really playing here: a clip started on this box's own panel, or a player that
+        # restarted, is put right by the next message.
+        if msg["file"] != self.file or self.player.playing() != self.local:
             path = self.find(msg["file"])
             if path is None:
                 self.status = {"state": "missing file", "file": msg["file"]}
+                self.file = None
                 return
             self.player.load(path, msg["loop"])
-            self.file, self.errors, self.paused = msg["file"], [], None
+            self.file, self.local = msg["file"], path.replace("\\", "/").rsplit("/", 1)[-1]
+            self.errors, self.paused, self.speed = [], None, None
+            self.server_speed = msg["speed"]
+            self._speed(msg["speed"])
             self.settle_until = now + SETTLE
-            self.speed = None
             self.status = {"state": "starting", "file": msg["file"]}
             return
+        if msg["speed"] != self.server_speed:            # the server changed speed: follow at once
+            self.server_speed = msg["speed"]
+            self._speed(msg["speed"])
+            self.errors = []
         if msg["paused"] != self.paused:
             self.player.pause(msg["paused"])
             self.paused = msg["paused"]
             if msg["paused"]:
-                self.player.seek(msg["pos"])
-                self.settle_until = now + SETTLE
+                self._jump(msg, now, aim_ahead=False)
         pos = self.player.position()
         if pos is None:
             return
         err = self._error(pos, msg["pos"], msg["duration"])
-        if self.last_jump and now >= self.settle_until:
-            # learn how long a jump takes: if we landed behind, aim further ahead next time
-            self.lead = min(2.0, max(0.0, self.lead - err))
+        if self.last_jump is not None and now >= self.settle_until:
+            # learn how long a jump takes, in clip seconds at speed 1: landed behind, aim further ahead next time
+            self.lead = min(2.0, max(0.0, self.lead - 0.7 * err / max(self.last_jump, 0.1)))
             self.last_jump = None
         if now < self.settle_until:
             return
         self.errors = (self.errors + [err])[-5:]
         e = statistics.median(self.errors)
         if msg["paused"]:
+            if abs(e) > 0.04:                            # the server moved while paused
+                self._jump(msg, now, aim_ahead=False)
             self.status = {"state": "paused with the server", "file": self.file, "error_ms": round(e * 1000)}
             return
         if abs(e) > SEEK_AT:
-            target = msg["pos"] + self.lead * msg["speed"]
-            if msg["duration"]:
-                target %= msg["duration"]
-            self.player.seek(target)
-            self.last_jump = (now, target)
-            self.settle_until = now + SETTLE
-            self.errors = []
+            self._jump(msg, now)
             self.status = {"state": "jumped to catch up", "file": self.file, "error_ms": round(e * 1000)}
             return
         want = msg["speed"]
         if abs(e) > TOLERANCE:
             want = msg["speed"] * (1 - max(-MAX_NUDGE, min(MAX_NUDGE, e * GAIN)))
-        if self.speed is None or abs(want - self.speed) > 0.0005:
-            self.player.set_speed(want)
-            self.speed = want
+        self._speed(want)
         self.status = {"state": "in step" if abs(e) <= 0.04 else "catching up", "file": self.file,
                        "error_ms": round(e * 1000), "speed": round(want, 4)}
 
 
 # ---- the service -------------------------------------------------------------------------------------------------
 class SyncManager:
-    """Runs the server's sender or the client's receiver in a thread, as the settings say."""
+    """Runs the server's sender, the client's receiver, or (sync off with a wall tile) a crop watcher, in a thread,
+    as the settings say. Each thread has its own stop signal, so one that is slow to stop can never pick up a later
+    run's settings."""
 
     def __init__(self, api, settings, log=print, clock=time.monotonic, targets=None):
         self.api, self.settings, self.log, self._clock = api, settings, log, clock
@@ -259,13 +286,23 @@ class SyncManager:
         self.server = None               # (address, last heard) the client follows
         self.sent = 0
         self.dropped = 0
+        self.error = None                # why the last thread stopped, for the card
         self.crop_for = None             # the file the wall crop was last set for
+        self._bcast = (0.0, [])          # broadcast addresses, kept for a while (reading them runs `ip`)
+        self._quiet_until = 0.0
 
     def config(self):
         return self.settings.data.get("sync", blank())
 
     def enabled(self):
         return self.api.registry.enabled("wall")
+
+    def _note(self, text):
+        """Log at most once every 10 seconds: a flood or a player that is down must not fill the journal."""
+        now = self._clock()
+        if now >= self._quiet_until:
+            self._quiet_until = now + 10
+            self.log("pvj-web: sync: " + text)
 
     # -- player access --
     def _get(self, prop):
@@ -281,24 +318,47 @@ class SyncManager:
             pass
 
     def apply_wall(self, force=False):
-        """Crop the picture to this screen's tile (or show it whole). Called when a clip starts and on changes."""
+        """Crop the picture to this screen's tile (or show it whole). Called when a clip starts and on changes; a
+        clip whose picture size is not known yet is tried again on the next call."""
         path = self._get("path")
         if not force and path == self.crop_for:
             return
-        self.crop_for = path
         wall = self.config()["wall"]
+        whole = (wall["cols"] == 1 and wall["rows"] == 1) or not self.enabled()
+        if whole:
+            self._set("video-crop", "")
+            self.crop_for = path
+            return
         params = self._get("video-params") or {}
         w, h = params.get("w"), params.get("h")
-        crop = wall_crop(wall, w, h) if (w and h and self.enabled()) else ""
-        self._set("video-crop", crop)
+        if not (w and h):
+            return                         # not decoded yet: next time
+        self._set("video-crop", wall_crop(wall, w, h))
+        self.crop_for = path
 
     # -- the server --
+    def _synced_file(self, path):
+        """The file name to send for `path`, or None for what clients cannot have: the test pattern, a live input,
+        a stream. Only files in the media folder or at the top of a USB drive are synced."""
+        if not path or "://" in path:
+            return None
+        import os
+        name = os.path.basename(path)
+        roots = [getattr(self.api, "media_dir", None), getattr(self.api, "usb_root", None)]
+        real = os.path.realpath(path)
+        for root in roots:
+            if root:
+                r = os.path.realpath(root)
+                if real.startswith(r + os.sep):
+                    return name
+        return None
+
     def state(self):
         path = self._get("path")
         black = bool(getattr(self.api, "mix", {}).get("blackout"))
-        if not path or path.startswith(("av://", "fd://")):
+        name = self._synced_file(path) if path else None
+        if name is None:
             return {"st": "stop", "bk": black}
-        name = path.rsplit("/", 1)[-1]
         out = {"st": "play", "f": name, "p": round(float(self._get("time-pos") or 0.0), 3),
                "sp": float(self._get("speed") or 1.0), "pa": bool(self._get("pause")),
                "lp": self._get("loop-file") not in (None, False, "no"), "bk": black}
@@ -310,6 +370,9 @@ class SyncManager:
     def _broadcasts(self):
         if self._targets is not None:
             return list(self._targets)
+        now = self._clock()
+        if now - self._bcast[0] < 15 and self._bcast[1]:
+            return self._bcast[1]
         out = []
         try:
             for entry in self.api._ip_json():
@@ -320,16 +383,19 @@ class SyncManager:
                         out.append(a["broadcast"])
         except Exception:
             pass
-        return out or ["255.255.255.255"]
+        out = out or ["255.255.255.255"]
+        self._bcast = (now, out)
+        return out
 
-    def _serve(self, cfg):
+    def _serve(self, cfg, stop):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        run = secrets.token_hex(4)           # a new run: clients start counting again
         seq = 0
         try:
-            while not self._stop.wait(SEND_EVERY):
+            while not stop.wait(SEND_EVERY):
                 try:
-                    data = encode(cfg["group"], seq, self.state())
+                    data = encode(cfg["group"], seq, dict(self.state(), r=run))
                 except SyncError:
                     continue
                 seq += 1
@@ -342,6 +408,11 @@ class SyncManager:
                 self.apply_wall()
         finally:
             s.close()
+
+    def _watch_wall(self, cfg, stop):
+        """Sync off but a wall tile set: keep cropping each new clip."""
+        while not stop.wait(0.5):
+            self.apply_wall()
 
     # -- the client --
     def _local_player(self):
@@ -358,6 +429,10 @@ class SyncManager:
                 else:
                     api.player.play([path], loop=loop, spawn=getattr(api, "spawn", True))
                 mgr.crop_for = None
+
+            def playing(self):
+                p = mgr._get("path")
+                return p.rsplit("/", 1)[-1] if isinstance(p, str) and p else None
 
             def position(self):
                 v = mgr._get("time-pos")
@@ -401,15 +476,16 @@ class SyncManager:
             pass
         return None
 
-    def _receive(self, cfg):
+    def _receive(self, cfg, stop):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("0.0.0.0", cfg["port"]))
         s.settimeout(0.5)
         self.follower = Follower(self._local_player(), self.find, clock=self._clock, log=self.log)
-        last_seq = None
+        last = None                          # (run, seq) of the last message used
+        window = (0.0, 0)                    # rate limit: messages in the current second
         try:
-            while not self._stop.is_set():
+            while not stop.is_set():
                 try:
                     data, (addr, _) = s.recvfrom(MAX_PACKET + 1)
                 except socket.timeout:
@@ -418,6 +494,15 @@ class SyncManager:
                     continue
                 except OSError:
                     continue
+                now = self._clock()
+                if now - window[0] >= 1.0:
+                    window = (now, 0)
+                window = (window[0], window[1] + 1)
+                if window[1] > MAX_PER_SECOND:     # a server sends ten a second; more is a flood
+                    self.dropped += 1
+                    if window[1] == MAX_PER_SECOND + 1:
+                        self._note("more than %d messages a second; the extra ones are ignored" % MAX_PER_SECOND)
+                    continue
                 if not private(addr):
                     self.dropped += 1
                     continue
@@ -425,52 +510,67 @@ class SyncManager:
                 if msg is None:
                     self.dropped += 1
                     continue
-                now = self._clock()
                 if self.server and self.server[0] != addr and now - self.server[1] < FOLLOW_TIMEOUT:
                     continue                     # someone else's server on the same network: follow one only
                 if self.server is None or self.server[0] != addr:
-                    last_seq = None
+                    last = None
                     self.log("pvj-web: sync: following the server at %s" % addr)
-                if last_seq is not None and msg["seq"] <= last_seq and last_seq - msg["seq"] < 1000:
-                    continue                     # old or repeated
-                last_seq = msg["seq"]
+                if last is not None and msg["run"] == last[0] and msg["seq"] <= last[1]:
+                    continue                     # old or repeated (a restarted server has a new run)
+                last = (msg["run"], msg["seq"])
                 self.server = (addr, now)
                 try:
                     self.follower.apply(msg)
                 except Exception as e:           # a hiccup with the player must not end following
-                    self.log("pvj-web: sync: %s" % e)
+                    self._note(str(e))
                 self.apply_wall()
         finally:
             s.close()
 
+    def _run(self, target, cfg, stop):
+        try:
+            target(cfg, stop)
+        except Exception as e:                   # a busy port, for example: say so on the card
+            self.error = str(e)
+            self.log("pvj-web: sync stopped: %s" % e)
+
     # -- start, stop, status --
     def apply(self):
-        """Start or stop the sender or receiver to match the settings and the module switch."""
+        """Start or stop the sender, receiver or crop watcher to match the settings and the module switch."""
         with self.lock:
-            self._stop.set()
-            if self._thread:
-                self._thread.join(timeout=3)
+            self._stop.set()                     # only the old thread's own signal
+            old = self._thread
+            if old:
+                old.join(timeout=1.0)            # it has its own signal: if it is slow, it still ends on its own
             self._thread = None
-            self._stop = threading.Event()
-            self.server, self.follower = None, None
+            self._stop = stop = threading.Event()
+            self.server, self.follower, self.error = None, None, None
             cfg = self.config()
             self.apply_wall(force=True)
-            if not self.enabled() or cfg["role"] == "off":
+            if not self.enabled():
                 return
-            target = self._serve if cfg["role"] == "server" else self._receive
-            self._thread = threading.Thread(target=target, args=(cfg,), name="sync-" + cfg["role"], daemon=True)
+            if cfg["role"] == "server":
+                target = self._serve
+            elif cfg["role"] == "client":
+                target = self._receive
+            elif cfg["wall"]["cols"] * cfg["wall"]["rows"] > 1:
+                target = self._watch_wall
+            else:
+                return
+            self._thread = threading.Thread(target=self._run, args=(target, cfg, stop), name="sync-" + cfg["role"], daemon=True)
             self._thread.start()
 
     def stop(self):
         with self.lock:
             self._stop.set()
             if self._thread:
-                self._thread.join(timeout=3)
+                self._thread.join(timeout=1.0)
             self._thread = None
 
     def status(self):
         cfg = self.config()
-        out = {"enabled": self.enabled(), "config": cfg, "running": bool(self._thread and self._thread.is_alive())}
+        out = {"enabled": self.enabled(), "config": cfg, "running": bool(self._thread and self._thread.is_alive()),
+               "error": self.error}
         if cfg["role"] == "server":
             out["sent"] = self.sent
         if cfg["role"] == "client":

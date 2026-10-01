@@ -40,6 +40,9 @@ class SimPlayer:
         self.calls.append(("load", path, loop))
         self.loaded, self.pos0, self.t0 = path, 0.0, self.clock()
 
+    def playing(self):
+        return self.loaded.rsplit("/", 1)[-1] if self.loaded else None
+
     def position(self):
         return self._now_pos()
 
@@ -166,6 +169,23 @@ class FollowerTest(unittest.TestCase):
         f.apply(play(pos=119.95))
         self.assertEqual(len([c for c in p.calls if c[0] == "seek"]), seeks)
 
+    def test_a_fast_or_slow_server_is_followed_without_endless_jumps(self):
+        """Review finding: at server speed 2 the client settled at speed 1, fell behind and jumped 77 times in 2 min."""
+        for speed in (2.0, 4.0, 0.25):
+            f, p, clock = follower()
+            msg = self.run_for(f, clock, 60.0, speed=speed)
+            jumps = len([c for c in p.calls if c[0] == "seek"])
+            self.assertLessEqual(jumps, 4, speed)
+            self.assertLess(abs(p.position() - (msg["pos"] + 0.1 * speed)), 0.03 * max(1.0, speed), speed)   # clip seconds
+            self.assertEqual(f.status["state"], "in step", speed)
+
+    def test_a_clip_started_on_the_client_itself_is_replaced(self):
+        f, p, clock = follower(files=("show.mp4", "other.mp4"))
+        self.run_for(f, clock, 5.0)
+        p.load("/media/other.mp4", True)                       # someone pressed a pad on the client
+        f.apply(play(pos=15.0))
+        self.assertEqual(p.loaded, "/media/show.mp4")
+
     def test_pause_stop_blackout_and_missing_files(self):
         f, p, clock = follower()
         self.run_for(f, clock, 5.0)
@@ -180,6 +200,74 @@ class FollowerTest(unittest.TestCase):
 
 
 class ManagerTest(unittest.TestCase):
+    def manager(self, props, **api_attrs):
+        class Ipc:
+            def request(self, cmd, prop, *a):
+                if cmd == "set_property":
+                    props["set:" + prop] = a[0]
+                    return None
+                return props.get(prop)
+
+        class Api:
+            mix = {"blackout": False}
+            registry = type("R", (), {"enabled": lambda self, m: True})()
+            player = type("P", (), {"ipc": Ipc()})()
+        api = Api()
+        for k, v in api_attrs.items():
+            setattr(api, k, v)
+
+        class Settings:
+            data = {"sync": sync.blank()}
+        return sync.SyncManager(api, Settings(), log=lambda *_: None), Settings
+
+    def test_only_media_and_usb_files_are_synced(self):
+        props = {"path": "/srv/video/show.mp4", "time-pos": 1.0}
+        m, _ = self.manager(props, media_dir="/srv/video", usb_root="/media/pvj")
+        self.assertEqual(m.state()["f"], "show.mp4")
+        for path in ("/run/pvj/capture.fifo", "srt://10.0.0.5:9000", "/etc/passwd", "av://lavfi:smptehdbars"):
+            props["path"] = path
+            self.assertEqual(m.state()["st"], "stop", path)          # clients stop instead of showing "missing file"
+
+    def test_the_wall_crop_waits_for_the_picture_size(self):
+        """Review finding: a clip whose size was not known yet got the whole picture for good."""
+        props = {"path": "/srv/video/show.mp4"}
+        m, S = self.manager(props)
+        S.data["sync"]["wall"] = {"cols": 2, "rows": 1, "col": 1, "row": 0, "bezel": 0.0}
+        m.apply_wall()
+        self.assertNotIn("set:video-crop", props)
+        props["video-params"] = {"w": 1920, "h": 1080}
+        m.apply_wall()
+        self.assertEqual(props["set:video-crop"], "960x1080+960+0")
+
+    def test_a_restarted_server_is_followed_at_once(self):
+        """Review finding: a client ignored a restarted server (seq back to 0) until the new seq passed the old."""
+        old = sync.decode(sync.encode("main", 500, {"st": "stop", "r": "aaaa"}), "main")
+        new = sync.decode(sync.encode("main", 0, {"st": "stop", "r": "bbbb"}), "main")
+        self.assertNotEqual(old["run"], new["run"])
+        self.assertIsNone(sync.decode(sync.encode("main", 1, {"st": "stop", "r": "NOT HEX"}), "main"))
+
+    def test_an_old_thread_never_runs_with_new_settings(self):
+        """Review finding: a thread still busy when the role changed picked up the next run's stop signal."""
+        import threading
+        import time as t
+        m, S = self.manager({})
+        S.data["sync"]["role"] = "server"
+        m._targets = ["127.0.0.1"]
+        slow = threading.Event()
+        real_state = m.state
+
+        def stuck_state():
+            slow.wait(2)                         # a player that answers slowly
+            return real_state()
+        m.state = stuck_state
+        m.apply()
+        first = m._thread
+        S.data["sync"]["role"] = "off"
+        m.apply()
+        slow.set()
+        first.join(5)
+        self.assertFalse(first.is_alive())
+
     def test_server_state_from_the_player(self):
         props = {"path": "/var/lib/pvj/video/show.mp4", "time-pos": 12.3456, "speed": 1.0, "pause": False,
                  "loop-file": "inf", "duration": 90.0}
@@ -191,15 +279,12 @@ class ManagerTest(unittest.TestCase):
         class Api:
             mix = {"blackout": True}
             player = type("P", (), {"ipc": Ipc()})()
+        Api.media_dir = "/var/lib/pvj/video"
         m = sync.SyncManager(Api(), None, log=lambda *_: None)
         st = m.state()
         self.assertEqual((st["st"], st["f"], st["p"], st["lp"], st["d"], st["bk"]), ("play", "show.mp4", 12.346, True, 90.0, True))
         props["path"] = "av://lavfi:smptehdbars"
         self.assertEqual(m.state()["st"], "stop")                 # the test pattern is not synced
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 import os
@@ -240,6 +325,8 @@ class TwoRealPlayersTest(unittest.TestCase):
             mix = {"blackout": False}
             registry = type("R", (), {"enabled": lambda self, m: True})()
             spawn = True
+            media_dir = os.path.dirname(clip)        # only files from the media folder (or USB) are synced
+            usb_root = None
 
             def __init__(self):
                 self.player = player
@@ -282,3 +369,7 @@ class TwoRealPlayersTest(unittest.TestCase):
         med = _stats.median(abs(d) for d in diffs)
         print("\nsync, two headless players: median difference %.1f ms, worst %.1f ms" % (med * 1000, max(abs(d) for d in diffs) * 1000))
         self.assertLess(med, 0.1)
+
+
+if __name__ == "__main__":
+    unittest.main()

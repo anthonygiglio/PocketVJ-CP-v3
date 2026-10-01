@@ -17,11 +17,11 @@ The client's card shows what it does: the server it follows, "in step" or "catch
 
 ## How it keeps in step
 
-The server sends a small message about ten times a second, and at once when something changes: the clip's name, the position, pause, speed, looping and blackout. A client that is off by more than half a second (a new clip, a seek, a late start) jumps, aimed a little ahead to allow for the time a jump takes; it learns that allowance from each jump. Smaller differences are corrected by playing up to 4 percent faster or slower for a moment, which is not visible and keeps the sound's pitch. Within 15 ms it plays at the server's speed.
+The server sends a small message about ten times a second: the clip's name, the position, pause, speed, looping and blackout. A client that is off by more than half a second (a new clip, a seek, a late start) jumps, aimed a little ahead to allow for the time a jump takes; it learns that allowance from each jump. Smaller differences are corrected by playing up to 4 percent faster or slower for a moment, which is not visible and keeps the sound's pitch. Within 15 ms it plays at the server's speed.
 
 Measured on a Raspberry Pi 4:
 - two headless players following each other over the network on the same box: after the first jump, a median difference of 0 ms and at most 40 ms (one frame at 25 fps, which is also how finely the position is read);
-- the box's real player as a client of a stand-in server on a Mac on Wi-Fi, following a 1080p film from a USB stick into the middle (10 minutes in): three jumps in the first 6 seconds (the first jump into a long file took longer than expected, the next overshot while the allowance was learned), then "in step" for the rest of the 40 seconds, between 14 ms behind and 11 ms ahead.
+- the box's real player as a client of a stand-in server on a Mac on Wi-Fi, following a 1080p film from a USB stick into the middle (15 minutes in): two jumps in the first 4 seconds (the first jump into a long file takes longer than expected), then it caught up the remaining third of a second by playing 4 percent faster (not a jump), and from 14 seconds on it stayed within 5 ms.
 
 So allow a few seconds at the start of a synced show (a still or black at the start of the clip hides it). **Not yet measured between two boxes on two screens.**
 
@@ -31,7 +31,8 @@ Set, on each box, the wall's columns and rows, which tile this screen is, and th
 
 ## Safety and limits
 
-- Messages are only accepted from private network addresses, with the same group name, and are small and strictly checked. A client follows one server at a time (the first it hears; another only after 3 seconds of silence). UDP senders can be forged on the same network, so keep the show network private, as for OSC and DMX.
+- Messages are only accepted from private network addresses, with the same group name, and are small and strictly checked; more than 40 a second are ignored. A client follows one server at a time (the first it hears; another only after 3 seconds of silence). UDP senders can be forged on the same network, so keep the show network private, as for OSC and DMX.
 - The server sends to the broadcast address of each local network (UDP port 5577 unless changed); routers do not pass broadcasts, so all boxes must be on the same network.
-- A client follows the server's clip; local playing on a client is overruled by the next message. Live inputs, streams and the test pattern are not synced.
+- A client follows the server's clip; a clip started on a client's own panel is replaced by the server's with the next message, and a client whose player restarted starts the clip again. Only files from the media folder or the top of a USB drive are synced: when the server shows a live input, a stream or the test pattern, the clients stop.
+- A box with sync off can still show its wall tile.
 - Not built: syncing a playlist position (a client plays the same file the server is playing, so "play all" works clip by clip), and sound-only boxes.

@@ -1703,7 +1703,6 @@
         h('button', { class: 'btn small', id: 'newpresenter', text: 'New presenter code', onclick: function () { act('POST', '/api/access/code', { role: 'live', minutes: 60 }, drawLive); } }),
         h('button', { class: 'btn small', id: 'printsheet', text: 'Print access sheet', onclick: function () { printSheet(d); } })));
       clearTimeout(accessTimer);
-    clearTimeout(syncTimer);
       if (scr.showing || d.codes.length) accessTimer = setTimeout(function () { if (document.getElementById('accesscard')) refresh(); }, 5000);
     }
     function refresh() {
@@ -1768,6 +1767,7 @@
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
     clearTimeout(accessTimer);
+    clearTimeout(syncTimer);
     keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
