@@ -130,6 +130,7 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 
 - **Keep the show network private.** The panel is protected by a PIN and per-device tokens, but it is not built to face the internet. OSC, DMX and MIDI are off until you switch them on; OSC and DMX only accept senders on private networks (plus ranges you add).
 - **Power cuts.** The read-only root protects the system disk from a pulled plug (`sudo pvj-rootfs enable`, then reboot). Not tested on a real board.
+- **Remote support** is off until you allow it, and even then only open while you run a session you started (time-limited, panel only, visible on every device, stoppable). See [REMOTE-SUPPORT.md](REMOTE-SUPPORT.md).
 - **Updates** are signed bundles installed with `sudo pvj-update` (from a USB stick, no internet needed) and roll back by themselves if the panel does not come back. See [pvj/README.md](../pvj/README.md#updates-and-rollback). There is no update button in the panel.
 - **Player stuck?** System > Restart player asks it to quit and systemd brings it back. If mpv ignores that, run `sudo systemctl restart pvj-player` on the box.
 - **Network changes** always revert by themselves unless you confirm them. Test them with a keyboard and monitor on the box, never over SSH on the only link.

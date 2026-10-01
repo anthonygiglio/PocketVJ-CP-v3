@@ -1,3 +1,5 @@
 mpv
 python3
 udev
+wireguard-tools
+nftables

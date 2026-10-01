@@ -118,3 +118,6 @@ canvas.mapcanvas:focus-visible { outline: 2px solid var(--ac); outline-offset: 2
 .row.nudge .btn { min-width: 44px; min-height: 44px; font-size: 18px; }
 .list .item.map-entry.on { box-shadow: inset 3px 0 0 var(--ac); padding-left: 8px; }
 button.linkish { background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+/* Remote support: impossible to miss while a session is open */
+.support-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; margin: 0 0 8px; border-radius: 8px; background: var(--ac); color: var(--on); font-weight: 600; }
+.support-code { font: 700 34px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 0.12em; text-align: center; padding: 12px; border: 2px dashed var(--ac); border-radius: 10px; margin: 8px 0; user-select: all; }
