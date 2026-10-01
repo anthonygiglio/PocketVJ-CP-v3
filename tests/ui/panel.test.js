@@ -102,6 +102,24 @@ function startServer() {
     await page.setInputFiles('#filepick', { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100, 1) });
     await page.waitForFunction(() => /only video, image and audio files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
 
+    // Nothing in a card may be wider than the card at phone width (names squeezed, buttons off the edge).
+    async function fitsCard(selector, what) {
+      const bad = await page.evaluate((sel) => {
+        const out = [];
+        document.querySelectorAll(sel).forEach((card) => {
+          const box = card.getBoundingClientRect();
+          card.querySelectorAll('button, input, select, span, img').forEach((el) => {
+            const r = el.getBoundingClientRect();
+            if (r.width && (r.right > box.right + 1 || r.left < box.left - 1)) out.push((el.textContent || el.id || el.tagName).trim().slice(0, 30));
+          });
+          card.querySelectorAll('.item > span:first-child').forEach((el) => { if (el.getBoundingClientRect().width < 60 && el.textContent.length > 8) out.push('squeezed: ' + el.textContent.slice(0, 30)); });
+        });
+        return out;
+      }, selector);
+      assert(bad.length === 0, what + ': outside the card or squeezed: ' + bad.join(', '));
+    }
+    await fitsCard('.card', 'Media');
+
     // Mix: drag a slider and check the throttle keeps request count sane
     await page.click('nav >> text=Mix');
     await page.waitForSelector('#mo');
@@ -287,6 +305,7 @@ function startServer() {
     await page.waitForFunction((x) => fetch('/api/mapper').then((r) => r.json()).then((d) => Math.abs(d.surfaces[0].vertices[0][0] - (x + 50)) < 0.01), x0);
     await page.fill('#mapsetname', 'Main stage');
     await page.click('#mapsave');
+    await fitsCard('#mapcard', 'Mapping card');
     await page.waitForSelector('#mapsets >> option:has-text("Main stage")', { state: 'attached' });
     await page.click('#mapon');
     await page.waitForSelector('#mapstatus:has-text("Mapping is on")', { timeout: 20000 });
@@ -318,6 +337,7 @@ function startServer() {
     await page.click('text=Create guest link');
     await page.waitForFunction(() => { const i = document.querySelector('input[aria-label="Guest link"]'); return i && !i.hidden && /#token=/.test(i.value); });
     const guestLink = await page.inputValue('input[aria-label="Guest link"]');
+    await fitsCard('.card', 'System');
     if (shots) await page.screenshot({ path: path.join(shots, '4-system.png'), fullPage: true });
 
     // Guest (view only) via the link in a fresh context

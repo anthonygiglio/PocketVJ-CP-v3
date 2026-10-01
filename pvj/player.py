@@ -357,8 +357,12 @@ class Player:
         self._set("volume", min(130.0, max(0.0, float(percent))))
 
     def clear(self):
-        """Stop the current clip but keep the player service and window alive."""
+        """Stop the current clip but keep the player service and window alive. The loop settings go back to off, so
+        an idle player does not report the last clip's looping (the panel's Loop button read "on" with nothing
+        playing, seen on the Pi after the test pattern); every play sets them again."""
         self.ipc.request("stop")
+        self.ipc.request("set_property", "loop-file", "no")
+        self.ipc.request("set_property", "loop-playlist", "no")
 
     def screenshot(self, path, quality=60, with_text=True):
         """Save what the player is showing right now as a JPEG. With `with_text` it is the whole window (brightness,

@@ -16,6 +16,23 @@ Independent security review: no high findings; three medium, all fixed with test
 
 Not verified: a real server on the internet, a studio network, NAT, the hub scripts on a VPS.
 
+## 2026-09-30 (phone layout)
+
+Done:
+- At phone width, list rows wrap: a name keeps room for about ten characters and the buttons move to their own line instead of squeezing it (the Media list showed names a few letters wide); the mapper's surface list and the Access card's button row no longer run off the card. Seen in the refreshed screenshots.
+- The browser test now fails if anything in a card sticks out of it, or a list name is squeezed, at 390 px wide (Media, the mapping card, System).
+- The mapping card numbers its requests and never draws an older answer over a newer one: a likely cause of the one-time failure of the browser test's mapper step (the first state read landing after the "add" answer).
+
+## 2026-09-30 (ST 2110 removed)
+
+Done: removed the planned ST 2110 module and reworded README, ROADMAP, HANDOFF, the manual, pvj/README and pvj/STREAMS to "through a gateway" (D30), after a research report and the owner's go-ahead. Also corrected pvj/README, which still listed the mapper as not built. Nothing of ST 2110 was ever built or tested.
+
+## 2026-09-30 (live Pi updated, small fixes)
+
+Done:
+- Current master (aef29ab) installed on the test Pi 4 with the full offline installer by an agent; all four services active, unit files and code identical to master, player without the old 8-bit flag, settings schema 11, modules as before. Old test files cleaned out of the Pi's /tmp.
+- Stopping (including the test pattern's off) now resets the player's loop settings, so an idle player no longer reports the last clip's looping; the agent saw `loop_file: "inf"` on the idle box.
+
 ## 2026-09-30 (panel screenshots refreshed)
 
 Done:
