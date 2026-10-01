@@ -69,3 +69,40 @@ def probe(path, mpv_bin="mpv", timeout=20):
             _cache.clear()
         _cache[key] = info
     return dict(info)
+
+
+HEAVY = ("prores", "dnxhd", "dnxhr", "cfhd", "rawvideo", "v210", "qtrle", "ffv1", "huffyuv", "utvideo")
+
+
+def advice(info, board):
+    """Plain-word warnings for a clip that may not play smoothly on this board, or []. Only what was measured on a
+    Pi 4 (1080p H.264 at 24 fps in software: about 109 percent of one core, no dropped frames) or is plainly far
+    beyond it; anything untested says so."""
+    codec = (info.get("codec") or "").lower()
+    w, h, fps = info.get("width") or 0, info.get("height") or 0, info.get("fps") or 0
+    if not codec:
+        return []
+    out = []
+    pixels = w * h
+    if any(k in codec for k in HEAVY):
+        out.append("%s is an editing format: far too heavy for playback on this box. Export H.264 or HEVC (see Prepare "
+                   "your clips in the manual)." % codec.upper())
+        return out
+    if board in ("pi3", "pi4") and "h264" in codec and pixels > 1920 * 1088:
+        out.append("H.264 larger than 1080p is decoded in software here and will very likely stutter. Use 1080p, or "
+                   "HEVC for 4K (4K not tested on this box yet).")
+    elif board == "pi4" and "h264" in codec and pixels > 1280 * 720 and fps > 31:
+        out.append("1080p at %s fps in H.264 is decoded in software here; 1080p at 24 fps was measured smooth on a Pi 4, "
+                   "faster was not tested. If it stutters, use 25 or 30 fps or HEVC." % round(fps))
+    elif board == "pi3" and pixels > 1280 * 720:
+        out.append("On a Pi 3, clips larger than 720p were not tested and may stutter. 720p H.264 is the safe choice.")
+    if board == "pi4" and "h264" not in codec and pixels > 1920 * 1088:
+        out.append("Larger than 1080p: not tested on this box yet. Check it plays smoothly before the show.")
+    if board == "pi5" and "h264" in codec and pixels > 1920 * 1088:
+        out.append("A Pi 5 has no hardware H.264 decoding: above 1080p use HEVC (not tested on a Pi 5 yet).")
+    if fps and fps > 61:
+        out.append("%s fps is more than a screen shows; use 25, 30, 50 or 60." % round(fps))
+    if codec in ("mjpeg", "png", "bmp", "tiff", "webp") and pixels > 24000000:
+        out.append("A very large picture (%dx%d): it may be slow to show. 1920x1080 is plenty for a screen." % (w, h))
+    return out
+

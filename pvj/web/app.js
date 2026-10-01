@@ -793,7 +793,9 @@
     parts.push(i.audio ? 'sound: ' + i.audio : 'no sound');
     if (i.duration) parts.push(clock(i.duration));
     if (i.container) parts.push(i.container.split(',')[0]);
-    return name + ': ' + parts.join(' \u00b7 ');
+    var text = name + ': ' + parts.join(' \u00b7 ');
+    if (i.advice && i.advice.length) text += '. Note: ' + i.advice.join(' ');
+    return text;
   }
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
   function refreshMedia() {
