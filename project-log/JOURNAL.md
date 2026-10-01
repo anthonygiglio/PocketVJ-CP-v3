@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (old OSC names)
+
+Done: from the manual deep dive (three agents read the old manual against the build; their combined list is the order of the next work). `/startmasteronce01` to `99` failed silently (they were passed as a preset name the parser does not know; the old receiver ran startmasteroneNN): fixed. Old names for features that exist now are mapped (test screen, test tones, overlay, slideshow, flip as a toggle); old names that need full access or are not built are refused explicitly and listed in pvj/OSC.md.
+
 ## 2026-09-30 (multi-box sync and video wall)
 
 Done:

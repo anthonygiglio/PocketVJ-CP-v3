@@ -282,5 +282,34 @@ class ServerLogicTest(unittest.TestCase):
             second.start()
 
 
+
+class OldTouchOscNamesTest(unittest.TestCase):
+    """The old panel's TouchOSC layouts: names whose features exist now (found in the manual deep dive)."""
+
+    def test_startmasteronce_runs_the_play_once_presets(self):
+        # the old receiver ran startmasteroneNN for /startmasteronceNN; it used to fail silently here
+        self.assertEqual(osc.translate("/startmasteronce07", [1.0]), ("/api/play", {"preset": "startmasterone07"}))
+        from pvj import presets
+        self.assertFalse(presets.parse_legacy_name("startmasterone07")["loop"])
+        self.assertIsNone(osc.translate("/startmasteronce07", [0.0]))         # the release does nothing
+
+    def test_names_for_features_that_exist(self):
+        cases = {"/testscreen": ("/api/testpattern", {"on": True}), "/testscreenoff": ("/api/testpattern", {"on": False}),
+                 "/testtone": ("/api/testtone", {"channel": "both"}), "/testtoneleft": ("/api/testtone", {"channel": "left"}),
+                 "/testtoneright": ("/api/testtone", {"channel": "right"}), "/overlay": ("/api/overlay", {"on": True}),
+                 "/stopoverlay": ("/api/overlay", {"on": False}), "/image": ("/api/play", {"slideshow": {"source": "media"}}),
+                 "/stopimage": ("/api/control", {"action": "stop"})}
+        for address, want in cases.items():
+            self.assertEqual(osc.translate(address, [1.0]), want, address)
+
+    def test_flip_toggles_like_the_old_buttons(self):
+        self.assertEqual(osc.translate("/fliph", [1.0], {"flip_h": False}), ("/api/control", {"action": "flip_h", "value": True}))
+        self.assertEqual(osc.translate("/flipv", [], {"flip_v": True}), ("/api/control", {"action": "flip_v", "value": False}))
+
+    def test_start_names_that_are_not_presets_do_nothing(self):
+        for address in sorted(osc.NOT_HERE):
+            self.assertIsNone(osc.translate(address, [1.0]), address)
+
+
 if __name__ == "__main__":
     unittest.main()
