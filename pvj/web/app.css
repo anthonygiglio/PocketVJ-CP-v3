@@ -85,7 +85,11 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px
 .list .item > span, .list .item > div { min-width: 0; overflow-wrap: anywhere; }
 /* Buttons in a list row keep their words whole; a long address or name wraps in its own column instead. */
 .list .item .btn { white-space: nowrap; flex: none; }
-.list .item > span:first-child { flex: 1 1 0; }
+/* At phone width a row's name keeps room for about ten characters; the buttons move to a line of their own before
+   they squeeze it (the Media list showed names a few letters wide, the mapper's Remove ran off the card). */
+.list .item { flex-wrap: wrap; }
+.list .item > span:first-child, .list .item > button.linkish:first-child { flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
+.list .item > .row { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 /* Stream and other addresses keep their case (the small-caps label style would mangle them). */
 .addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
 /* The screen preview keeps the picture's shape and never overflows the card. */
@@ -114,3 +118,6 @@ canvas.mapcanvas:focus-visible { outline: 2px solid var(--ac); outline-offset: 2
 .row.nudge .btn { min-width: 44px; min-height: 44px; font-size: 18px; }
 .list .item.map-entry.on { box-shadow: inset 3px 0 0 var(--ac); padding-left: 8px; }
 button.linkish { background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+/* Remote support: impossible to miss while a session is open */
+.support-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; margin: 0 0 8px; border-radius: 8px; background: var(--ac); color: var(--on); font-weight: 600; }
+.support-code { font: 700 34px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 0.12em; text-align: center; padding: 12px; border: 2px dashed var(--ac); border-radius: 10px; margin: 8px 0; user-select: all; }

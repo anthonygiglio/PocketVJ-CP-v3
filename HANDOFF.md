@@ -16,7 +16,7 @@ The repository was renamed from `PocketVJ-CP-v3` to `nxlx.mastercontrol`.
 - New code is Apache-2.0 (SPDX headers, `REUSE.toml`). Legacy code stays under the upstream `LICENSE.md`. `LICENSE.md` and `AUTHORS.md` are never edited. Copyright holder in headers: "NXLX.Systems and contributors".
 - One long-lived mpv controlled over JSON IPC, supervised by systemd (`pvj-player.service`). The panel (`pvj-web.service`) is unprivileged; anything needing root goes through a small helper (`pvj-netd`) over a socket.
 - Token auth (PIN pairing, roles view/live/full), CSRF header, strict CSP. Signed updates with rollback.
-- NDI, AES67/Dante and ST 2110 are separate optional modules, not built yet. SRT/RTSP/RTMP streams, DMX, MIDI, the schedule and autostart are built, off by default.
+- NDI and AES67/Dante are separate optional modules, not built yet. ST 2110 is not planned natively; it comes in through a gateway (D30). SRT/RTSP/RTMP streams, DMX, MIDI, the schedule and autostart are built, off by default.
 - Naming: the `pvj` package, `pvj-*` services and commands and install paths keep their names.
 - Style: no em dashes in written text (commas, semicolons, new sentences). Default document font Inter.
 
@@ -49,7 +49,7 @@ One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 25
 - The read-only root (`pvj-rootfs`), signed updates on a board, the Network module (must be tested with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
 - Pi 3, Pi 5 and x86 (nothing has run on them).
 
-Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, shutdown and reboot buttons, a display-mode (resolution and refresh) setting, NDI, AES67/Dante, ST 2110, presenter, wall, importing old mapper files, controller profiles and lights/feedback for MIDI, custom DMX layouts, Art-Net discovery.
+Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, shutdown and reboot buttons, a display-mode (resolution and refresh) setting, NDI, AES67/Dante, presenter, wall, importing old mapper files, controller profiles and lights/feedback for MIDI, custom DMX layouts, Art-Net discovery.
 
 Known limits: the panel cannot restart a wedged mpv (it is unprivileged by design). The old manual is published to GitHub Pages by the "Deploy manual to Pages" workflow (it failed until Pages was enabled for the repository; it has passed since 2026-09-30). Merged branches on GitHub have not been deleted (the tool that tried was blocked; delete them on github.com). The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub.
 

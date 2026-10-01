@@ -12,6 +12,29 @@ Done:
 
 Not verified: two boxes on two screens (the Pi 3B needs its spare SD card), Wi-Fi, a wall with real bezels.
 
+## 2026-09-30 (remote support)
+
+Done:
+- Remote support sessions (D29, `docs/REMOTE-SUPPORT.md`): `pvj/support.py`, the root helper `pvj-supportd` (`pvj/supportd.py`, unit, installer and image), System > Remote support card, a support sign-in screen for people arriving through the tunnel, a banner on every device, settings schema 12, `tools/support-hub/` for the owner's server. The installer installs `wireguard-tools` and `nftables` when it can and otherwise reports remote support as unavailable.
+- Chosen after research (agent report): WireGuard out to the owner's server, started at the studio, panel only, time-limited. Tailscale and RustDesk were considered and not used (see D29).
+
+Verified on the Pi 4 against a stand-in support server in a network namespace: tunnel up with a handshake in 3 seconds; through it `/api/hello` said remote, the status needed a login, a wrong code was refused, the code signed in with the chosen role, PIN change, invites, session start, support settings and power off answered 403, SSH was blocked, the snapshot route passed the checks; restarting the helper mid-session removed the interface and the firewall table and the panel ended the session; Stop removed everything. Afterwards remote support was switched off and cleared on the box, and the stand-in removed.
+
+Independent security review: no high findings; three medium, all fixed with tests: a support network equal to the studio's LAN would have locked every studio device out for good (remote rules now apply only during a session, and an overlapping network is refused); the hub script accepted a key with a line break that could have given a box a support laptop's address (the whole key is checked now, and duplicate keys refused); restarting the panel left the tunnel open with no banner (the panel closes it at start). Also fixed: teardown order, a stale key file, the panel's real port in the firewall (the default is 8080, not 80), an 8 hour cap, lifting the PIN lockout refused through the tunnel, IPv4-mapped addresses, and the docs.
+
+Not verified: a real server on the internet, a studio network, NAT, the hub scripts on a VPS.
+
+## 2026-09-30 (phone layout)
+
+Done:
+- At phone width, list rows wrap: a name keeps room for about ten characters and the buttons move to their own line instead of squeezing it (the Media list showed names a few letters wide); the mapper's surface list and the Access card's button row no longer run off the card. Seen in the refreshed screenshots.
+- The browser test now fails if anything in a card sticks out of it, or a list name is squeezed, at 390 px wide (Media, the mapping card, System).
+- The mapping card numbers its requests and never draws an older answer over a newer one: a likely cause of the one-time failure of the browser test's mapper step (the first state read landing after the "add" answer).
+
+## 2026-09-30 (ST 2110 removed)
+
+Done: removed the planned ST 2110 module and reworded README, ROADMAP, HANDOFF, the manual, pvj/README and pvj/STREAMS to "through a gateway" (D30), after a research report and the owner's go-ahead. Also corrected pvj/README, which still listed the mapper as not built. Nothing of ST 2110 was ever built or tested.
+
 ## 2026-09-30 (live Pi updated, small fixes)
 
 Done:

@@ -102,6 +102,24 @@ function startServer() {
     await page.setInputFiles('#filepick', { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100, 1) });
     await page.waitForFunction(() => /only video, image and audio files/.test(document.getElementById('uploads').textContent), null, { timeout: 8000 });
 
+    // Nothing in a card may be wider than the card at phone width (names squeezed, buttons off the edge).
+    async function fitsCard(selector, what) {
+      const bad = await page.evaluate((sel) => {
+        const out = [];
+        document.querySelectorAll(sel).forEach((card) => {
+          const box = card.getBoundingClientRect();
+          card.querySelectorAll('button, input, select, span, img').forEach((el) => {
+            const r = el.getBoundingClientRect();
+            if (r.width && (r.right > box.right + 1 || r.left < box.left - 1)) out.push((el.textContent || el.id || el.tagName).trim().slice(0, 30));
+          });
+          card.querySelectorAll('.item > span:first-child').forEach((el) => { if (el.getBoundingClientRect().width < 60 && el.textContent.length > 8) out.push('squeezed: ' + el.textContent.slice(0, 30)); });
+        });
+        return out;
+      }, selector);
+      assert(bad.length === 0, what + ': outside the card or squeezed: ' + bad.join(', '));
+    }
+    await fitsCard('.card', 'Media');
+
     // Mix: drag a slider and check the throttle keeps request count sane
     await page.click('nav >> text=Mix');
     await page.waitForSelector('#mo');
@@ -303,6 +321,7 @@ function startServer() {
     await page.waitForFunction((x) => fetch('/api/mapper').then((r) => r.json()).then((d) => Math.abs(d.surfaces[0].vertices[0][0] - (x + 50)) < 0.01), x0);
     await page.fill('#mapsetname', 'Main stage');
     await page.click('#mapsave');
+    await fitsCard('#mapcard', 'Mapping card');
     await page.waitForSelector('#mapsets >> option:has-text("Main stage")', { state: 'attached' });
     await page.click('#mapon');
     await page.waitForSelector('#mapstatus:has-text("Mapping is on")', { timeout: 20000 });
@@ -313,11 +332,28 @@ function startServer() {
     await page.waitForFunction(() => !document.querySelector('.map-entry'));
     await page.click('nav >> text=System');
     await page.waitForSelector('h1:has-text("System")');
+    // Remote support: off by default; settings saved and checked; allowing it shows the start controls
+    await page.waitForSelector('#supportcard #supportallow');
+    assert(/Remote support is off/.test(await page.textContent('#supportcard')), 'remote support starts off');
+    await page.fill('#support-endpoint', 'support.example.com:51820');
+    await page.fill('#support-server_key', 'a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=');
+    await page.fill('#support-address', '10.77.0.40');
+    await page.fill('#support-network', '10.77.0.0/24');
+    await page.click('#supportsave');
+    await page.click('#supportallow');
+    await page.waitForSelector('#supportstart');
+    await page.waitForSelector('#supportwhy');                       // no helper in the test harness: said plainly
+    await page.fill('#support-address', '10.99.0.40');
+    await page.click('#supportsave');
+    await page.waitForFunction(() => /inside the support network/.test(document.getElementById('msg').textContent));
+    await page.click('#supportallow');
+    await page.waitForFunction(() => /Remote support is off/.test(document.getElementById('supportcard').textContent));
     await page.click('button:has-text("Night red")');
     await page.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
     await page.click('text=Create guest link');
     await page.waitForFunction(() => { const i = document.querySelector('input[aria-label="Guest link"]'); return i && !i.hidden && /#token=/.test(i.value); });
     const guestLink = await page.inputValue('input[aria-label="Guest link"]');
+    await fitsCard('.card', 'System');
     if (shots) await page.screenshot({ path: path.join(shots, '4-system.png'), fullPage: true });
 
     // Guest (view only) via the link in a fresh context

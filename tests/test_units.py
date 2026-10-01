@@ -126,6 +126,31 @@ class SysdUnitTest(unittest.TestCase):
             self.assertIn("pvj-sysd.service", f.read())
 
 
+class SupportdUnitTest(unittest.TestCase):
+    def test_the_support_helper_has_only_net_admin_and_its_own_folders(self):
+        u = load_units()["pvj-supportd.service"]
+        self.assertEqual(u["CapabilityBoundingSet"], ["CAP_NET_ADMIN"])
+        self.assertEqual(u["NoNewPrivileges"], ["yes"])
+        self.assertEqual(sorted(words(u, "RestrictAddressFamilies")), ["AF_INET", "AF_INET6", "AF_NETLINK", "AF_UNIX"])
+        for key, value in (("ProtectSystem", "strict"), ("RuntimeDirectory", "pvj-supportd"), ("RuntimeDirectoryMode", "0750"),
+                           ("StateDirectory", "pvj-support"), ("StateDirectoryMode", "0700"), ("MemoryDenyWriteExecute", "yes"),
+                           ("SystemCallFilter", "@system-service"), ("ProtectKernelModules", "yes")):
+            self.assertEqual(u[key], [value], key)
+        self.assertNotIn("PrivateUsers", u)            # it would hide the caller's uid from the peer check
+        self.assertNotIn("PrivateNetwork", u)          # it works on the box's own network
+
+    def test_installer_and_image_enable_it_and_load_wireguard(self):
+        with open(os.path.join(REPO, "install", "install.sh")) as f:
+            sh = f.read()
+        self.assertIn("pvj-supportd.service", sh)
+        self.assertIn("echo wireguard >", sh)
+        self.assertIn("wireguard-tools", sh)
+        with open(os.path.join(REPO, "image", "stage-pvj", "00-install-pvj", "01-run.sh")) as f:
+            self.assertIn("pvj-supportd.service", f.read())
+        with open(os.path.join(REPO, "image", "stage-pvj", "00-install-pvj", "00-packages-nr")) as f:
+            self.assertEqual({"wireguard-tools", "nftables"} - set(f.read().split()), set())
+
+
 class WebUnitCaptureTest(unittest.TestCase):
     def test_the_panel_may_read_capture_devices_and_only_those_besides_alsa(self):
         web = load_units()["pvj-web.service"]
