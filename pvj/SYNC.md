@@ -19,7 +19,11 @@ The client's card shows what it does: the server it follows, "in step" or "catch
 
 The server sends a small message about ten times a second, and at once when something changes: the clip's name, the position, pause, speed, looping and blackout. A client that is off by more than half a second (a new clip, a seek, a late start) jumps, aimed a little ahead to allow for the time a jump takes; it learns that allowance from each jump. Smaller differences are corrected by playing up to 4 percent faster or slower for a moment, which is not visible and keeps the sound's pitch. Within 15 ms it plays at the server's speed.
 
-Measured on a Raspberry Pi 4 with two headless players following each other over the network on the same box: after the first jump, a median difference of 0 ms and at most 40 ms (one frame at 25 fps, which is also how finely the position is read). **Not yet measured between two boxes on two screens.**
+Measured on a Raspberry Pi 4:
+- two headless players following each other over the network on the same box: after the first jump, a median difference of 0 ms and at most 40 ms (one frame at 25 fps, which is also how finely the position is read);
+- the box's real player as a client of a stand-in server on a Mac on Wi-Fi, following a 1080p film from a USB stick into the middle (10 minutes in): three jumps in the first 6 seconds (the first jump into a long file took longer than expected, the next overshot while the allowance was learned), then "in step" for the rest of the 40 seconds, between 14 ms behind and 11 ms ahead.
+
+So allow a few seconds at the start of a synced show (a still or black at the start of the clip hides it). **Not yet measured between two boxes on two screens.**
 
 ## Video wall
 
