@@ -69,6 +69,7 @@ function startServer() {
     await page.goto(base + '/');
     await page.waitForSelector('.pin');
     await shot('connect', (f) => shell().screenshot({ path: f }));
+    await shot('screen-phone-connect', (f) => page.screenshot({ path: f, fullPage: true }));
 
     for (let i = 0; i < 4; i++) await page.fill(`input[aria-label="PIN digit ${i + 1}"]`, info.pin[i]);
     await page.fill('#devname', 'Anthony\'s phone');
@@ -213,6 +214,27 @@ function startServer() {
     await shot('access', (f) => card('Access').screenshot({ path: f }));
 
     await page.evaluate(() => { document.querySelector('.tabs').style.removeProperty('display'); });
+
+    // Whole screens, top to bottom, as a starting point for mock-ups (docs/mockups/current). Every optional module
+    // is switched on first, so every card is in the picture.
+    for (const m of ['wall', 'projector', 'mapper', 'inputs-srt', 'scheduler', 'control-dmx', 'control-midi', 'network']) {
+      await api('POST', '/api/modules/' + m, { enabled: true });
+    }
+    async function screens(prefix) {
+      for (const tab of ['Live', 'Mix', 'Media', 'System']) {
+        await page.click('nav >> text=' + tab);
+        await page.waitForTimeout(1500);                      // cards that load their own data
+        await shot(prefix + '-' + tab.toLowerCase(), (f) => page.screenshot({ path: f, fullPage: true }));
+      }
+    }
+    await screens('screen-phone');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.reload();
+    await page.waitForSelector('.pads');
+    await screens('screen-laptop');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await page.waitForSelector('.pads');
 
     // Another theme, and the wide layout.
     await api('POST', '/api/theme', { name: 'night-red', accent: null });
