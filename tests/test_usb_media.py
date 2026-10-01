@@ -230,6 +230,20 @@ class UsbImportTest(ServerBase):
         self.assertIn("cancelled", self.wait()["error"])
         self.assertFalse(os.path.exists(os.path.join(self.media, "film.mp4")))
 
+class UsbDriveAndAutostartPadTest(UsbMediaTest):
+    def test_play_every_clip_of_one_drive(self):
+        st, body, _ = self.call("POST", "/api/play", {"usb_drive": "NXLX-USB"}, token=self.token)
+        self.assertEqual((st, body["playing"], body["files"]), (200, "NXLX-USB", 2))    # Film One.mp4 and b.mkv; not the link
+        self.assertEqual(self.call("POST", "/api/play", {"usb_drive": "NOPE"}, token=self.token)[0], 404)
+        self.assertEqual(self.call("POST", "/api/play", {"usb_drive": "LINKED"}, token=self.token)[0], 404)
+
+    def test_autostart_refuses_an_empty_pad_and_media_says_usb_autostart_is_on(self):
+        from pvj import autostart
+        self.api.autostart = autostart.Autostart(self.api, self.settings, log=lambda *_: None)
+        st, body, _ = self.call("POST", "/api/autostart", {"mode": "pad", "pad": [2, 11]}, token=self.token)
+        self.assertEqual((st, body["error"]), (400, "choose a pad that has a clip"))
+        self.call("POST", "/api/autostart", {"mode": "usb"}, token=self.token)
+        self.assertTrue(self.call("GET", "/api/media", token=self.token)[1]["autostart_usb"])
 
 if __name__ == "__main__":
     unittest.main()

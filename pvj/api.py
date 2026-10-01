@@ -153,6 +153,8 @@ class Api:
         self._import_lock = threading.Lock()
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
+        from . import health as health_mod
+        self.health = health_mod.Health(self, getattr(player, "rundir", "/run/pvj"))     # checks start in server.build
         from . import sync as sync_mod
         self.sync = sync_mod.SyncManager(self, settings)            # started by server.build
         from . import support as support_mod
@@ -380,7 +382,8 @@ class Api:
             except OSError:
                 pass
         return {"files": [d["name"] for d in details], "details": details, "free": self._free_space(),
-                "max_upload": MAX_UPLOAD_BYTES, "usb": self.usb_drives()}
+                "max_upload": MAX_UPLOAD_BYTES, "usb": self.usb_drives(),
+                "autostart_usb": self.settings.data.get("autostart", {}).get("mode") == "usb"}
 
     def _safe_new_name(self, name):
         if not valid_name(name):
@@ -635,6 +638,27 @@ class Api:
         self._started_playing()
         return paths
 
+    def play_usb_drive(self, body):
+        """{"usb_drive": label, "shuffle": bool}: every clip at the top of that USB drive, looping. Used by autostart,
+        so the drive that was plugged in is the one that plays (not whichever the /media/usb link points to)."""
+        label = body.get("usb_drive")
+        shuffle = body.get("shuffle", False)
+        if not isinstance(shuffle, bool):
+            raise bad("shuffle must be true or false")
+        drive = [d for d in self.usb_drives() if d["drive"] == label]
+        if not drive:
+            raise ApiError(404, "no USB drive called %s" % label)
+        paths = []
+        for f in drive[0]["files"]:
+            try:
+                paths.append(self.resolve_usb("%s/%s" % (label, f["name"])))
+            except ApiError:
+                pass
+        if not paths:
+            raise ApiError(404, "no clips at the top of %s" % label)
+        self._start_list(paths, "loop", shuffle)
+        return {"playing": label, "files": len(paths)}
+
     def play_slideshow(self, body):
         """The images of the media folder, or of a USB drive, one after another: {"slideshow": {"source": "media" or a
         drive label, "seconds": 0.1 to 3600, "ending": ..., "shuffle": ...}}. The old Presenter tab's Slide Show."""
@@ -700,6 +724,8 @@ class Api:
             return self.play_slideshow(body)
         if "capture" in body:
             return self.play_capture(body)
+        if "usb_drive" in body:
+            return self.play_usb_drive(body)
         if "pad" in body:
             pad = body["pad"]
             if not (isinstance(pad, list) and len(pad) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in pad)):
@@ -906,9 +932,11 @@ class Api:
         from . import probe
         path = self.resolve_usb(body.get("usb")) if "usb" in body else self.resolve_media(body.get("name"))
         try:
-            return probe.probe(path, getattr(self.player, "mpv_bin", "mpv"))
+            info = probe.probe(path, getattr(self.player, "mpv_bin", "mpv"))
         except probe.ProbeError as e:
             raise ApiError(422, str(e))
+        info["advice"] = probe.advice(info, self.board["kind"])
+        return info
 
     def system_info(self, body, device, client):
         """Versions, storage and screens: the old Settings and Display tabs' information buttons."""
@@ -1195,6 +1223,9 @@ class Api:
         with self.settings.lock:
             self.settings.save()
         return state
+
+    def get_health(self, body, device, client):
+        return self.health.report()
 
     # --- remote support (see support.py) --------------------------------------------------
     def _support_clash_networks(self):
@@ -1489,6 +1520,11 @@ class Api:
                 new = autostart_mod.validate(body, self.settings.data["autostart"])
             except autostart_mod.AutostartError as e:
                 raise bad(str(e))
+            if new["mode"] == "pad":           # a pad that exists and has a clip, or it would fail at every start
+                banks = self.settings.data["pads"]["banks"]
+                b, i = new["pad"]
+                if not (b < len(banks) and i < 12 and banks[b]["pads"][i].get("file")):
+                    raise bad("choose a pad that has a clip")
             self.settings.data["autostart"] = new
             self.settings.save()
         return self.autostart.status()
@@ -1786,6 +1822,7 @@ class Api:
             ("GET", "/api/inputs"): ("view", self.get_inputs),
             ("GET", "/api/overlay"): ("view", self.get_overlay),
             ("POST", "/api/overlay"): ("live", self.set_overlay),
+            ("GET", "/api/health"): ("view", self.get_health),
             ("GET", "/api/support"): ("view", self.get_support),
             ("POST", "/api/support/config"): ("full", self.set_support),
             ("POST", "/api/support/start"): ("full", self.start_support),

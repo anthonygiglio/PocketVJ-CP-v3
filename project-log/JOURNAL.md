@@ -8,6 +8,24 @@ Newest entry first. One entry per working session: what was done, what merged, w
 
 Done: from the manual deep dive (the old "Loading from USB to internal"): Media > USB drive > **Copy to the box** copies a clip into the media folder in the background (`POST /api/media/import`, progress at `GET /api/media/import`, `.../cancel`), through the same code as an upload, so the same checks apply (name, free space, size limit, a hidden temporary file, no overwrite unless asked, one at a time with uploads). Tests with a fake drive, including cancel and bad references. Independent review: no high findings; fixed: the "done" line vanished at the next redraw, a stick that stops answering gets a plain message (tested with a read that fails half-way, the half file removed), an empty file is refused plainly, no leaked file handle, the copy stops if the device that started it is removed, a generic message for unexpected errors. Cancel acts between chunks (a stick that hangs without an error cannot be interrupted until it answers). Not run on the Pi with the real stick yet.
 
+## 2026-09-30 (autostart for installations)
+
+Done: from the manual deep dive (the old Autostart tab had a slideshow, USB and random order). Autostart now has a slideshow (seconds a picture), a pad, "play the USB stick" (also each time a drive with clips is plugged in, checked every 2 s; a drive already there at start is not played twice, a drive without clips is ignored), and shuffle for every clip, the slideshow and USB. Settings saved before these keys existed keep working with defaults (no schema change). Tests on a fake clock and fake drives, a browser step. Independent review: no high findings; fixed: the drive that is plugged in is the one that plays (it used the /media/usb link, which can point elsewhere), a stick mounted during boot is no longer missed, switching back to USB mode no longer interrupts a show, a drive that comes and goes within 10 s (bad contact) does not restart playback, a pad must exist and have a clip, and the Media screen says when plugging a stick in will start it. Not run on the Pi yet with a real stick swap.
+
+## 2026-09-30 (prepare your clips)
+
+Done: a "Prepare your clips" section in docs/MANUAL.md from the manual deep dive and this project's own measurements (what was measured on the Pi 4, what was not: 1080p 50/60 fps, HEVC, 4K, Pi 5 and Pi 3), a HandBrake recipe, naming for Quick play, sync advice and power; Troubleshooting now covers https-first browsers and stutters. Media > Info adds plain-word advice per board (`probe.advice`): only warnings that were measured or plainly beyond the board, and "not tested" where it was not.
+
+## 2026-09-30 (health card and the box's address)
+
+Done: System > Health (`pvj/health.py`, `GET /api/health`, any paired device): power (the Pi's `rpi_volt` undervoltage alarm, readable without root, checked every 5 s and remembered in /run until a reboot, since a short drop is easy to miss), temperature with the Pi's slow-down points, the player (hardware or software decode, dropped frames a second), load and memory, whether the helpers answer, and the box's addresses; a full-access device can put the address alone on the display (a new "address" item for the access screen, with no code on it). From the manual deep dive (the old Powersupply, Check Services and GPU Usage buttons). Corrected NETWORK.md: `.local` already works.
+
+Checked on the Pi: the alarm file exists (`/sys/class/hwmon/hwmon1`, `in0_lcrit_alarm` 0) and `vcgencmd get_throttled` agrees (0x0); `/dev/vcio` is root-only, so vcgencmd is not used. The card itself goes on the box after the sync branch merges (the box's settings are already at schema 13).
+
+## 2026-09-30 (old OSC names)
+
+Done: from the manual deep dive (three agents read the old manual against the build; their combined list is the order of the next work). `/startmasteronce01` to `99` failed silently (they were passed as a preset name the parser does not know; the old receiver ran startmasteroneNN): fixed. Old names for features that exist now are mapped (test screen, test tones, overlay, slideshow, flip as a toggle); old names that need full access or are not built are refused explicitly and listed in pvj/OSC.md.
+
 ## 2026-09-30 (multi-box sync and video wall)
 
 Done:

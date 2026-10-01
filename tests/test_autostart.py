@@ -139,6 +139,105 @@ class AutostartTest(unittest.TestCase):
         self.assertIsNone(a._thread)
 
 
+class NewModesTest(unittest.TestCase):
+    """From the manual deep dive: installations want a slideshow, shuffle, a pad, and whatever is on a USB stick."""
+
+    def setUp(self):
+        self.settings = Settings(os.path.join(tempfile.mkdtemp(), "settings.json"))
+        self.settings.load()
+        self.api = FakeApi()
+        self.api.drives = []
+        self.api.usb_drives = lambda: self.api.drives
+        self.now = [1000.0]
+        self.a = autostart.Autostart(self.api, self.settings, log=lambda *_: None, sleep=lambda *_: None, clock=lambda: self.now[0])
+
+    def cfg(self, **kw):
+        self.settings.data["autostart"] = autostart.validate(kw, self.settings.data["autostart"])
+
+    def test_slideshow_shuffle_and_pad(self):
+        self.cfg(mode="slideshow", seconds=8, shuffle=True)
+        self.a.run_now()
+        self.assertEqual(self.api.calls[-1], {"slideshow": {"source": "media", "seconds": 8, "shuffle": True, "ending": "loop"}})
+        self.cfg(mode="all", shuffle=True)
+        self.a.run_now()
+        self.assertEqual(self.api.calls[-1], {"preset": "startless", "shuffle": True})
+        self.cfg(mode="pad", pad=[1, 4])
+        self.a.run_now()
+        self.assertEqual(self.api.calls[-1], {"pad": [1, 4]})
+        for bad in ({"seconds": 0}, {"seconds": True}, {"pad": [0]}, {"pad": [0, 12]}, {"pad": [16, 0]}, {"shuffle": "yes"}, {"mode": "dance"}):
+            with self.assertRaises(autostart.AutostartError, msg=str(bad)):
+                autostart.validate(bad, self.settings.data["autostart"])
+
+    def test_a_usb_stick_plugged_in_plays_and_one_already_there_plays_once(self):
+        self.cfg(mode="usb")
+        self.api.pid = 100
+        self.a.tick()                                            # start: no drive yet
+        self.assertEqual(self.a.last["ok"], False)
+        self.tick()
+        self.assertEqual(self.api.calls, [])
+        self.api.drives = [{"drive": "SHOW", "files": [{"name": "a.mp4", "size": 1}]}]
+        self.assertTrue(self.tick())                             # plugged in: that drive plays
+        self.assertEqual(self.api.calls, [{"usb_drive": "SHOW", "shuffle": False}])
+        self.tick()
+        self.tick()
+        self.assertEqual(len(self.api.calls), 1)                 # still the same stick: not again
+        self.api.drives = []
+        self.tick()
+        self.api.drives = [{"drive": "OTHER", "files": [{"name": "b.mp4", "size": 1}]}]
+        self.tick()
+        self.assertEqual(self.api.calls[-1], {"usb_drive": "OTHER", "shuffle": False})   # swapped: the new one
+        self.api.drives = [{"drive": "EMPTY", "files": []}] + self.api.drives
+        self.tick()
+        self.assertEqual(len(self.api.calls), 2)                 # a drive without clips is ignored
+
+    def tick(self, seconds=11):
+        self.now[0] += seconds
+        return self.a.tick()
+
+    def test_a_stick_mounted_during_boot_is_not_missed(self):
+        """Review finding: mounted between the first run and the first look, it was taken as already seen."""
+        self.cfg(mode="usb")
+        self.api.pid = 100
+        self.api.drives = [{"drive": "SHOW", "files": [{"name": "a.mp4", "size": 1}]}]
+        self.a.tick()                                            # the box starts with the stick in
+        self.assertEqual(self.api.calls, [{"usb_drive": "SHOW", "shuffle": False}])
+        self.tick()
+        self.assertEqual(len(self.api.calls), 1)                 # and plays it once
+
+    def test_switching_back_to_usb_mode_does_not_interrupt_the_show(self):
+        self.cfg(mode="usb")
+        self.api.pid = 100
+        self.a.tick()
+        self.cfg(mode="all")
+        self.tick()
+        self.api.drives = [{"drive": "SHOW", "files": [{"name": "a.mp4", "size": 1}]}]
+        self.tick()
+        self.cfg(mode="usb")
+        self.tick()
+        self.tick()
+        self.assertEqual(self.api.calls, [])
+
+    def test_a_flapping_drive_does_not_restart_playback(self):
+        self.cfg(mode="usb")
+        self.api.pid = 100
+        self.a.tick()
+        stick = [{"drive": "SHOW", "files": [{"name": "a.mp4", "size": 1}]}]
+        self.api.drives = stick
+        self.tick()
+        for _ in range(5):                                       # a bad contact: gone and back every 2 s
+            self.api.drives = []
+            self.tick(2)
+            self.api.drives = stick
+            self.tick(2)
+        self.assertEqual(len(self.api.calls), 1)
+
+    def test_settings_saved_before_the_new_keys_still_work(self):
+        self.settings.data["autostart"] = {"mode": "all", "file": "", "preset": "", "loop": True, "delay": 0}
+        self.a.run_now()
+        self.assertEqual(self.api.calls[-1], {"preset": "startless"})
+        self.assertEqual(autostart.validate({"mode": "slideshow"}, self.settings.data["autostart"])["seconds"], 10)
+
+
 class AutostartApiTest(ServerBase):
     def setUp(self):
         super().setUp()
