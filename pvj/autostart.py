@@ -138,6 +138,12 @@ class Autostart:
                 apply_overlay()
             except Exception as e:
                 self.log("pvj-web: could not put the overlay back: %s" % e)
+        sync = getattr(self.api, "sync", None)
+        if sync is not None:                 # a restarted player lost the wall crop
+            try:
+                sync.apply_wall(force=True)
+            except Exception as e:
+                self.log("pvj-web: could not put the wall crop back: %s" % e)
         apply_mapper = getattr(self.api, "apply_mapper", None)
         if apply_mapper and self.settings.data.get("mapper", {}).get("surfaces"):   # it lost the mapping too
             try:

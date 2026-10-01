@@ -134,6 +134,7 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | --- | --- |
 | **Autostart**: what plays at power-up and after a crash | [pvj/AUTOSTART.md](../pvj/AUTOSTART.md) |
 | **Weekly schedule**: play, start scripts, stop, blackout, show and projector power at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
+| **Video wall and sync**: boxes play in step (server and client), each can show a tile of the picture | [pvj/SYNC.md](../pvj/SYNC.md) |
 | **Projection mapper**: quads, triangles and grids, lined up from the phone (card on Mix) | [pvj/MAPPER.md](../pvj/MAPPER.md) |
 | **Projector control**: on, off and picture mute over PJLink | [pvj/PROJECTORS.md](../pvj/PROJECTORS.md) |
 | **Streams**: SRT, RTSP, RTMP | [pvj/STREAMS.md](../pvj/STREAMS.md) |
@@ -164,12 +165,18 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 
 **Hostile drives and files.** A USB stick or an upload can hold a file that is named `.mp4` but is really a playlist or a script for the player. The player is started so that it plays media only: it does not follow references inside files (playlists, EDL), load sidecar subtitle or audio files, load scripts or run youtube-dl. This was tested on a Raspberry Pi 4 with fake playlists. A drive is also mounted read-only with `nosuid,nodev,noexec`, and only the top level of a drive is listed, up to a limit.
 
+## Health
+
+System > Health says in plain words whether the box is well: the power supply (a Pi warns when the voltage drops; any drop is remembered until the next reboot, because it is the most common cause of odd stutters, network drops and damaged SD cards: use the official supply, 5 V 3 A for a Pi 4), the temperature (above 80 C a Pi slows down), the player (decoded in hardware or software, and dropped frames a second while playing), the load, and whether the helpers are running. It also lists the addresses to open the panel from another device, and a full-access device can put the address on the display for 2 minutes.
+
 ## 7. Troubleshooting
 
 | Symptom | Try |
 | --- | --- |
 | The browser says the site is not secure or cannot be reached | Type `http://` in front of the address: the panel uses plain HTTP on your own network, and browsers that try HTTPS first fail |
 | A clip stutters | Media > Info on the clip says if it is too heavy for this box; see Prepare your clips |
+
+| Stutters, network drops, odd restarts | System > Health: a "Power" warning means the power supply is too weak |
 | The page does not load | Same network as the box? `systemctl status pvj-web` on the box; the address may have changed (check the router's client list) |
 | "Wrong PIN" | The PIN changes at every start. `sudo pvj-pin`, or System > New PIN from a paired device |
 | A pad is grey and says Empty | Edit pads (full access) and assign a clip |
@@ -182,6 +189,6 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 
 ## 8. Not built yet
 
-Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, the presenter, the video wall, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
+Crossfade, Wi-Fi and hotspot, updates from the network, a panel update button, NDI, AES67/Dante, the presenter, importing old mapper files and custom DMX layouts. See [ROADMAP.md](../ROADMAP.md).
 
 **SMPTE ST 2110** is not supported directly and not planned: use a converter from 2110 to HDMI into the live input (USB capture), or from 2110 to NDI once NDI is built.
