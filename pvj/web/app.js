@@ -935,7 +935,7 @@
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
     var cards = [vitals, boxCard()];
-    cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full));
+    cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full), syncCard());
     if (full || (S.device && S.device.remote)) cards.push(supportCard());
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
@@ -1257,6 +1257,60 @@
     });
     return card;
   }
+  // ---- multi-box sync and video wall -----------------------------------
+  var syncTimer = null;
+  function syncCard() {
+    var body = h('div', { class: 'list', id: 'syncbody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'synccard' }, h('h2', { text: 'Sync and video wall' }), body);
+    var mod = S.modules.filter(function (m) { return m.id === 'wall'; })[0];
+    if (!mod || !mod.enabled) {
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'syncmsg', text: 'Off. Switch on "Video wall and sync" under Modules above (beta).' }));
+      return card;
+    }
+    var full = can('full');
+    function post(b) { return act('POST', '/api/sync', b, function (data) { say(''); draw(data); }); }
+    function refresh() { api('GET', '/api/sync').then(function (r) { if (document.getElementById('synccard') && r.ok) draw(r.data); }); }
+    function draw(d) {
+      clearTimeout(syncTimer);
+      body.textContent = '';
+      var c = d.config, f = d.follow || {};
+      var line = c.role === 'off' ? 'Off: this box plays on its own.' :
+        c.role === 'server' ? 'Server: other boxes in group "' + c.group + '" follow this one. ' + (d.sent ? d.sent + ' messages sent.' : '') :
+        'Client of group "' + c.group + '": ' + (d.server ? 'following ' + d.server + '. ' : 'listening for a server. ') +
+          (f.state || '') + (f.file ? ', ' + f.file : '') + (typeof f.error_ms === 'number' ? ', ' + f.error_ms + ' ms off' : '');
+      body.appendChild(h('div', { class: 'k', id: 'syncline', text: line }));
+      if (c.role !== 'off') syncTimer = setTimeout(refresh, 2000);
+      if (!full) return;
+      body.appendChild(h('div', { class: 'row wrap', id: 'syncroles' }, [['off', 'Off'], ['server', 'Server (others follow)'], ['client', 'Client (follow a server)']].map(function (r) {
+        return h('button', { class: 'btn small' + (c.role === r[0] ? ' on' : ''), 'aria-pressed': c.role === r[0] ? 'true' : 'false', id: 'syncrole-' + r[0], text: r[1],
+          onclick: function () { post({ role: r[0] }); } });
+      })));
+      var group = h('input', { class: 'text-input mono', id: 'syncgroup', 'aria-label': 'Group name', value: c.group, maxlength: 24 });
+      body.appendChild(h('label', { class: 'k', for: 'syncgroup', text: 'Group name (the same on every box that plays together)' }));
+      body.appendChild(h('div', { class: 'row' }, group, h('button', { class: 'btn small', id: 'syncgroupsave', text: 'Save', onclick: function () { post({ group: group.value.trim() }); } })));
+      body.appendChild(h('div', { class: 'k', text: 'Every box needs the same clips with the same file names (media folder or the top of a USB drive). Clients follow the server\'s clip, position, pause and blackout.' }));
+      var w = c.wall, nums = function (lo, hi) { var a = []; for (var i = lo; i <= hi; i++) a.push(i); return a; };
+      function pick(id, label, values, cur, fmt) {
+        return h('select', { class: 'text-input', id: id, 'aria-label': label }, values.map(function (v) { return h('option', { value: String(v), text: fmt(v), selected: v === cur }); }));
+      }
+      var cols = pick('wallcols', 'Columns', nums(1, 8), w.cols, function (v) { return v + (v === 1 ? ' column' : ' columns'); });
+      var rows = pick('wallrows', 'Rows', nums(1, 8), w.rows, function (v) { return v + (v === 1 ? ' row' : ' rows'); });
+      var col = pick('wallcol', 'This screen\'s column', nums(0, 7), w.col, function (v) { return 'column ' + (v + 1); });
+      var row = pick('wallrow', 'This screen\'s row', nums(0, 7), w.row, function (v) { return 'row ' + (v + 1); });
+      var bezel = h('input', { class: 'text-input mono', id: 'wallbezel', type: 'number', min: 0, max: 20, step: 0.5, value: w.bezel, 'aria-label': 'Bezel, percent of a screen' });
+      body.appendChild(h('div', { class: 'k', text: 'Video wall: this screen shows one tile of the picture. 1 column and 1 row shows the whole picture.' }));
+      body.appendChild(h('div', { class: 'row wrap' }, cols, rows));
+      body.appendChild(h('div', { class: 'row wrap' }, col, row));
+      body.appendChild(h('label', { class: 'k', for: 'wallbezel', text: 'Frame between screens (percent of a screen, hides that much picture)' }));
+      body.appendChild(h('div', { class: 'row' }, bezel, h('button', { class: 'btn small', id: 'wallsave', text: 'Save wall', onclick: function () {
+        post({ wall: { cols: +cols.value, rows: +rows.value, col: +col.value, row: +row.value, bezel: +bezel.value } });
+      } })));
+    }
+    refresh();
+    return card;
+  }
+
   // ---- projectors (PJLink) ---------------------------------------------
   var projForm = { name: '', host: '', port: '4352', password: '' };  // survives redraws
   function projectorsCard(full) {
@@ -1713,6 +1767,7 @@
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
     clearTimeout(accessTimer);
+    clearTimeout(syncTimer);
     keepNetForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
