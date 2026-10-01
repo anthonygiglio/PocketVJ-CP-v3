@@ -33,7 +33,7 @@ Refused on purpose: wireless interfaces, virtual ones (Docker, bridges, tunnels)
 
 ## Not built yet
 
-Wi-Fi setup and the box's own hotspot, several addresses per port, VLANs, bonding, static routes, choosing the DHCP range when serving addresses, and a friendly `.local` name (needs avahi).
+Wi-Fi setup and the box's own hotspot, several addresses per port, VLANs, bonding, static routes and choosing the DHCP range when serving addresses. (The box does answer to `<name>.local`, for example `nxlx-mastercontrol.local`: that comes from the system image, not this module; checked from a Mac on the test network.)
 
 ## Tested, and not
 

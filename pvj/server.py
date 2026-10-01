@@ -380,6 +380,11 @@ def build(env=None, player=None):
     api.support.client = supportd_mod.SupportdClient(os.path.join(os.environ.get("PVJ_SUPPORTD_DIR", "/run/pvj-supportd"), "supportd.sock"))
     api.support.panel_port = int(env.get("PVJ_PORT", "8080"))
     api.support.close_leftover()
+    api.health.start()                       # notices a short undervoltage with nobody looking
+    try:
+        api.sync.apply()                     # lead or follow, as the settings say
+    except Exception as e:                   # a busy port must not stop the panel
+        print("pvj-web: sync not started: %s" % e, file=sys.stderr)
     api.sweep_stale_uploads()  # temp files left by a power cut can be gigabytes
     api.osc = osc_mod.OscManager(api, settings)
     api.scheduler = scheduler_mod.Scheduler(api, settings, registry)

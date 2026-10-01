@@ -17,7 +17,7 @@ import os
 import tempfile
 import threading
 
-SCHEMA = 12
+SCHEMA = 13
 
 
 class SettingsError(Exception):
@@ -50,6 +50,7 @@ def default_settings():
         "mapper": {"on": False, "screen": None, "surfaces": [], "sets": {}},
         "support": {"allowed": False, "endpoint": "", "server_key": "", "address": "", "network": "", "max_minutes": 240},
         "support_log": [],
+        "sync": {"role": "off", "group": "main", "port": 5577, "wall": {"cols": 1, "rows": 1, "col": 0, "row": 0, "bezel": 0.0}},
     }
 
 
@@ -113,8 +114,14 @@ def _v11_to_v12(data):
     data.setdefault("support_log", [])
 
 
+def _v12_to_v13(data):
+    """13: multi-box sync and the video wall. Off; the whole picture."""
+    data.setdefault("sync", {"role": "off", "group": "main", "port": 5577,
+                             "wall": {"cols": 1, "rows": 1, "col": 0, "row": 0, "bezel": 0.0}})
+
+
 MIGRATIONS = {1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9,
-              9: _v9_to_v10, 10: _v10_to_v11, 11: _v11_to_v12}
+              9: _v9_to_v10, 10: _v10_to_v11, 11: _v11_to_v12, 12: _v12_to_v13}
 
 
 def migrate(data, migrations=None, current=SCHEMA):

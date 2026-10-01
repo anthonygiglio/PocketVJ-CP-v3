@@ -45,7 +45,7 @@ def lines(pin, hostname, addresses):
 QR_IDS = {"view": 1, "live": 2, "pin": 3}       # overlay ids on the player
 QR_REFRESH = 15.0
 QR_MAX_SCALE = 16                                # pixels per module; bounds the bitmap whatever size the player reports                                # a player that restarted has lost its overlays: draw them again after this long
-MANUAL_ITEMS = ("pin", "view", "live")
+MANUAL_ITEMS = ("pin", "view", "live", "address")    # "address": only where to open the panel
 MANUAL_MIN_SECONDS, MANUAL_MAX_SECONDS, MANUAL_DEFAULT_SECONDS = 10, 3600, 60
 LABELS = {"pin": "Full access PIN", "view": "Guest, watch only, code", "live": "Presenter, play and mix, code"}
 
@@ -82,9 +82,9 @@ class PinScreen:
         """Put access details on the display for `seconds`, even over a playing clip (it is an explicit request).
         `items` is any of "pin" (full access), "view" (guest code), "live" (presenter code); a code that does not
         exist yet is made. Returns the status. Raises ValueError for bad input."""
-        if (not isinstance(items, list) or not items or len(items) > 3 or len(set(items)) != len(items)
+        if (not isinstance(items, list) or not items or len(items) > len(MANUAL_ITEMS) or len(set(items)) != len(items)
                 or not all(i in MANUAL_ITEMS for i in items)):
-            raise ValueError("choose what to show: pin, view and/or live")
+            raise ValueError("choose what to show: pin, view, live and/or address")
         if isinstance(seconds, bool) or not isinstance(seconds, int) or not MANUAL_MIN_SECONDS <= seconds <= MANUAL_MAX_SECONDS:
             raise ValueError("seconds must be %d to %d" % (MANUAL_MIN_SECONDS, MANUAL_MAX_SECONDS))
         with self._lock:
@@ -118,6 +118,8 @@ class PinScreen:
         addr += ["http://%s/" % clean(a) for a in self.addresses()[:1]]
         out = ["nxlx.mastercontrol", "Open " + "  or  ".join(addr) if addr else "Open the panel in a browser"]
         for item in m["items"]:
+            if item == "address":                       # the address is the line above; nothing secret to add
+                continue
             value = clean(str(self.auth.current_pin)) if item == "pin" else clean(joins.get(item, "----"))
             out.append("%s  %s" % (LABELS[item], value))
         qrs = [r for r in ("view", "live") if r in m["items"]]
