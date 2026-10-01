@@ -4,6 +4,13 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (phone layout)
+
+Done:
+- At phone width, list rows wrap: a name keeps room for about ten characters and the buttons move to their own line instead of squeezing it (the Media list showed names a few letters wide); the mapper's surface list and the Access card's button row no longer run off the card. Seen in the refreshed screenshots.
+- The browser test now fails if anything in a card sticks out of it, or a list name is squeezed, at 390 px wide (Media, the mapping card, System).
+- The mapping card numbers its requests and never draws an older answer over a newer one: a likely cause of the one-time failure of the browser test's mapper step (the first state read landing after the "add" answer).
+
 ## 2026-09-30 (panel screenshots refreshed)
 
 Done:

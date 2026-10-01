@@ -85,7 +85,11 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px
 .list .item > span, .list .item > div { min-width: 0; overflow-wrap: anywhere; }
 /* Buttons in a list row keep their words whole; a long address or name wraps in its own column instead. */
 .list .item .btn { white-space: nowrap; flex: none; }
-.list .item > span:first-child { flex: 1 1 0; }
+/* At phone width a row's name keeps room for about ten characters; the buttons move to a line of their own before
+   they squeeze it (the Media list showed names a few letters wide, the mapper's Remove ran off the card). */
+.list .item { flex-wrap: wrap; }
+.list .item > span:first-child, .list .item > button.linkish:first-child { flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
+.list .item > .row { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 /* Stream and other addresses keep their case (the small-caps label style would mangle them). */
 .addr { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--mu); overflow-wrap: anywhere; }
 /* The screen preview keeps the picture's shape and never overflows the card. */
