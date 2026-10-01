@@ -797,6 +797,25 @@
     if (i.advice && i.advice.length) text += '. Note: ' + i.advice.join(' ');
     return text;
   }
+  // A copy from a USB drive runs on the box; this follows it until it is done.
+  var importTimer = null;
+  function watchImport(d) {
+    clearTimeout(importTimer);
+    var line = document.getElementById('importline');
+    if (!line) return;
+    line.textContent = '';
+    if (d.active) {
+      var pct = d.size ? Math.floor(100 * d.done / d.size) : 0;
+      line.appendChild(document.createTextNode('Copying ' + d.name + ': ' + pct + '% (' + megabytes(d.done) + ' of ' + megabytes(d.size) + ') '));
+      line.appendChild(h('button', { class: 'btn small', id: 'importcancel', text: 'Cancel', onclick: function () { act('POST', '/api/media/import/cancel', {}, watchImport); } }));
+      importTimer = setTimeout(function () { api('GET', '/api/media/import').then(function (r) { if (r.ok) watchImport(r.data); }); }, 1000);
+    } else if (d.error || d.result) {
+      // Kept after the list is redrawn, until the next copy (a redraw used to wipe it at once).
+      S.importNote = d.error ? 'Copy of ' + d.name + ' stopped: ' + d.error : d.name + ' is now on the box.';
+      line.textContent = S.importNote;
+      if (d.result && !d.seen) { d.seen = true; refreshMedia(); }
+    }
+  }
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
   function refreshMedia() {
     return api('GET', '/api/media').then(function (r) {
@@ -827,6 +846,11 @@
     });
   }
   function media() {
+    setTimeout(function () {
+      var line = document.getElementById('importline');
+      if (line && S.importNote) line.textContent = S.importNote;
+      api('GET', '/api/media/import').then(function (r) { if (r.ok && r.data.active) watchImport(r.data); });
+    }, 0);
     var info = S.mediaInfo || {};
     var full = can('full');
     var details = info.details || S.media.map(function (n) { return { name: n, size: 0 }; });
@@ -919,12 +943,21 @@
           h('div', { class: 'k', text: 'USB drive: ' + drive.drive + ' (read only, plays straight from the drive)' }),
           info.autostart_usb ? h('div', { class: 'k', text: 'Autostart is set to play USB sticks: plugging one in starts it, even during a show.' }) : null,
           h('div', { class: 'list' }, drive.files.length ? drive.files.map(function (f) {
+            var have = S.media.indexOf(f.name) >= 0;
             return h('div', { class: 'item' },
-              h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) })),
-              h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + f.name + ' from USB', disabled: !can('live'),
-                onclick: function () { act('POST', '/api/play', { usb: drive.drive + '/' + f.name }, function () { say('Playing ' + f.name); poll(); }); } }));
+              h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) + (have ? ' \u00b7 also on the box' : '') })),
+              h('span', { class: 'row' },
+                h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + f.name + ' from USB', disabled: !can('live'),
+                  onclick: function () { act('POST', '/api/play', { usb: drive.drive + '/' + f.name }, function () { say('Playing ' + f.name); poll(); }); } }),
+                can('full') ? h('button', { class: 'btn small', text: have ? 'Copy again' : 'Copy to the box', 'aria-label': 'Copy ' + f.name + ' to the box',
+                  onclick: function () {
+                    if (have && !window.confirm(f.name + ' is already on the box. Replace it?')) return;
+                    S.importNote = '';
+                    act('POST', '/api/media/import', { usb: drive.drive + '/' + f.name, replace: have }, function (d) { watchImport(d); });
+                  } }) : null));
           }) : h('div', { class: 'k', text: 'No video or image files at the top of this drive.' })));
       }),
+      h('div', { class: 'k', id: 'importline', role: 'status' }),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }));
   }
 

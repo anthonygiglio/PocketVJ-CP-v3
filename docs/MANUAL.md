@@ -44,7 +44,7 @@ Tested on a Raspberry Pi 4: the codes and QR codes were drawn on the display, de
 
 ## 3. Put clips on it
 
-Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/pvj/<label>` (and `/media/usb` for the newest one), and its video and image files at the top level of the drive appear on the Media screen under "USB drive" with a **Play** button, so you can play straight from the stick without copying (a 3 GB film played fine this way on a Pi 4). Files in folders on the drive are not listed yet; put the clips at the top.
+Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/pvj/<label>` (and `/media/usb` for the newest one), and its video and image files at the top level of the drive appear on the Media screen under "USB drive" with a **Play** button, so you can play straight from the stick without copying (a 3 GB film played fine this way on a Pi 4). Files in folders on the drive are not listed yet; put the clips at the top. To keep a clip after the stick goes, press **Copy to the box** next to it (full access): it is copied in the background with a progress line and a Cancel button, with the same checks as an upload (free space, a hidden temporary file, never replacing a clip unless you confirm). Cancel acts between chunks, within a moment.
 
 ![Media screen](images/ui/media.png)
 

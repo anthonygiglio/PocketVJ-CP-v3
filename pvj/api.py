@@ -149,6 +149,8 @@ class Api:
         self.pinscreen = None     # PinScreen or None
         self.sysd = None          # SysdClient or None (reboot, power off, set the clock)
         self.capture = None       # Capture or None (live input from a USB capture device)
+        self._import = {}         # the USB copy running or last run
+        self._import_lock = threading.Lock()
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
         from . import health as health_mod
@@ -458,6 +460,79 @@ class Api:
                 except OSError:
                     pass
             self._upload_lock.release()
+
+    # --- copy a clip from a USB drive into the media folder (the old "Loading from USB to internal") ---------
+    def import_usb(self, body, device, client):
+        """{"usb": "LABEL/name.mp4", "replace": bool}: copy it into the media folder in the background, with the
+        same checks as an upload (name, free space, a hidden temporary file, never overwriting unless asked).
+        One copy or upload at a time. GET /api/media/import shows the progress."""
+        src = self.resolve_usb(body.get("usb"))
+        replace = body.get("replace", False)
+        if not isinstance(replace, bool):
+            raise bad("replace must be true or false")
+        name = os.path.basename(src)
+        try:
+            fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError as e:
+            raise ApiError(404, "cannot read that file: %s" % (e.strerror or e))
+        try:
+            f = os.fdopen(fd, "rb")
+        except OSError:
+            os.close(fd)
+            raise ApiError(404, "cannot read that file")
+        try:
+            size = os.fstat(f.fileno()).st_size
+        except OSError:
+            f.close()
+            raise ApiError(404, "cannot read that file")
+        if size == 0:
+            f.close()
+            raise bad("that file is empty")
+        with self._import_lock:
+            if self._import.get("active"):
+                f.close()
+                raise ApiError(409, "a copy is already running")
+            self._import = {"active": True, "name": name, "from": body["usb"], "size": size, "done": 0, "cancel": False}
+        job = self._import
+
+        def read(n):
+            try:
+                chunk = f.read(n)
+            except OSError:
+                raise ApiError(503, "the USB drive stopped answering (pulled out, or damaged)")
+            job["done"] += len(chunk)
+            return chunk
+
+        token_device = device.get("id") if device else None
+
+        def check():
+            if job["cancel"]:
+                raise ApiError(499, "copy cancelled")
+            if token_device and not any(d["id"] == token_device for d in self.auth.list_devices()) and not device.get("remote"):
+                raise ApiError(403, "the device that started the copy was removed")
+
+        def run():
+            try:
+                result = self.upload(name, size, read, replace=replace, check=check)
+                job.update(active=False, result=result)
+            except ApiError as e:
+                job.update(active=False, error=e.message)
+            except Exception as e:           # something unexpected: logged, said plainly
+                print("pvj-web: USB copy failed: %s" % e)
+                job.update(active=False, error="the copy failed")
+            finally:
+                f.close()
+        threading.Thread(target=run, name="usb-import", daemon=True).start()
+        return self.import_status({}, device, client)
+
+    def import_status(self, body, device, client):
+        j = self._import
+        return {k: j.get(k) for k in ("active", "name", "from", "size", "done", "error", "result") if k in j} or {"active": False}
+
+    def import_cancel(self, body, device, client):
+        if self._import.get("active"):
+            self._import["cancel"] = True
+        return self.import_status(body, device, client)
 
     @staticmethod
     def _fsync_dir(path):
@@ -1732,6 +1807,9 @@ class Api:
             ("POST", "/api/testpattern"): ("live", self.test_pattern),
             ("POST", "/api/testtone"): ("live", self.test_tone),
             ("POST", "/api/media/info"): ("view", self.media_info),
+            ("POST", "/api/media/import"): ("full", self.import_usb),
+            ("GET", "/api/media/import"): ("view", self.import_status),
+            ("POST", "/api/media/import/cancel"): ("full", self.import_cancel),
             ("GET", "/api/system"): ("view", self.system_info),
             ("POST", "/api/system/reboot"): ("full", self.reboot),
             ("POST", "/api/system/poweroff"): ("full", self.poweroff),

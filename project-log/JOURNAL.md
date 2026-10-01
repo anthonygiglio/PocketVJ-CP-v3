@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (copy from USB)
+
+Done: from the manual deep dive (the old "Loading from USB to internal"): Media > USB drive > **Copy to the box** copies a clip into the media folder in the background (`POST /api/media/import`, progress at `GET /api/media/import`, `.../cancel`), through the same code as an upload, so the same checks apply (name, free space, size limit, a hidden temporary file, no overwrite unless asked, one at a time with uploads). Tests with a fake drive, including cancel and bad references. Independent review: no high findings; fixed: the "done" line vanished at the next redraw, a stick that stops answering gets a plain message (tested with a read that fails half-way, the half file removed), an empty file is refused plainly, no leaked file handle, the copy stops if the device that started it is removed, a generic message for unexpected errors. Cancel acts between chunks (a stick that hangs without an error cannot be interrupted until it answers). Not run on the Pi with the real stick yet.
+
 ## 2026-09-30 (autostart for installations)
 
 Done: from the manual deep dive (the old Autostart tab had a slideshow, USB and random order). Autostart now has a slideshow (seconds a picture), a pad, "play the USB stick" (also each time a drive with clips is plugged in, checked every 2 s; a drive already there at start is not played twice, a drive without clips is ignored), and shuffle for every clip, the slideshow and USB. Settings saved before these keys existed keep working with defaults (no schema change). Tests on a fake clock and fake drives, a browser step. Independent review: no high findings; fixed: the drive that is plugged in is the one that plays (it used the /media/usb link, which can point elsewhere), a stick mounted during boot is no longer missed, switching back to USB mode no longer interrupts a show, a drive that comes and goes within 10 s (bad contact) does not restart playback, a pad must exist and have a clip, and the Media screen says when plugging a stick in will start it. Not run on the Pi yet with a real stick swap.
