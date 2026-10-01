@@ -19,7 +19,7 @@ More screens, with the beta modules (autostart, schedule, streams, DMX, MIDI, ne
 - Run on Raspberry Pi 3B, 4 and 5, small x86 mini PCs, and old recycled computers.
 - Run on current systems: Raspberry Pi OS Bookworm and Trixie, Debian and Ubuntu on x86.
 - Be rugged at gigs. The preferred setup is a direct Ethernet link on a private network; Wi-Fi is optional, for the phone only.
-- Take video from the network: NDI, SRT, RTSP and RTMP, plus AES67/Dante audio and SMPTE ST 2110 on capable hardware. Each is an optional, updatable module. See [ROADMAP.md](ROADMAP.md).
+- Take video from the network: NDI, SRT, RTSP and RTMP, plus AES67/Dante audio. SMPTE ST 2110 sources come in through a gateway (2110 to HDMI into the capture input, or 2110 to NDI). Each input is an optional, updatable module. See [ROADMAP.md](ROADMAP.md).
 
 ## Layout
 

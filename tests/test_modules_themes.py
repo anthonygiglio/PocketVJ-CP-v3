@@ -19,9 +19,10 @@ def registry(board="pi5"):
 class ManifestTest(unittest.TestCase):
     def test_shipped_manifests_are_valid_and_cover_requested_inputs(self):
         m = modules.load_manifests()
-        for needed in ("core", "inputs-ndi", "inputs-srt", "inputs-audio-ip", "inputs-st2110", "mapper"):
+        for needed in ("core", "inputs-ndi", "inputs-srt", "inputs-audio-ip", "mapper"):
             self.assertIn(needed, m)
-        self.assertEqual(m["inputs-st2110"]["boards"], ["x86"])
+        # D30: no native ST 2110 input (1 GbE cannot carry it, no hardware PTP on a Pi 4); use a gateway
+        self.assertNotIn("inputs-st2110", m)
         self.assertEqual(m["piwall"]["boards"], ["pi3"])
 
     def test_validation_reports_problems(self):
@@ -62,7 +63,7 @@ class RegistryTest(unittest.TestCase):
     def test_board_support_and_dependencies_enforced(self):
         reg, _ = registry("pi3")
         rows = {m["id"]: m for m in reg.list()}
-        self.assertFalse(rows["inputs-st2110"]["supported"])
+        self.assertFalse(rows["mapper"]["supported"])          # the mapper needs a Pi 4 or better
         self.assertTrue(rows["piwall"]["supported"])
         # a ready, supported module with an unmet dependency: fake manifests
         manifests = modules.load_manifests()
