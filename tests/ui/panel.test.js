@@ -264,6 +264,22 @@ function startServer() {
     if ((await page.content()).includes('secret1')) problems.push('the projector password came back to the page');
     await page.click('.proj-entry >> button:has-text("Remove")');
     await page.waitForFunction(() => !document.querySelector('.proj-entry'));
+    // Sync and video wall: switch the module on, be a server, set a wall tile, back to off
+    await page.click('.item:has-text("Video wall and sync") >> button');
+    await page.waitForSelector('#syncrole-server');
+    await page.click('#syncrole-server');
+    await page.waitForSelector('#syncline:has-text("Server")');
+    await page.selectOption('#wallcols', '2');
+    await page.selectOption('#wallcol', '1');
+    await page.fill('#wallbezel', '3');
+    await page.click('#wallsave');
+    await page.waitForFunction(() => fetch('/api/sync').then((r) => r.json()).then((d) => d.config.wall.cols === 2 && d.config.wall.col === 1 && d.config.wall.bezel === 3));
+    await page.selectOption('#wallcol', '2');
+    await page.click('#wallsave');
+    await page.waitForFunction(() => /inside the wall/.test(document.getElementById('msg').textContent));
+    await page.click('#syncrole-off');
+    await page.waitForSelector('#syncline:has-text("Off")');
+    await fitsCard('#synccard', 'Sync card');
     // Projection mapping: switch the module on, add a quad on Mix, drag and nudge a corner, save, switch it on
     await page.click('.item:has-text("Projection mapper") >> button');
     await page.waitForFunction(() => /Projection mapper/.test(document.body.textContent));

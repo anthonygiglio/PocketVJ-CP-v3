@@ -4,6 +4,14 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (multi-box sync and video wall)
+
+Done:
+- Server and client sync (D31, `pvj/sync.py`, `pvj/SYNC.md`, System > Sync and video wall, `/api/sync`, the "Video wall and sync" module made ready, settings schema 13): the server sends its clip and position; clients follow by nudging their speed and jump only when far off. A per-box tile of the picture for a video wall, with bezel compensation.
+- Checked on the Pi 4: mpv's video-crop applied while playing (a screenshot showed exactly the chosen quarter) and cleared with an empty value; small speed changes apply at once. Two real headless players following each other over UDP on the Pi: median 0 ms, worst 40 ms (one frame at 25 fps). A simulator test covers the start, drift, seeks, looping, pause, stop and missing files.
+
+Not verified: two boxes on two screens (the Pi 3B needs its spare SD card), Wi-Fi, a wall with real bezels.
+
 ## 2026-09-30 (live Pi updated, small fixes)
 
 Done:
