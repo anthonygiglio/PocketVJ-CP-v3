@@ -937,6 +937,7 @@
     var cards = [vitals, boxCard()];
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full), syncCard());
     if (full || (S.device && S.device.remote)) cards.push(supportCard());
+    if (full) cards.push(updateCard());
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -1257,6 +1258,60 @@
     });
     return card;
   }
+  // ---- updates (signed bundles, installed by pvj-update as root; D33) ----
+  var updateTimer = null;
+  function updateCard() {
+    var body = h('div', { class: 'list', id: 'updatebody' }, h('div', { class: 'k', text: 'Loading...' }));
+    var card = h('div', { class: 'card', id: 'updatecard' }, h('h2', { text: 'Updates' }), body);
+    function refresh() { api('GET', '/api/system/update').then(function (r) { if (document.getElementById('updatecard') && r.ok) draw(r.data); }); }
+    function start(source, label) {
+      if (!window.confirm('Install ' + label + '? The panel and the player restart; if the new version does not come up, the box goes back to this one by itself.')) return;
+      act('POST', '/api/system/update', { source: source, confirm: 'update' }, function () { say('Update started.'); setTimeout(refresh, 1500); });
+    }
+    function draw(d) {
+      clearTimeout(updateTimer);
+      body.textContent = '';
+      body.appendChild(h('div', { class: 'k', id: 'updateversion', text: 'Installed: version ' + d.version }));
+      var last = d.last;
+      if (last) {
+        var words = { running: 'Updating: ', done: 'Last update: ', failed: 'Last update failed: ' };
+        body.appendChild(h('div', { class: 'k', id: 'updatelast', text: (words[last.state] || '') + last.message + (last.at ? ' (' + new Date(last.at * 1000).toLocaleString() + ')' : '') }));
+        if (last.state === 'running') updateTimer = setTimeout(refresh, 3000);
+      }
+      d.usb.forEach(function (b) {
+        body.appendChild(h('div', { class: 'item' },
+          h('span', { text: 'On USB drive ' + b.drive + ': version ' + b.version + (b.signed ? '' : ' (no signature: it will be refused)') }),
+          h('button', { class: 'btn small', id: 'updateusb', text: 'Install', onclick: function () { start('usb', 'version ' + b.version + ' from the USB drive'); } })));
+      });
+      d.inbox.forEach(function (b) {
+        body.appendChild(h('div', { class: 'item' },
+          h('span', { text: 'Uploaded: version ' + b.version + (b.signed ? '' : ' (upload its .sig file too)') }),
+          h('button', { class: 'btn small', id: 'updateinbox', text: 'Install', onclick: function () { start('inbox', 'version ' + b.version); } })));
+      });
+      if (!d.usb.length && !d.inbox.length) body.appendChild(h('div', { class: 'k', text: 'No update waiting. Put pvj-N.N.N.tar.gz with its .sig file in a pvj-update folder on a USB stick, or upload them here.' }));
+      var pick = h('input', { type: 'file', id: 'updatepick', multiple: true, accept: '.gz,.sig,.sha256', hidden: true });
+      pick.addEventListener('change', function () {
+        var files = Array.prototype.slice.call(pick.files);
+        files.sort(function (a, b) { return a.name.length - b.name.length; });   // the bundle first, then its .sig
+        var next = function () {
+          var f = files.shift();
+          if (!f) { refresh(); return; }
+          say('Uploading ' + f.name + '...');
+          fetch('/api/system/update/upload?name=' + encodeURIComponent(f.name), { method: 'POST', credentials: 'same-origin',
+            headers: { 'X-PVJ-Request': '1', 'Content-Type': 'application/octet-stream' }, body: f })
+            .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'upload failed'); }); })
+            .then(function () { say(f.name + ' uploaded.'); next(); }, function (e) { say(e.message, true); refresh(); });
+        };
+        next();
+      });
+      body.appendChild(pick);
+      body.appendChild(h('button', { class: 'btn small', id: 'updateupload', text: 'Upload an update (.tar.gz and .sig)', onclick: function () { pick.click(); } }));
+      body.appendChild(h('div', { class: 'k', text: 'Only updates signed with your key are installed; older versions are refused; a failed update goes back by itself.' }));
+    }
+    refresh();
+    return card;
+  }
+
   // ---- multi-box sync and video wall -----------------------------------
   var syncTimer = null;
   function syncCard() {
@@ -1767,6 +1822,7 @@
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
     clearTimeout(accessTimer);
+    clearTimeout(updateTimer);
     clearTimeout(syncTimer);
     keepNetForm();
     app.textContent = '';

@@ -11,6 +11,7 @@ or a path unchecked.
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -884,6 +885,110 @@ class Api:
         except ApiError:
             return {"clock_from_network": None, "now": int(time.time())}
 
+    # --- updates from the panel (D33) ---------------------------------------------------------
+    UPDATE_NAME = re.compile(r"pvj-([0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz(\.sig|\.sha256)?")
+    UPDATE_MAX = 300 * 1024 * 1024           # the same limit as pvj-update
+    UPDATE_SIDE_MAX = 64 * 1024              # a signature or a checksum file
+
+    def _update_inbox(self):
+        return os.path.join(os.path.dirname(self.settings.path), "update-inbox")
+
+    def _update_result(self):
+        path = os.environ.get("PVJ_UPDATE_RESULT", "/run/pvj-update/result.json")
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def update_status(self, body, device, client):
+        """What is installed, what is waiting (on a USB drive or uploaded), and the last update's progress."""
+        from . import __version__
+        import glob
+        usb = []
+        for path in sorted(glob.glob(os.path.join(self.usb_root, "*", "pvj-update", "pvj-*.tar.gz"))):
+            m = self.UPDATE_NAME.fullmatch(os.path.basename(path))
+            if m and not m.group(2):
+                usb.append({"drive": path.split(os.sep)[-3], "version": m.group(1), "signed": os.path.isfile(path + ".sig")})
+        inbox = []
+        try:
+            for n in sorted(os.listdir(self._update_inbox())):
+                m = self.UPDATE_NAME.fullmatch(n)
+                if m and not m.group(2):
+                    inbox.append({"version": m.group(1), "signed": os.path.isfile(os.path.join(self._update_inbox(), n + ".sig"))})
+        except OSError:
+            pass
+        return {"version": __version__, "usb": usb, "inbox": inbox, "last": self._update_result()}
+
+    def start_update(self, body, device, client):
+        """{"source": "usb" | "inbox", "confirm": "update"}: pvj-sysd starts a fixed update unit as root."""
+        if body.get("confirm") != "update":
+            raise bad('send {"confirm": "update"}')
+        source = body.get("source")
+        if source not in ("usb", "inbox"):
+            raise bad("source must be usb or inbox")
+        self._sysd({"cmd": "update", "source": source})
+        return {"started": source}
+
+    def update_upload(self, name, length, read, check=None):
+        """Store an update bundle, its signature or its checksum in the inbox (the panel cannot install anything:
+        pvj-update verifies the signature as root, on its own copy, when the update is started)."""
+        m = self.UPDATE_NAME.fullmatch(name or "")
+        if not m:
+            raise bad("an update is named pvj-N.N.N.tar.gz (with .sig and .sha256 beside it)")
+        limit = self.UPDATE_SIDE_MAX if m.group(2) else self.UPDATE_MAX
+        if not isinstance(length, int) or length <= 0:
+            raise ApiError(411, "Content-Length required")
+        if length > limit:
+            raise ApiError(413, "too large for an update file")
+        inbox = self._update_inbox()
+        try:
+            os.makedirs(inbox, mode=0o750, exist_ok=True)
+            if not m.group(2) and length * 5 + FREE_SPACE_RESERVE > shutil.disk_usage(inbox).free:
+                raise ApiError(507, "not enough free space to unpack and install this update")
+        except OSError as e:
+            raise ApiError(500, "cannot use the update folder: %s" % (e.strerror or e))
+        if not self._upload_lock.acquire(blocking=False):
+            raise ApiError(409, "another upload is in progress")
+        tmp = None
+        try:
+            if not m.group(2):                      # a new bundle: anything older waiting in the inbox goes
+                for old in os.listdir(inbox):
+                    om = self.UPDATE_NAME.fullmatch(old)
+                    if om and om.group(1) != m.group(1):
+                        os.unlink(os.path.join(inbox, old))
+            fd, tmp = tempfile.mkstemp(prefix=".upload-", dir=inbox)
+            got = 0
+            with os.fdopen(fd, "wb") as out:
+                while got < length:
+                    if check:
+                        check()
+                    chunk = read(min(CHUNK, length - got))
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    got += len(chunk)
+                out.flush()
+                os.fsync(out.fileno())
+            if got != length:
+                raise ApiError(400, "upload was cut short")
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, os.path.join(inbox, name))
+            tmp = None
+            return {"name": name, "size": length}
+        except (TimeoutError, ConnectionError):
+            raise ApiError(400, "upload interrupted")
+        except OSError as e:
+            raise ApiError(500, "could not store the file: %s" % (e.strerror or e))
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            self._upload_lock.release()
+
     def reboot(self, body, device, client):
         if body.get("confirm") != "reboot":
             raise bad('send {"confirm": "reboot"}')
@@ -1700,6 +1805,8 @@ class Api:
             ("POST", "/api/system/reboot"): ("full", self.reboot),
             ("POST", "/api/system/poweroff"): ("full", self.poweroff),
             ("POST", "/api/system/clock"): ("full", self.set_clock),
+            ("GET", "/api/system/update"): ("full", self.update_status),
+            ("POST", "/api/system/update"): ("full", self.start_update),
             ("POST", "/api/mix"): ("live", self.set_mix),
             ("GET", "/api/access"): ("full", self.get_access),
             ("POST", "/api/access/code"): ("full", self.make_join_code),

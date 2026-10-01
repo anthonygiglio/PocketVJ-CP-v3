@@ -10,7 +10,9 @@ with SO_PEERCRED), and runs only these fixed commands, as argument lists, never 
 * set_time: only while the clock has NOT been set from the network (a Pi has no clock battery, so without a network
   it starts at the last shutdown time); `timedatectl set-time` with a validated epoch, then network time back on, so
   a network that appears later still corrects it;
-* status: whether the clock is set from the network.
+* status: whether the clock is set from the network;
+* update: start pvj-update-usb.service or pvj-update-inbox.service (fixed units: pvj-update checks the signature,
+  refuses older versions and rolls back by itself).
 
 It holds no capabilities of its own (systemd and timedated do the work), and OSC, MIDI and DMX cannot reach it.
 """
@@ -146,6 +148,24 @@ class SysService:
                         % datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")}
             return {"ok": True, "now": now}
 
+    UPDATE_UNITS = {"usb": "pvj-update-usb.service", "inbox": "pvj-update-inbox.service"}
+
+    def update(self, source):
+        """Start one of two fixed update units (pvj-update does the checking: signature, version, rollback). Nothing
+        from the request reaches a command line except the choice between the two."""
+        unit = self.UPDATE_UNITS.get(source)
+        if unit is None:
+            return {"ok": False, "error": "source must be usb or inbox"}
+        for u in self.UPDATE_UNITS.values():
+            code, out = self._run(["systemctl", "is-active", u])
+            if out.strip() in ("active", "activating"):
+                return {"ok": False, "error": "an update is already running"}
+        code, out = self._run(["systemctl", "start", "--no-block", unit])
+        if code != 0:
+            return {"ok": False, "error": "could not start the update: %s" % out.strip()[-160:]}
+        self.log("pvj-sysd: update from %s started by the panel" % source)
+        return {"ok": True, "started": source}
+
     def handle(self, message):
         if not isinstance(message, dict):
             return {"ok": False, "error": "bad request"}
@@ -156,6 +176,8 @@ class SysService:
             return self.power(cmd)
         if cmd == "set_time":
             return self.set_time(message.get("epoch"))
+        if cmd == "update":
+            return self.update(message.get("source"))
         return {"ok": False, "error": "unknown command"}
 
 

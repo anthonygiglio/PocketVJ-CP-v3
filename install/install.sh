@@ -83,6 +83,8 @@ WEB_UNIT="$ROOT/etc/systemd/system/pvj-web.service"
 NET_UNIT="$ROOT/etc/systemd/system/pvj-netd.service"
 SYS_UNIT="$ROOT/etc/systemd/system/pvj-sysd.service"
 SUP_UNIT="$ROOT/etc/systemd/system/pvj-supportd.service"
+UPD_USB_UNIT="$ROOT/etc/systemd/system/pvj-update-usb.service"
+UPD_INBOX_UNIT="$ROOT/etc/systemd/system/pvj-update-inbox.service"
 WG_LOAD="$ROOT/etc/modules-load.d/pvj-wireguard.conf"
 USB_RULE="$ROOT/etc/udev/rules.d/99-pvj-usb.rules"
 BIN_LINKS="$ROOT/usr/local/bin"
@@ -95,7 +97,7 @@ uninstall() {
 	if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 		systemctl disable --now pvj-player.service 2>/dev/null || true
 	fi
-	run rm -f "$SUP_UNIT" "$WG_LOAD"
+	run rm -f "$SUP_UNIT" "$WG_LOAD" "$UPD_USB_UNIT" "$UPD_INBOX_UNIT"
 	run rm -f "$UNIT" "$WEB_UNIT" "$NET_UNIT" "$SYS_UNIT" "$USB_UNIT" "$USB_RULE" "$BIN_LINKS/pvj-player" "$BIN_LINKS/pvj-selftest" "$BIN_LINKS/pvj-usb" "$BIN_LINKS/pvj-rootfs" "$BIN_LINKS/pvj-pin" "$BIN_LINKS/pvj-update"
 	run rm -rf "${ROOT}${PREFIX:?}"
 	[ "$PURGE" = 1 ] && run rm -rf "$ETC"
@@ -259,6 +261,9 @@ if [ "$DRY" = 0 ]; then
 	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-netd.service" > "$NET_UNIT"
 	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-sysd.service" > "$SYS_UNIT"
 	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-supportd.service" > "$SUP_UNIT"
+	# Updates from the panel: started on request by pvj-sysd, never enabled.
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-usb.service" > "$UPD_USB_UNIT"
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-inbox.service" > "$UPD_INBOX_UNIT"
 	# The support helper may not load kernel modules itself (its sandbox), so WireGuard's is loaded at boot.
 	mkdir -p "$(dirname "$WG_LOAD")"
 	echo wireguard > "$WG_LOAD"
