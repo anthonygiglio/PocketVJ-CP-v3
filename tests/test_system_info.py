@@ -81,6 +81,23 @@ class ApiTest(ServerBase):
         p = self.call("GET", "/api/status", token=self.view)[1]["player"]
         self.assertEqual((p["path"], p["test_tone"]), (None, "right"))
 
+class ClipAdviceTest(unittest.TestCase):
+    """Warnings only where measured or plainly beyond the board; untested cases say so."""
+
+    def test_the_measured_case_has_no_warning(self):
+        from pvj import probe
+        self.assertEqual(probe.advice({"codec": "h264", "width": 1920, "height": 1080, "fps": 23.976}, "pi4"), [])
+
+    def test_too_heavy_or_untested_cases_say_so(self):
+        from pvj import probe
+        a = probe.advice({"codec": "h264", "width": 3840, "height": 2160, "fps": 30}, "pi4")
+        self.assertIn("will very likely stutter", a[0])
+        self.assertIn("not tested", probe.advice({"codec": "h264", "width": 1920, "height": 1080, "fps": 59.94}, "pi4")[0])
+        self.assertIn("not tested", probe.advice({"codec": "hevc", "width": 3840, "height": 2160, "fps": 30}, "pi4")[0])
+        self.assertIn("editing format", probe.advice({"codec": "prores", "width": 1920, "height": 1080, "fps": 25}, "pi4")[0])
+        self.assertIn("Pi 3", probe.advice({"codec": "h264", "width": 1920, "height": 1080, "fps": 25}, "pi3")[0])
+        self.assertEqual(probe.advice({"codec": None}, "pi4"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

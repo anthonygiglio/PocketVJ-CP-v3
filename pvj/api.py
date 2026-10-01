@@ -833,9 +833,11 @@ class Api:
         from . import probe
         path = self.resolve_usb(body.get("usb")) if "usb" in body else self.resolve_media(body.get("name"))
         try:
-            return probe.probe(path, getattr(self.player, "mpv_bin", "mpv"))
+            info = probe.probe(path, getattr(self.player, "mpv_bin", "mpv"))
         except probe.ProbeError as e:
             raise ApiError(422, str(e))
+        info["advice"] = probe.advice(info, self.board["kind"])
+        return info
 
     def system_info(self, body, device, client):
         """Versions, storage and screens: the old Settings and Display tabs' information buttons."""

@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (prepare your clips)
+
+Done: a "Prepare your clips" section in docs/MANUAL.md from the manual deep dive and this project's own measurements (what was measured on the Pi 4, what was not: 1080p 50/60 fps, HEVC, 4K, Pi 5 and Pi 3), a HandBrake recipe, naming for Quick play, sync advice and power; Troubleshooting now covers https-first browsers and stutters. Media > Info adds plain-word advice per board (`probe.advice`): only warnings that were measured or plainly beyond the board, and "not tested" where it was not.
+
 ## 2026-09-30 (health card and the box's address)
 
 Done: System > Health (`pvj/health.py`, `GET /api/health`, any paired device): power (the Pi's `rpi_volt` undervoltage alarm, readable without root, checked every 5 s and remembered in /run until a reboot, since a short drop is easy to miss), temperature with the Pi's slow-down points, the player (hardware or software decode, dropped frames a second), load and memory, whether the helpers answer, and the box's addresses; a full-access device can put the address alone on the display (a new "address" item for the access screen, with no code on it). From the manual deep dive (the old Powersupply, Check Services and GPU Usage buttons). Corrected NETWORK.md: `.local` already works.
