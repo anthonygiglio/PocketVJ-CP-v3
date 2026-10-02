@@ -282,7 +282,7 @@ fi
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && command -v udevadm >/dev/null; then udevadm control --reload || true; fi
 if [ "$REAL" = 1 ] && [ "$DRY" = 0 ] && [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
-	systemctl restart systemd-journald.service 2>/dev/null && journalctl --flush 2>/dev/null || true
+	if systemctl restart systemd-journald.service 2>/dev/null; then journalctl --flush 2>/dev/null || true; fi
 	systemctl enable pvj-player.service pvj-web.service pvj-sysd.service pvj-supportd.service
 	modprobe wireguard 2>/dev/null || log "the WireGuard kernel module is not available: remote support stays unavailable"
 	if [ "$START" = 1 ]; then systemctl restart pvj-player.service pvj-web.service pvj-sysd.service pvj-supportd.service; fi
