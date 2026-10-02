@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (persistent log)
+
+The owner asked for a log that survives restarts, after the Pi restarted on its own and the cause was lost. D35: the installer adds a journald drop-in that keeps the log on the card, capped at 64 MB. Tests check the installer writes it and uninstall removes it.
+
 ## 2026-10-01 (update button on the Pi)
 
 Checked on the Pi 4 with master: the installer replaced the old update units with the version templates. With a temporary test key in /etc/pvj/allowed_signers, a 0.1.1 bundle (built from master, signed, uploaded through the panel with its .sig and no .sha256) installed through POST /api/system/update: the result file went running, then done; the panel restarted and answered on 0.1.1; the inbox was emptied; pvj-web, pvj-player and pvj-sysd were active. `pvj-update rollback` went back to 0.1.0. Removed afterwards: the test key, the 0.1.1 release and its rollback pointer.

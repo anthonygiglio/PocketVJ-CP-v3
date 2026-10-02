@@ -175,7 +175,7 @@ System > Health says in plain words whether the box is well: the power supply (a
 | --- | --- |
 | The browser says the site is not secure or cannot be reached | Type `http://` in front of the address: the panel uses plain HTTP on your own network, and browsers that try HTTPS first fail |
 | A clip stutters | Media > Info on the clip says if it is too heavy for this box; see Prepare your clips |
-| Stutters, network drops, odd restarts | System > Health: a "Power" warning means the power supply is too weak |
+| Stutters, network drops, odd restarts | System > Health: a "Power" warning means the power supply is too weak. After an unexpected restart, `journalctl -b -1 -e` on the box shows the end of the log before it (the log is kept across restarts, up to 64 MB) |
 | The page does not load | Same network as the box? `systemctl status pvj-web` on the box; the address may have changed (check the router's client list) |
 | "Wrong PIN" | The PIN changes at every start. `sudo pvj-pin`, or System > New PIN from a paired device |
 | A pad is grey and says Empty | Edit pads (full access) and assign a clip |
