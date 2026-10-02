@@ -2,7 +2,7 @@
      SPDX-License-Identifier: Apache-2.0 -->
 # Panel design playground
 
-A working copy of the panel (Live, Mix, Media, System and the Updates card) with live controls for its look and layout. It is for trying ideas before changing `pvj/web/app.css` and `app.js`. It is a dev tool: it is not installed on the box and the panel does not depend on it (D34).
+A working copy of the panel (Live, Mix, Media, System and the Updates card) with live controls for its look and layout. It is for trying ideas before changing `pvj/web/app.css` and `app.js`. It is a dev tool: it is not installed on the box and the panel does not depend on it (D34). For pictures of the panel as it is, with every screen exported as SVG, PSD and PNG, see [docs/mockups](../../docs/mockups/README.md); this tool is for changing it.
 
 ## What it does
 
@@ -16,7 +16,7 @@ The panel part is `src/Panel.tsx` and `src/panel.css`, which use the panel's own
 
 ## Run and build
 
-Needs Node 18 or newer.
+Needs Node 20.19 or newer, or 22.12 or newer (Vite's minimum).
 
 ```
 cd tools/panel-playground
