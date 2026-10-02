@@ -33,3 +33,30 @@ Switching on takes the projector a minute or so to warm up, and switching off st
 ## Not verified on real hardware
 
 **No real projector has been tested.** The protocol code is tested against a small fake PJLink class 1 projector (with and without a password, a wrong password, an unknown command, a projector that is off the network, a slow sender, a device that is not a projector, and six commands at once to one projector). Class 2 features (input switching by name, lamp hours, filter) are not used.
+
+
+## Plan: a general PJLink control system (D36)
+
+Only the PJLink standard, so it works with any brand. Command details to be checked against the published PJLink specification before building; nothing is claimed about real projectors until tested on one.
+
+**Phase 1, class 1 (every PJLink projector).**
+- Identify on add: name (`NAME ?`), maker (`INF1 ?`), model (`INF2 ?`), other info (`INFO ?`), class (`CLSS ?`), inputs (`INST ?`); shown in the panel.
+- Input selection (`INPT`) from the projector's own list, with a friendly label per input ("Matrix", "Box"). A change while warming up is answered "busy"; retry for up to about 90 seconds, then say so plainly.
+- Picture and sound mute separately (`AVMT 11/10`, `21/20`) and together (`31/30`).
+- Health: lamp hours (`LAMP ?`) and the projector's warnings (`ERST ?`: fan, lamp, temperature, cover, filter, other) in the Health card.
+- Background status every 30 to 60 seconds, staggered, so the panel shows on, off, warming up or cooling down without asking each time.
+
+**Phase 2, class 2 (used only when `CLSS ?` says 2).**
+- Volume up and down (`SVOL`; class 2 has steps, not a level).
+- Freeze (`FREZ`), the projector's input names (`INNM ?`), the incoming resolution (`IRES ?`).
+- "Find projectors": the class 2 search on the private network, to add one with a tap.
+- Status notices sent by the projector, so the panel updates at once.
+
+**Phase 3, the room.**
+- Groups ("Main wall", "Painting wall", "All").
+- Scenes: power, input, mute and volume per group, together with what the box plays.
+- A Room screen for staff (presenter and guest codes): per group on or off, source, volume, All off.
+- Projector actions from the schedule, OSC, MIDI and DMX.
+
+**Safety and tests.** The rules above stay (private networks only, passwords never shown, one command at a time per projector, time limits). The fake projector grows a class 2 mode, with tests for every refusal and timeout. Epson's own protocol (exact volume levels) is a possible later add-on, not part of this plan.
+\n
