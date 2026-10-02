@@ -44,11 +44,38 @@ Tested on a Raspberry Pi 4: the codes and QR codes were drawn on the display, de
 
 ## 3. Put clips on it
 
-Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/pvj/<label>` (and `/media/usb` for the newest one), and its video and image files at the top level of the drive appear on the Media screen under "USB drive" with a **Play** button, so you can play straight from the stick without copying (a 3 GB film played fine this way on a Pi 4). Files in folders on the drive are not listed yet; put the clips at the top.
+Media > **Upload clips** (full access). Video and image files only. Uploads go to a hidden temporary file and appear only when complete, so a dropped connection never leaves a half file. Or plug in a USB drive: it mounts read-only under `/media/pvj/<label>` (and `/media/usb` for the newest one), and its video and image files at the top level of the drive appear on the Media screen under "USB drive" with a **Play** button, so you can play straight from the stick without copying (a 3 GB film played fine this way on a Pi 4). Files in folders on the drive are not listed yet; put the clips at the top. To keep a clip after the stick goes, press **Copy to the box** next to it (full access): it is copied in the background with a progress line and a Cancel button, with the same checks as an upload (free space, a hidden temporary file, never replacing a clip unless you confirm). Cancel acts between chunks, within a moment.
 
 ![Media screen](images/ui/media.png)
 
 Clips live in `/var/lib/pvj/video`. **If you turn on the read-only root (`sudo pvj-rootfs enable`), move media to a second disk or USB drive first**: everything on the system disk is lost at reboot afterwards, and the command refuses if media is on the system disk.
+
+### Prepare your clips
+
+What plays smoothly depends on the board. What this project has measured, and what it has not:
+
+| Board | Plays well | Notes |
+| --- | --- | --- |
+| Raspberry Pi 4 | H.264 up to 1080p (a 1080p 24 fps film: about one core, no dropped frames; 720p 30 fps: a fifth of a core) | H.264 is decoded in software on this build. 1080p at 50 or 60 fps, HEVC and 4K are **not tested yet**. |
+| Raspberry Pi 5 | HEVC (in hardware), H.264 up to 1080p (in software) | **Not tested on a Pi 5 yet.** |
+| Raspberry Pi 3 | 720p H.264 | Larger is **not tested** and may stutter. |
+
+Media > **Info** on a clip shows its format and, when it may not play smoothly on this box, says why.
+
+A safe recipe (HandBrake, free, for Mac, Windows and Linux):
+- Format **MP4**; video **H.264** (or **H.265/HEVC** for 4K on a Pi 4 or 5), profile Main or High, **8-bit**;
+- **Constant frame rate**, "Same as source" (phone footage is often variable: switch to constant); 25, 30, 50 or 60 fps;
+- Resolution: the screen's (1920x1080 for most projectors); **no** automatic cropping;
+- Quality: constant quality around 20 to 22 (RF), or 8 to 12 Mbit/s for 1080p;
+- Audio: AAC, 48 kHz, stereo.
+
+Avoid editing formats (ProRes, DNxHD and similar): they are many times too heavy. Very high bit rates from a slow USB stick can stutter too; copy those to the box.
+
+Names: anything readable works (spaces too). Start a name with two digits (`01_intro.mp4`, `02_loop.mp4`) to play it by number from Quick play, the old start scripts and OSC. On a USB drive, put clips at the top level.
+
+For a synced show or a video wall, use the same files with the same names on every box, and start each clip with a second of black or a still: the clients jump into step during the first seconds.
+
+Power matters as much as the clip: a weak power supply makes a Pi stutter, drop the network and damage its SD card. Use the official supply (Pi 4: 5 V 3 A; Pi 5: 5 V 5 A); System > Health warns when the voltage drops.
 
 ## 4. Play
 
@@ -138,10 +165,17 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 
 **Hostile drives and files.** A USB stick or an upload can hold a file that is named `.mp4` but is really a playlist or a script for the player. The player is started so that it plays media only: it does not follow references inside files (playlists, EDL), load sidecar subtitle or audio files, load scripts or run youtube-dl. This was tested on a Raspberry Pi 4 with fake playlists. A drive is also mounted read-only with `nosuid,nodev,noexec`, and only the top level of a drive is listed, up to a limit.
 
+## Health
+
+System > Health says in plain words whether the box is well: the power supply (a Pi warns when the voltage drops; any drop is remembered until the next reboot, because it is the most common cause of odd stutters, network drops and damaged SD cards: use the official supply, 5 V 3 A for a Pi 4), the temperature (above 80 C a Pi slows down), the player (decoded in hardware or software, and dropped frames a second while playing), the load, and whether the helpers are running. It also lists the addresses to open the panel from another device, and a full-access device can put the address on the display for 2 minutes.
+
 ## 7. Troubleshooting
 
 | Symptom | Try |
 | --- | --- |
+| The browser says the site is not secure or cannot be reached | Type `http://` in front of the address: the panel uses plain HTTP on your own network, and browsers that try HTTPS first fail |
+| A clip stutters | Media > Info on the clip says if it is too heavy for this box; see Prepare your clips |
+| Stutters, network drops, odd restarts | System > Health: a "Power" warning means the power supply is too weak |
 | The page does not load | Same network as the box? `systemctl status pvj-web` on the box; the address may have changed (check the router's client list) |
 | "Wrong PIN" | The PIN changes at every start. `sudo pvj-pin`, or System > New PIN from a paired device |
 | A pad is grey and says Empty | Edit pads (full access) and assign a clip |

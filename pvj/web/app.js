@@ -793,7 +793,28 @@
     parts.push(i.audio ? 'sound: ' + i.audio : 'no sound');
     if (i.duration) parts.push(clock(i.duration));
     if (i.container) parts.push(i.container.split(',')[0]);
-    return name + ': ' + parts.join(' \u00b7 ');
+    var text = name + ': ' + parts.join(' \u00b7 ');
+    if (i.advice && i.advice.length) text += '. Note: ' + i.advice.join(' ');
+    return text;
+  }
+  // A copy from a USB drive runs on the box; this follows it until it is done.
+  var importTimer = null;
+  function watchImport(d) {
+    clearTimeout(importTimer);
+    var line = document.getElementById('importline');
+    if (!line) return;
+    line.textContent = '';
+    if (d.active) {
+      var pct = d.size ? Math.floor(100 * d.done / d.size) : 0;
+      line.appendChild(document.createTextNode('Copying ' + d.name + ': ' + pct + '% (' + megabytes(d.done) + ' of ' + megabytes(d.size) + ') '));
+      line.appendChild(h('button', { class: 'btn small', id: 'importcancel', text: 'Cancel', onclick: function () { act('POST', '/api/media/import/cancel', {}, watchImport); } }));
+      importTimer = setTimeout(function () { api('GET', '/api/media/import').then(function (r) { if (r.ok) watchImport(r.data); }); }, 1000);
+    } else if (d.error || d.result) {
+      // Kept after the list is redrawn, until the next copy (a redraw used to wipe it at once).
+      S.importNote = d.error ? 'Copy of ' + d.name + ' stopped: ' + d.error : d.name + ' is now on the box.';
+      line.textContent = S.importNote;
+      if (d.result && !d.seen) { d.seen = true; refreshMedia(); }
+    }
   }
   function megabytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : (n / 1048576).toFixed(1) + ' MB'; }
   function refreshMedia() {
@@ -825,6 +846,11 @@
     });
   }
   function media() {
+    setTimeout(function () {
+      var line = document.getElementById('importline');
+      if (line && S.importNote) line.textContent = S.importNote;
+      api('GET', '/api/media/import').then(function (r) { if (r.ok && r.data.active) watchImport(r.data); });
+    }, 0);
     var info = S.mediaInfo || {};
     var full = can('full');
     var details = info.details || S.media.map(function (n) { return { name: n, size: 0 }; });
@@ -915,13 +941,23 @@
       (info.usb || []).map(function (drive) {
         return h('div', { class: 'card usb-drive', 'data-drive': drive.drive },
           h('div', { class: 'k', text: 'USB drive: ' + drive.drive + ' (read only, plays straight from the drive)' }),
+          info.autostart_usb ? h('div', { class: 'k', text: 'Autostart is set to play USB sticks: plugging one in starts it, even during a show.' }) : null,
           h('div', { class: 'list' }, drive.files.length ? drive.files.map(function (f) {
+            var have = S.media.indexOf(f.name) >= 0;
             return h('div', { class: 'item' },
-              h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) })),
-              h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + f.name + ' from USB', disabled: !can('live'),
-                onclick: function () { act('POST', '/api/play', { usb: drive.drive + '/' + f.name }, function () { say('Playing ' + f.name); poll(); }); } }));
+              h('span', {}, f.name, h('br'), h('span', { class: 'k', text: megabytes(f.size) + (have ? ' \u00b7 also on the box' : '') })),
+              h('span', { class: 'row' },
+                h('button', { class: 'btn small', text: 'Play', 'aria-label': 'Play ' + f.name + ' from USB', disabled: !can('live'),
+                  onclick: function () { act('POST', '/api/play', { usb: drive.drive + '/' + f.name }, function () { say('Playing ' + f.name); poll(); }); } }),
+                can('full') ? h('button', { class: 'btn small', text: have ? 'Copy again' : 'Copy to the box', 'aria-label': 'Copy ' + f.name + ' to the box',
+                  onclick: function () {
+                    if (have && !window.confirm(f.name + ' is already on the box. Replace it?')) return;
+                    S.importNote = '';
+                    act('POST', '/api/media/import', { usb: drive.drive + '/' + f.name, replace: have }, function (d) { watchImport(d); });
+                  } }) : null));
           }) : h('div', { class: 'k', text: 'No video or image files at the top of this drive.' })));
       }),
+      h('div', { class: 'k', id: 'importline', role: 'status' }),
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }));
   }
 
@@ -934,7 +970,7 @@
       kv('Temperature', typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : 'n/a'),
       kv('Player', pl.running ? 'Running' : 'Not running'),
       kv('This device', S.device ? S.device.name + ' (' + S.device.role + ')' : ''));
-    var cards = [vitals, boxCard()];
+    var cards = [vitals, healthCard(), boxCard()];
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full), syncCard());
     if (full || (S.device && S.device.remote)) cards.push(supportCard());
     if (full) cards.push(updateCard());
@@ -949,6 +985,42 @@
       h('div', { id: 'msg', class: 'msg' + (S.msgErr ? ' err' : ''), role: 'status', text: S.msg }),
       h('div', { class: 'grid2' }, cards));
   }
+  // ---- health (the old Powersupply, Check Services and GPU Usage buttons, in plain words) ----
+  var healthTimer = null;
+  function healthCard() {
+    var body = h('div', { class: 'list', id: 'healthbody' }, h('div', { class: 'k', text: 'Checking...' }));
+    var card = h('div', { class: 'card', id: 'healthcard' }, h('h2', { text: 'Health' }), body);
+    var mark = { ok: 'OK', warn: 'Check', bad: 'Problem', unknown: '?' };
+    function row(id, label, state, text) {
+      return h('div', { class: 'item health-' + (state || 'unknown'), id: id },
+        h('span', {}, h('b', { text: label }), h('br'), h('span', { class: 'k', text: text })),
+        h('span', { class: 'badge', text: mark[state] || '?' }));
+    }
+    function draw(d) {
+      clearTimeout(healthTimer);
+      healthTimer = setTimeout(refresh, 5000);
+      body.textContent = '';
+      body.appendChild(row('healthpower', 'Power', d.power.state, d.power.text));
+      body.appendChild(row('healthtemp', 'Temperature', d.temperature.state, d.temperature.text));
+      body.appendChild(row('healthplayer', 'Player', d.player.state, d.player.text));
+      var busy = d.cpu_percent !== null && d.cpu_percent >= 90;
+      body.appendChild(row('healthload', 'Load', busy ? 'warn' : 'ok',
+        (d.cpu_percent === null ? '?' : d.cpu_percent + '% of all cores') + (d.memory_percent === null ? '' : ' · memory ' + d.memory_percent + '% of ' + d.memory_mb + ' MB')));
+      d.helpers.forEach(function (x) {
+        body.appendChild(row('health-' + x.name, x.label, x.running ? 'ok' : (x.name === 'pvj-netd' ? 'unknown' : 'bad'),
+          x.running ? 'Running' : (x.name === 'pvj-netd' ? 'Not running (only needed for network settings)' : 'Not running')));
+      });
+      body.appendChild(h('div', { class: 'k', text: 'Open the panel from another device at:' }));
+      body.appendChild(h('div', { class: 'list mono', id: 'healthaddr' }, d.addresses.map(function (a) { return h('div', { class: 'item' }, h('span', { text: a })); })));
+      if (can('full')) body.appendChild(h('button', { class: 'btn small', id: 'healthshowaddr', text: 'Show the address on the display (2 minutes)', onclick: function () {
+        act('POST', '/api/access/screen', { show: true, items: ['address'], seconds: 120 }, function () { say('The address is on the display for 2 minutes.'); });
+      } }));
+    }
+    function refresh() { api('GET', '/api/health').then(function (r) { if (document.getElementById('healthcard') && r.ok) draw(r.data); }); }
+    refresh();
+    return card;
+  }
+
   function gb(n) { return (n / 1073741824).toFixed(1) + ' GB'; }
   // The old Settings and Display tabs' information buttons, on one card.
   function boxCard() {
@@ -1176,37 +1248,71 @@
   function autostartCard(full) {
     var body = h('div', { class: 'list', id: 'autobody' });
     var card = h('div', { class: 'card', id: 'autocard' }, h('h2', { text: 'Autostart' }), body);
-    var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['preset', 'Legacy start script']];
+    var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['slideshow', 'Slideshow of the pictures'],
+      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script']];
+    function padName(p) {
+      var b = (S.banks || [])[p[0]], pad = b && b.pads && b.pads[p[1]];
+      return 'Bank ' + (p[0] + 1) + ', pad ' + (p[1] + 1) + (pad && (pad.label || pad.file) ? ': ' + (pad.label || pad.file) : '');
+    }
     function draw(d) {
       body.textContent = '';
-      var c = autoForm || { mode: d.config.mode, file: d.config.file, preset: d.config.preset, loop: d.config.loop, delay: d.config.delay };
-      var line = d.config.mode === 'off' ? 'Off: the box waits for you at power-up.' :
-        'On: ' + MODES.filter(function (m) { return m[0] === d.config.mode; })[0][1] + (d.config.mode === 'file' ? ' (' + d.config.file + ')' : d.config.mode === 'preset' ? ' (' + d.config.preset + ')' : '') + ', after ' + d.config.delay + ' s.';
+      var cfg = d.config;
+      var c = autoForm || { mode: cfg.mode, file: cfg.file, preset: cfg.preset, loop: cfg.loop, delay: cfg.delay,
+        shuffle: !!cfg.shuffle, seconds: cfg.seconds || 10, pad: cfg.pad || [0, 0] };
+      var detail = cfg.mode === 'file' ? ' (' + cfg.file + ')' : cfg.mode === 'preset' ? ' (' + cfg.preset + ')' :
+        cfg.mode === 'pad' ? ' (' + padName(cfg.pad || [0, 0]) + ')' : cfg.mode === 'slideshow' ? ' (' + (cfg.seconds || 10) + ' s a picture)' : '';
+      var line = cfg.mode === 'off' ? 'Off: the box waits for you at power-up.' :
+        'On: ' + MODES.filter(function (m) { return m[0] === cfg.mode; })[0][1] + detail + (cfg.shuffle ? ', shuffled' : '') + ', after ' + cfg.delay + ' s.';
       body.appendChild(h('div', { class: 'k', id: 'autoline', text: line }));
       if (d.last) body.appendChild(h('div', { class: 'k', id: 'autolast', text: 'Last run ' + d.last.at + ': ' + (d.last.ok ? 'started' : 'failed, ' + d.last.message) }));
       if (!full) return;
       var mode = h('select', { class: 'text-input', id: 'automode', 'aria-label': 'What to play at power-up' },
         MODES.map(function (m) { return h('option', { value: m[0], text: m[1], selected: m[0] === c.mode }); }));
-      var file = h('select', { class: 'text-input', id: 'autofile', 'aria-label': 'Clip', hidden: c.mode !== 'file' },
+      var file = h('select', { class: 'text-input', id: 'autofile', 'aria-label': 'Clip' },
         S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === (c.file || S.media[0]) }); }));
-      var preset = h('input', { class: 'text-input mono', id: 'autopreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: c.preset, hidden: c.mode !== 'preset', autocomplete: 'off' });
-      var loop = h('select', { class: 'text-input', id: 'autoloop', 'aria-label': 'Loop', hidden: c.mode === 'off' || c.mode === 'preset' },
+      var preset = h('input', { class: 'text-input mono', id: 'autopreset', 'aria-label': 'Start script name', placeholder: 'startlessonce05', value: c.preset, autocomplete: 'off' });
+      var pads = [];
+      (S.banks || []).forEach(function (bk, bi) { (bk.pads || []).forEach(function (pd, pi) { if (pd.file) pads.push([bi, pi]); }); });
+      var pad = h('select', { class: 'text-input', id: 'autopad', 'aria-label': 'Pad' }, pads.length ? pads.map(function (p) {
+        return h('option', { value: p.join(','), text: padName(p), selected: p[0] === c.pad[0] && p[1] === c.pad[1] });
+      }) : [h('option', { value: '', text: 'No pad has a clip yet' })]);
+      var seconds = h('input', { class: 'text-input mono', id: 'autoseconds', type: 'number', min: 1, max: 3600, 'aria-label': 'Seconds a picture', value: c.seconds });
+      var shuffle = h('select', { class: 'text-input', id: 'autoshuffle', 'aria-label': 'Order' },
+        [[false, 'In name order'], [true, 'Shuffled']].map(function (o) { return h('option', { value: String(o[0]), text: o[1], selected: o[0] === c.shuffle }); }));
+      var loop = h('select', { class: 'text-input', id: 'autoloop', 'aria-label': 'Loop' },
         [[true, 'Loop'], [false, 'Play once']].map(function (o) { return h('option', { value: String(o[0]), text: o[1], selected: o[0] === c.loop }); }));
-      var delay = h('input', { class: 'text-input mono', id: 'autodelay', type: 'number', min: 0, max: 120, 'aria-label': 'Wait after power-up, seconds', value: c.delay, hidden: c.mode === 'off' });
-      function remember() { autoForm = { mode: mode.value, file: file.value, preset: preset.value, loop: loop.value === 'true', delay: parseFloat(delay.value || '0') }; }
-      function show() { file.hidden = mode.value !== 'file'; preset.hidden = mode.value !== 'preset'; loop.hidden = mode.value === 'off' || mode.value === 'preset'; delay.hidden = mode.value === 'off'; }
-      [mode, file, preset, loop, delay].forEach(function (el) { el.addEventListener('input', remember); el.addEventListener('change', function () { remember(); show(); }); });
-      body.appendChild(mode); body.appendChild(file); body.appendChild(preset); body.appendChild(loop);
-      body.appendChild(h('label', { class: 'k', for: 'autodelay', text: 'Wait after power-up (seconds)', hidden: false })); body.appendChild(delay);
+      var delay = h('input', { class: 'text-input mono', id: 'autodelay', type: 'number', min: 0, max: 120, 'aria-label': 'Wait after power-up, seconds', value: c.delay });
+      var secondsLabel = h('label', { class: 'k', for: 'autoseconds', text: 'Seconds a picture' });
+      var delayLabel = h('label', { class: 'k', for: 'autodelay', text: 'Wait after power-up (seconds)' });
+      function remember() {
+        autoForm = { mode: mode.value, file: file.value, preset: preset.value, loop: loop.value === 'true', delay: parseFloat(delay.value || '0'),
+          shuffle: shuffle.value === 'true', seconds: parseFloat(seconds.value || '10'), pad: pad.value ? pad.value.split(',').map(Number) : [0, 0] };
+      }
+      function show() {
+        var m = mode.value;
+        file.hidden = m !== 'file'; preset.hidden = m !== 'preset'; pad.hidden = m !== 'pad';
+        seconds.hidden = secondsLabel.hidden = m !== 'slideshow';
+        shuffle.hidden = ['all', 'slideshow', 'usb'].indexOf(m) < 0;
+        loop.hidden = ['file', 'all', 'slideshow'].indexOf(m) < 0;
+        delay.hidden = delayLabel.hidden = m === 'off';
+      }
+      [mode, file, preset, pad, seconds, shuffle, loop, delay].forEach(function (el) { el.addEventListener('input', remember); el.addEventListener('change', function () { remember(); show(); }); });
+      [mode, file, preset, pad, secondsLabel, seconds, shuffle, loop, delayLabel, delay].forEach(function (el) { body.appendChild(el); });
+      show();
       body.appendChild(h('div', { class: 'row' },
         h('button', { class: 'btn on small', id: 'autosave', text: 'Save', onclick: function () {
           remember();
-          act('POST', '/api/autostart', autoForm, function (data) { autoForm = null; say(''); draw(data); });
+          var b = { mode: autoForm.mode, loop: autoForm.loop, delay: autoForm.delay, shuffle: autoForm.shuffle };
+          if (autoForm.mode === 'file') b.file = autoForm.file;
+          if (autoForm.mode === 'preset') b.preset = autoForm.preset;
+          if (autoForm.mode === 'pad') b.pad = autoForm.pad;
+          if (autoForm.mode === 'slideshow') b.seconds = autoForm.seconds;
+          act('POST', '/api/autostart', b, function (data) { autoForm = null; say(''); draw(data); });
         } }),
         h('button', { class: 'btn small', id: 'autotest', text: 'Run it now', disabled: !can('live'), onclick: function () {
           act('POST', '/api/autostart/test', {}, function (data) { draw(data); });
         } })));
-      body.appendChild(h('div', { class: 'k', text: 'Runs when the box starts, and again if the player is restarted after a crash. A Stop from the panel is not undone.' }));
+      body.appendChild(h('div', { class: 'k', text: 'Runs when the box starts, and again if the player is restarted after a crash. A Stop from the panel is not undone. "Play the USB stick" also plays each new stick the moment it is plugged in.' }));
     }
     api('GET', '/api/autostart').then(function (r) {
       if (!document.getElementById('autocard')) return;
@@ -1847,6 +1953,7 @@
     clearTimeout(midiTimer);
     clearTimeout(accessTimer);
     clearTimeout(updateTimer);
+    clearTimeout(healthTimer);
     clearTimeout(syncTimer);
     keepNetForm();
     app.textContent = '';

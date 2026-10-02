@@ -6,3 +6,6 @@ sync/.DS_Store
 __pycache__/
 *.pyc
 dist/
+
+# Mock-up exports (PNG, SVG, PSD) downloaded from CI: large, regenerated on demand
+docs/mockups/current/

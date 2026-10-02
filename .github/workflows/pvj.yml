@@ -45,16 +45,22 @@ jobs:
       - name: Install mpv and a browser
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
-          mkdir /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install playwright@1.56.1
+          mkdir /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm install playwright@1.56.1 pngjs@7.0.0 ag-psd@31.0.2
           npx playwright install --with-deps chromium
       - name: Drive the real panel in a browser (CSP violations fail the test)
         run: NODE_PATH=/tmp/pw/node_modules node tests/ui/panel.test.js
       - name: Take the cropped screenshots (docs/images/ui)
         continue-on-error: true   # documentation only: never blocks a merge
-        run: SHOTS="$RUNNER_TEMP/ui-shots" NODE_PATH=/tmp/pw/node_modules node tests/ui/screenshots.js
+        run: SHOTS="$RUNNER_TEMP/ui-shots" MOCKUPS="$RUNNER_TEMP/ui-mockups" NODE_PATH=/tmp/pw/node_modules node tests/ui/screenshots.js
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ui-screenshots
           path: ${{ runner.temp }}/ui-shots/*.png
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4   # editable mock-up files (SVG, layered PSD) of every screen
+        if: always()
+        with:
+          name: ui-mockups
+          path: ${{ runner.temp }}/ui-mockups/
           if-no-files-found: warn
