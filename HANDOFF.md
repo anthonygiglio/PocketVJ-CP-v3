@@ -14,44 +14,78 @@ The repository was renamed from `PocketVJ-CP-v3` to `nxlx.mastercontrol`.
 
 - Python 3, standard library only, replaces PHP. The legacy PHP and docs stay in the tree until feature parity.
 - New code is Apache-2.0 (SPDX headers, `REUSE.toml`). Legacy code stays under the upstream `LICENSE.md`. `LICENSE.md` and `AUTHORS.md` are never edited. Copyright holder in headers: "NXLX.Systems and contributors".
-- One long-lived mpv controlled over JSON IPC, supervised by systemd (`pvj-player.service`). The panel (`pvj-web.service`) is unprivileged; anything needing root goes through a small helper (`pvj-netd`) over a socket.
+- One long-lived mpv controlled over JSON IPC, supervised by systemd (`pvj-player.service`). The panel (`pvj-web.service`) is unprivileged; anything needing root goes through small helpers (`pvj-netd`, `pvj-sysd`, `pvj-supportd`) that answer only pvj-web over a socket.
 - Token auth (PIN pairing, roles view/live/full), CSRF header, strict CSP. Signed updates with rollback.
 - NDI and AES67/Dante are separate optional modules, not built yet. ST 2110 is not planned natively; it comes in through a gateway (D30). SRT/RTSP/RTMP streams, DMX, MIDI, the schedule and autostart are built, off by default.
 - Naming: the `pvj` package, `pvj-*` services and commands and install paths keep their names.
 - Style: no em dashes in written text (commas, semicolons, new sentences). Default document font Inter.
 
+## Start here (next session, written 2026-10-01)
+
+State at the end of 2026-10-01: master is green, **no open pull requests**, the test Pi 4 runs current master (0.1.0) with every service active.
+
+Next, in the order the owner approved after the deep dive into the old manual:
+
+1. **Factory reset, settings export and import, diagnostics** (a page or download with versions, health, logs). Needs no one at the box. Touches settings and root, so it gets an independent review.
+2. Display mode (resolution and refresh, with confirm-or-revert) and display sleep/wake. **Needs the owner at the monitor**; ask first.
+3. Mapper workflow: undo, number fields, export and import (including ofxPiMapper XML), switching saved mappings from the schedule, OSC, DMX and MIDI.
+4. Wall: the server lists its clients, send a clip to clients, separate horizontal and vertical bezels.
+5. Schedule with dates and intervals.
+6. Follow-on actions and music under the slideshow.
+7. Wi-Fi hotspot (large; needs the owner's go-ahead).
+
+Small follow-ups: after `pvj-update rollback` from a terminal, the Updates card still says "Last update: updated to X" (the installed version line is right). Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
+
+Owner's open items: a layout board at https://claude.ai/artifact/Bc24QHaMhyeS3eZfFyamLJ (press Save, then ask Claude to read it back) and editable mock-ups (SVG, layered PSD, PNG) in `docs/mockups/current/` (not in git; CI artifact `ui-mockups`). The design playground (D34, `tools/panel-playground`) has a preview at https://claude.ai/artifact/DYUr95vVi1jJyGquxhqZTu. A Pi 3B for two-box sync tests is waiting for a spare SD card (never touch its current card).
+
 ## What exists
 
-Merged to `master`: the security hotfix, the platform layer, the installer and services, the image definition, and the new core in Python 3 (API, panel, modules, themes, OSC receive, signed updates with rollback). On top of that, all built as separate pieces with their own notes in `pvj/`:
+Merged to `master`: the security hotfix, the platform layer, the installer and services, the image definition, and the new core in Python 3 (API, panel, modules, themes, OSC receive, signed updates with rollback). On top of that, each with its own notes:
 
 | Feature | Notes | Default |
 | --- | --- | --- |
-| Library: upload, rename, delete; play from a USB drive | this file, `pvj/README.md` | on |
-| Sound output (HDMI chosen automatically on a Pi) | `docs/MANUAL.md` | on |
-| Screen snapshot (one picture on request; live view was dropped, D20) | `docs/MANUAL.md` | on |
-| PIN drawn on the box's screen until the first device pairs | `pvj/pinscreen.py` | on |
-| Autostart (at power-up and after a player restart) | `pvj/AUTOSTART.md` | off |
+| Library: upload, rename, delete; play from a USB drive; copy a clip from USB to the box | `pvj/README.md`, `docs/MANUAL.md` | on |
+| Playback: pads in banks, seek, skip, prev/next, play all, shuffle, end-of-clip, slideshow, audio files, fade in/out, freeze, blackout | `docs/MANUAL.md` | on |
+| Mix: opacity, size, position, speed, volume, rotate, mirror, PNG overlay, transitions (cut, dip to black) | `docs/MANUAL.md` | on |
+| Clip advice (what plays well on this board) | `pvj/probe.py` | on |
+| Sound output, test tones | `docs/MANUAL.md` | on |
+| Screen snapshot (on request; live view dropped, D20) | `docs/MANUAL.md` | on |
+| PIN and the box's address drawn on the screen | `pvj/pinscreen.py` | on |
+| Health card (power, temperature, helpers, addresses) | `pvj/health.py` | on |
+| Updates card: signed bundles from USB or upload, rollback (D33) | `pvj/README.md` | on (needs a signing key) |
+| Remote support over WireGuard, on request only | `docs/REMOTE-SUPPORT.md` | off |
+| Old OSC command names | `pvj/OSC.md` | with OSC |
+| Autostart (file, all, slideshow, pad, USB, preset) | `pvj/AUTOSTART.md` | off |
 | Weekly schedule | `pvj/SCHEDULE.md` | off (beta) |
-| Streams (SRT, RTSP, RTMP) | `pvj/STREAMS.md` | off (beta) |
-| DMX over the network (Art-Net, sACN) | `pvj/DMX.md` | off (beta) |
-| MIDI controllers (every controller at once, Learn) | `pvj/MIDI.md` | off (beta) |
+| Projectors (PJLink) | `pvj/PROJECTORS.md` | off (beta) |
+| Projection mapper (quads, triangles, grids) | `pvj/MAPPER.md` | off (beta) |
+| Multi-box sync and video wall | `pvj/SYNC.md` | off (beta) |
+| Streams and live input (SRT, RTSP, RTMP, USB capture) | `pvj/STREAMS.md` | off (beta) |
+| DMX (Art-Net, sACN), MIDI controllers | `pvj/DMX.md`, `pvj/MIDI.md` | off (beta) |
 | Wired network settings with confirm-or-revert | `pvj/NETWORK.md` | off (beta) |
+| System log kept across restarts, 64 MB cap (D35) | `docs/MANUAL.md` | on |
 
-Docs for people: [docs/MANUAL.md](docs/MANUAL.md) and pictures in [docs/UI.md](docs/UI.md) (made by `tests/ui/screenshots.js`). Phase list and module manifests: [ROADMAP.md](ROADMAP.md), `pvj/modules.d`.
+Docs for people: [docs/MANUAL.md](docs/MANUAL.md) and pictures in [docs/UI.md](docs/UI.md) (made by `tests/ui/screenshots.js`, which with `MOCKUPS` set also writes the editable mock-ups, `tests/ui/mockups.js`). Module manifests: `pvj/modules.d`.
 
 ## What has been run on real hardware, and what has not
 
-One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 2560x1440 monitor, a USB drive, three USB MIDI controllers, a USB HDMI capture adapter) has run the image built by CI since 2026-09-30. **Verified there:** the image boots; the panel and PIN pairing over the network; uploads; playback (720p and 1080p H.264 in software, smooth after the fixes); sound on HDMI; USB drive automount (exFAT, read-only) and playing from it; reboot brings all services up; a killed mpv is back in about 2 seconds; DMX over the LAN; the weekly schedule; autostart across a reboot and after a crash (a Stop from the panel stays stopped); MIDI reading through the systemd sandbox and all three controllers opened at once by stable names; the screen snapshot; the board self-test. Each of those is described in the journal with numbers.
+One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 2560x1440 monitor, a USB drive, three USB MIDI controllers, a USB HDMI capture adapter) has run the CI image since 2026-09-30 and is kept on current master. **Verified there:** boot, panel and PIN pairing, uploads, playback (720p and 1080p H.264), HDMI sound, USB automount and playing from it, reboot and crash recovery, DMX over the LAN, the weekly schedule, autostart across reboot and crash, MIDI reading with all three controllers, the screen snapshot, the mapper's output (checked through screenshots; nobody watched the monitor), sync between two players on the box and against a stand-in server (within 5 ms after catching up), remote support against a stand-in hub, the health card, and a signed update through the Updates card followed by a rollback (2026-10-01). Details and numbers are in the journal.
 
 **Not verified on hardware (do not claim it works):**
-- MIDI Learn and the map (only against pipes and the browser test; needs a person at the controllers), and the PIN on screen (needs a fresh box or all devices removed).
-- Streams with a real SRT or RTSP source; HEVC, 4K and 1080p60 decode; 24 fps film judder on a 75 Hz display (the monitor offers only 75, 60 and 50 Hz; there is no display-mode setting yet); the second HDMI port; a projector (PJLink control is built and tested only against a fake projector).
-- The read-only root (`pvj-rootfs`), signed updates on a board, the Network module (must be tested with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
-- Pi 3, Pi 5 and x86 (nothing has run on them).
+- Sync and the wall on two real boxes (waiting for the Pi 3B's spare card); a real support server (VPS); swapping USB sticks while running; copy from USB on the box.
+- MIDI Learn with the real controllers; the PIN on screen on a fresh box; streams with a real source; HEVC, 4K, 1080p60; 24 fps judder; the second HDMI port; a real projector.
+- The read-only root (`pvj-rootfs`), the Network module (test with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
+- Pi 3, Pi 5 and x86.
 
-Not built: crossfade (needs a second player; only "Dip to black" and "Cut"), Wi-Fi/hotspot/VLAN, updates from the network or channels, a panel update button, shutdown and reboot buttons, a display-mode (resolution and refresh) setting, NDI, AES67/Dante, presenter, wall, importing old mapper files, controller profiles and lights/feedback for MIDI, custom DMX layouts, Art-Net discovery.
+Not built: crossfade (needs a second player), display mode, factory reset, settings export and import, diagnostics, Wi-Fi and hotspot, updates from the network, NDI, AES67/Dante, presenter, importing old mapper files, MIDI controller profiles and feedback, custom DMX layouts.
 
-Known limits: the panel cannot restart a wedged mpv (it is unprivileged by design). The old manual is published to GitHub Pages by the "Deploy manual to Pages" workflow (it failed until Pages was enabled for the repository; it has passed since 2026-09-30). Merged branches on GitHub have not been deleted (the tool that tried was blocked; delete them on github.com). The `legacy-v3` tag (commit `ed74df411b88b1a16dd80eecf52c3c9cf6d7768b`) is on GitHub.
+Known limits: the panel cannot restart a wedged mpv (unprivileged by design). Merged branches on GitHub are not deleted (ask the owner). GitHub ruleset "Protect master" requires 9 checks and pull requests; do not change it without asking.
+
+## Working on the test Pi
+
+- SSH as `nxlx@nxlx-mastercontrol.local` (or 192.168.0.169). A session key is set up per session; ask the owner to `ssh-copy-id` a new one.
+- `sudo` needs the owner's password, which is never written into the repo, memory or chat. When needed, the owner stages it on the Pi with `read -rsp "password: " p; printf '%s' "$p" > /tmp/.pw; chmod 600 /tmp/.pw; unset p; exit` (gone at reboot). Use it only as `S(){ cat /tmp/.pw | sudo -k -S -p "" "$@"; }`, never pipe data into an `S` command (see LESSONS), and delete `/tmp/.pw` when done.
+- Deploy master: `git archive origin/master`, copy it over, run `install/install.sh --offline` as root. Settings have a schema number; never put older code on a box with newer settings.
 
 ## Testing
 

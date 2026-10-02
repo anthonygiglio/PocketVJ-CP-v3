@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (end of the day)
+
+Merged today: the clip guide (#51), autostart modes (#52), copy from USB (#53), mock-up exports (#54), the update button with its review fixes (#55), the design playground (#56, from a second session), the Pi check log (#57), the persistent log (#58). The Pi runs master; the persistent log is installed there (seen writing to /var/log/journal; not yet seen across a restart). HANDOFF.md has a "Start here" section with the next steps. Two sessions shared one working folder and one commit landed on the other's branch; it was moved back before anything was pushed (see LESSONS).
+
 ## 2026-10-01 (panel design playground)
 
 Done: added `tools/panel-playground` (D34), a mock-up of the panel for trying ideas: four screens and the Updates card with its states, theme colours, typefaces, about twenty size knobs, layout options, preview sizes from phone to desktop, and an export of the changed CSS and theme JSON. First built as a claude.ai page from the web-artifacts-builder template, then moved here without its component library. `npm run build` type checks and builds one self-contained `dist/index.html`.
