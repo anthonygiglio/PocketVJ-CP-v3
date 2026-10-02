@@ -10,6 +10,16 @@ Done: added `tools/panel-playground` (D34), a mock-up of the panel for trying id
 
 Open: it has not been looked at in a browser by anyone yet (no browser on the dev Mac for the session); the published page is private to the owner. The export maps each knob to app.css selectors by hand; check the result in the real panel before committing a design change.
 
+## 2026-10-01 (persistent log)
+
+The owner asked for a log that survives restarts, after the Pi restarted on its own and the cause was lost. D35: the installer adds a journald drop-in that keeps the log on the card, capped at 64 MB. Tests check the installer writes it and uninstall removes it.
+
+## 2026-10-01 (update button on the Pi)
+
+Checked on the Pi 4 with master: the installer replaced the old update units with the version templates. With a temporary test key in /etc/pvj/allowed_signers, a 0.1.1 bundle (built from master, signed, uploaded through the panel with its .sig and no .sha256) installed through POST /api/system/update: the result file went running, then done; the panel restarted and answered on 0.1.1; the inbox was emptied; pvj-web, pvj-player and pvj-sysd were active. `pvj-update rollback` went back to 0.1.0. Removed afterwards: the test key, the 0.1.1 release and its rollback pointer.
+
+Small follow-up: after a rollback from a terminal the card still says "Last update: updated to 0.1.1" (the installed version line is right). The sudo password leaked into a file during the setup (see LESSONS); the owner changed it.
+
 ## 2026-09-30 (update button)
 
 Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting a version-pinned template unit; progress and outcome from a result file.
