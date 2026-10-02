@@ -228,6 +228,14 @@ function startServer() {
         // over a card. Let it sit at the end of the page while the picture is taken.
         await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.setProperty('position', 'static', 'important'); });
         await shot(prefix + '-' + tab.toLowerCase(), (f) => page.screenshot({ path: f, fullPage: true }));
+        if (process.env.MOCKUPS) {                            // editable copies: SVG and layered PSD (tests/ui/mockups.js)
+          try {
+            const r = await require('./mockups').exportScreen(page, process.env.MOCKUPS, prefix.replace('screen-', ''), tab.toLowerCase());
+            console.log('mock-up ' + prefix + ' ' + tab + ': ' + r.sections + ' sections, ' + r.controls + ' controls');
+          } catch (e) {
+            failures.push('mock-up ' + prefix + ' ' + tab + ': ' + e.message.split('\n')[0]);
+          }
+        }
         await page.evaluate(() => { const t = document.querySelector('.tabs'); if (t) t.style.removeProperty('position'); });
       }
     }
