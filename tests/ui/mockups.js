@@ -19,6 +19,7 @@ function describe() {
     const cs = getComputedStyle(el), r = el.getBoundingClientRect();
     return cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0 && r.width > 0 && r.height > 0;
   };
+  window.scrollTo(0, 0);                                  // measure from the top of the page
   const sx = window.scrollX, sy = window.scrollY;
   const box = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + sx, y: r.top + sy, w: r.width, h: r.height }; };
   const ownText = (el) => Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').trim();
@@ -42,7 +43,7 @@ function describe() {
     const cs = getComputedStyle(el), out = [];
     const b = box(el);
     const rx = parseFloat(cs.borderTopLeftRadius) || 0;
-    if (!/rgba\(.*, 0\)|transparent/.test(cs.backgroundColor)) out.push({ k: 'rect', ...b, rx, fill: cs.backgroundColor });
+    if (!el.matches('input[type=range]') && !/rgba\(.*, 0\)|transparent/.test(cs.backgroundColor)) out.push({ k: 'rect', ...b, rx, fill: cs.backgroundColor });
     const sides = ['Top', 'Right', 'Bottom', 'Left'].map((s) => ({ s, w: parseFloat(cs['border' + s + 'Width']), c: cs['border' + s + 'Color'], st: cs['border' + s + 'Style'] }))
       .filter((d) => d.w > 0 && d.st !== 'none' && !/rgba\(.*, 0\)/.test(d.c));
     if (sides.length === 4 && sides.every((d) => d.w === sides[0].w && d.c === sides[0].c)) {
@@ -107,7 +108,6 @@ function describe() {
     }
     return { ...n, kids };
   }
-  window.scrollTo(0, 0);
   const doc = document.documentElement;
   const bg = getComputedStyle(document.body).backgroundColor;
   const sections = Array.from(document.querySelectorAll(SECTIONS)).filter((el) => visible(el) && !el.parentElement.closest(SECTIONS));
