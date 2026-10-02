@@ -221,12 +221,12 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
                 body = f.read()
             self._send(200, body, TYPES.get(os.path.splitext(name)[1], "application/octet-stream"))
 
-        def _upload(self):
+        def _upload(self, update=False):
             """Raw-body upload: POST /api/media/upload?name=clip.mp4[&replace=1]. Streams to disk."""
             parts = urlsplit(self.path)
             query = parse_qs(parts.query)
             try:
-                device = self._who("POST", "/api/media/upload")
+                device = self._who("POST", "/api/system/update/upload" if update else "/api/media/upload")
                 api.require(device, "full")
                 if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/octet-stream":
                     raise ApiError(415, "send application/octet-stream")
@@ -248,7 +248,10 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
                 self._reaper.cancel()
                 self.connection.settimeout(30)
                 # read1 returns what has arrived, so slow senders are noticed after every packet
-                result = api.upload(name, length, self.rfile.read1, replace, check=still_paired)
+                if update:
+                    result = api.update_upload(name, length, self.rfile.read1, check=still_paired)
+                else:
+                    result = api.upload(name, length, self.rfile.read1, replace, check=still_paired)
                 self._json(200, result)
             except ApiError as e:
                 self.close_connection = True  # an unread body must not be parsed as the next request
@@ -270,6 +273,8 @@ def make_handler(api, auth, web_dir=WEB_DIR, max_lifetime=60.0, host_names=None)
                 return self._json(403, {"error": "cross-site or missing request header"})
             if path == "/api/media/upload":
                 return self._upload()
+            if path == "/api/system/update/upload":
+                return self._upload(update=True)
             body, err = self._body()
             if err:
                 return self._json(err[0], {"error": err[1]})

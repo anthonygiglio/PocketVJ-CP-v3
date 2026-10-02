@@ -21,6 +21,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -78,6 +79,45 @@ def verify_signature(path, sig_path, allowed_signers, run=subprocess.run):
                 stdin=data, capture_output=True, text=True)
     if r.returncode != 0:
         raise UpdateError("signature check failed: %s" % (r.stderr or r.stdout).strip())
+
+
+def open_untrusted(name, dir_fd=None, limit=MAX_BUNDLE_BYTES):
+    """Open a file someone else controls (an upload, a USB stick): never through a symlink, never a device or a
+    FIFO (O_NONBLOCK keeps a FIFO from blocking the open), and refused when larger than `limit`. Returns a binary
+    file object, or None when there is no such file."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise UpdateError("cannot open %s: %s" % (os.path.basename(name), e.strerror or e))
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        raise UpdateError("%s is not a regular file" % os.path.basename(name))
+    if st.st_size > limit:
+        os.close(fd)
+        raise UpdateError("%s is too large" % os.path.basename(name))
+    return os.fdopen(fd, "rb")
+
+
+def copy_bounded(src, dest, limit):
+    """Copy at most `limit` bytes from an open file into a new private file; fail if there is more (the file grew
+    after it was opened)."""
+    got = 0
+    with open(dest, "xb") as out:
+        while True:
+            chunk = src.read(1 << 20)
+            if not chunk:
+                break
+            got += len(chunk)
+            if got > limit:
+                raise UpdateError("the file grew while it was being copied")
+            out.write(chunk)
+
+
+SIDE_MAX = 64 * 1024     # a .sig or .sha256 file
 
 
 def safe_extract(bundle, dest):
@@ -236,30 +276,38 @@ class Updater:
         return found[-1] if found else None
 
     # --- actions --------------------------------------------------------
-    def check(self, bundle, sha256=None, allow_unsigned=False, force=False):
+    def check(self, bundle, sha256=None, allow_unsigned=False, force=False, dir_fd=None):
         """Verify a bundle without installing it. Returns (info, tree, scratch).
 
-        The bundle and its signature are first copied into a private folder and everything
-        (checksum, signature, unpacking) is done on that copy, so the file on a USB stick
-        cannot be swapped between the check and the use. The caller removes `scratch`."""
-        if not os.path.isfile(bundle):
-            raise UpdateError("%s not found" % bundle)
-        size = os.path.getsize(bundle)
-        if size > MAX_BUNDLE_BYTES:
-            raise UpdateError("bundle is too large")
-        if sha256 is None and os.path.isfile(bundle + ".sha256"):
-            with open(bundle + ".sha256") as f:
-                sha256 = f.read(4096)
-        parent = self.real(self.prefix)
-        scratch = tempfile.mkdtemp(prefix=".update-", dir=parent if os.path.isdir(parent) else None)  # mode 0700
+        The bundle, its signature and its checksum are opened without following links (regular files only, size
+        limited) and copied into a private folder; everything (checksum, signature, unpacking) is done on that
+        copy, so a file on a USB stick or in the upload folder cannot be swapped between the check and the use.
+        With `dir_fd`, `bundle` is a name inside that (already opened) folder. A signed bundle needs no checksum
+        (the signature covers the content); an unsigned one (development only) must have one. The caller removes
+        `scratch`."""
+        src = open_untrusted(bundle, dir_fd)
+        if src is None:
+            raise UpdateError("%s not found" % os.path.basename(bundle))
+        scratch = None
         try:
+            size = os.fstat(src.fileno()).st_size
+            if sha256 is None:
+                side = open_untrusted(bundle + ".sha256", dir_fd, SIDE_MAX)
+                if side is not None:
+                    with side:
+                        sha256 = side.read(4096).decode("ascii", "replace")
+            parent = self.real(self.prefix)
+            scratch = tempfile.mkdtemp(prefix=".update-", dir=parent if os.path.isdir(parent) else None)  # mode 0700
             if shutil.disk_usage(scratch).free < 4 * size:
                 raise UpdateError("not enough free disk space")
             mine = os.path.join(scratch, "bundle.tar.gz")
-            shutil.copyfile(bundle, mine)
-            if os.path.isfile(bundle + ".sig"):
-                shutil.copyfile(bundle + ".sig", mine + ".sig")
-            verify_sha256(mine, sha256)
+            copy_bounded(src, mine, MAX_BUNDLE_BYTES)
+            sig = open_untrusted(bundle + ".sig", dir_fd, SIDE_MAX)
+            if sig is not None:
+                with sig:
+                    copy_bounded(sig, mine + ".sig", SIDE_MAX)
+            if sha256 is not None or allow_unsigned:
+                verify_sha256(mine, sha256)
             if not allow_unsigned:
                 verify_signature(mine, mine + ".sig", self.allowed_signers(), self.run)
             tree = os.path.join(scratch, "tree")
@@ -277,8 +325,11 @@ class Updater:
                                   % (info["schema"], schema))
             return info, tree, scratch
         except BaseException:
-            shutil.rmtree(scratch, ignore_errors=True)
+            if scratch:
+                shutil.rmtree(scratch, ignore_errors=True)
             raise
+        finally:
+            src.close()
 
     def _previous_file(self):
         return self.real(self.prefix + "/previous")
@@ -300,8 +351,8 @@ class Updater:
             with open(self._previous_file(), "w") as f:
                 f.write(text)
 
-    def apply(self, bundle, sha256=None, allow_unsigned=False, force=False, log=print):
-        info, tree, scratch = self.check(bundle, sha256, allow_unsigned, force)
+    def apply(self, bundle, sha256=None, allow_unsigned=False, force=False, log=print, dir_fd=None):
+        info, tree, scratch = self.check(bundle, sha256, allow_unsigned, force, dir_fd=dir_fd)
         old_version = self._link_version()
         previous_before = self._read_previous()
         try:
@@ -353,10 +404,47 @@ class Updater:
         self._restart()
 
     # --- USB ------------------------------------------------------------
+    BUNDLE_NAME = re.compile(r"pvj-(\d+\.\d+\.\d+)\.tar\.gz")
+
+    def open_inbox(self):
+        """The upload folder, opened without following a link: pvj-web owns /var/lib/pvj and could replace the
+        folder with a link to somewhere root must not touch. Returns a directory fd (the caller closes it), or
+        None when there is no inbox."""
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(self.real(self.state_dir + "/update-inbox"), flags)
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            raise UpdateError("the upload folder is not usable: %s" % (e.strerror or e))
+        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise UpdateError("the upload folder is not a folder")
+        return fd
+
+    def inbox_bundles(self, dir_fd):
+        """Names of bundles uploaded through the panel in the opened inbox, newest first. Untrusted: check() opens
+        each without following links and verifies a private copy."""
+        found = []
+        for name in os.listdir(dir_fd):
+            m = self.BUNDLE_NAME.fullmatch(name)
+            if m:
+                found.append((parse_version(m.group(1)), name))
+        return [n for _, n in sorted(found, reverse=True)]
+
+    def clear_inbox(self, dir_fd):
+        """Remove what was uploaded, whatever the outcome: a bundle is tried once. Only inside the opened folder."""
+        for name in os.listdir(dir_fd):
+            if name.startswith("pvj-"):
+                try:
+                    os.unlink(name, dir_fd=dir_fd)
+                except OSError:
+                    pass
+
     def usb_bundles(self, base="/media/pvj"):
         found = []
         for path in glob.glob(os.path.join(base, "*", "pvj-update", "*.tar.gz")):
-            m = re.search(r"pvj-(\d+\.\d+\.\d+)\.tar\.gz$", os.path.basename(path))
+            m = self.BUNDLE_NAME.fullmatch(os.path.basename(path))
             if m:
                 found.append((parse_version(m.group(1)), path))
         return [p for _, p in sorted(found, reverse=True)]
@@ -411,13 +499,51 @@ def main(argv=None):
         p.add_argument("--sha256")
         p.add_argument("--allow-unsigned", action="store_true", help="development only")
         p.add_argument("--force", action="store_true")
-    sub.add_parser("usb", help="apply the newest bundle in <usb>/pvj-update/")
+    for name, text in (("usb", "apply the newest bundle in <usb>/pvj-update/"),
+                       ("inbox", "apply the newest bundle uploaded through the panel")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--result", help="write the progress and outcome as JSON here (for the panel)")
+        p.add_argument("--version", help="only this version (what the person confirmed in the panel)")
+    p = sub.add_parser("finish", help="mark an unfinished panel update as failed (the unit's ExecStopPost)")
+    p.add_argument("--result", required=True)
     sub.add_parser("rollback")
     args = ap.parse_args(argv)
     if args.cmd != "status" and os.geteuid() != 0:
         print("pvj-update: run as root (sudo)", file=sys.stderr)
         return 1
     u = Updater()
+    result = getattr(args, "result", None)
+
+    def report(state, message, version=None):
+        if not result:
+            return
+        data = {"state": state, "message": message, "version": version, "at": int(time.time())}
+        tmp = result + ".tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o644)
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, result)
+        except OSError:
+            pass
+
+    def log(text):
+        print(text, flush=True)
+        report("running", text)
+    if args.cmd == "finish":
+        try:
+            with open(result) as f:
+                if json.load(f).get("state") == "running":
+                    report("failed", "the update stopped before it finished")
+        except (OSError, ValueError):
+            pass
+        return 0
+    lock = None
+    if args.cmd in ("apply", "usb", "inbox", "rollback"):
+        lock = take_lock()
+        if lock is None:
+            print("pvj-update: another update is running", file=sys.stderr)
+            return 1                      # the result file belongs to the update that is running
     try:
         if args.cmd == "status":
             print(json.dumps(u.status(), indent=2))
@@ -427,15 +553,57 @@ def main(argv=None):
             print("ok: version %s, settings schema %d" % (info["version"], info["schema"]))
         elif args.cmd == "apply":
             u.apply(args.bundle, args.sha256, args.allow_unsigned, args.force)
-        elif args.cmd == "usb":
-            bundles = u.usb_bundles()
-            if not bundles:
-                raise UpdateError("no update bundle found in /media/pvj/*/pvj-update/")
-            print("using %s" % bundles[0])
-            u.apply(bundles[0])
+        elif args.cmd in ("usb", "inbox"):
+            report("running", "looking for an update")
+            if args.version is not None and not _VERSION.match(args.version):
+                raise UpdateError("not a version: %s" % args.version)
+            inbox = u.open_inbox() if args.cmd == "inbox" else None
+            try:
+                if args.cmd == "usb":
+                    bundles = u.usb_bundles()
+                else:
+                    bundles = u.inbox_bundles(inbox) if inbox is not None else []
+                if args.version:
+                    bundles = [b for b in bundles if os.path.basename(b) == "pvj-%s.tar.gz" % args.version]
+                if not bundles:
+                    raise UpdateError(("version %s is no longer there" % args.version if args.version else "no update bundle found")
+                                      + (" (in pvj-update/ on a USB drive)" if args.cmd == "usb" else " (upload it again)"))
+                log("using %s" % os.path.basename(bundles[0]))
+                version = u.apply(bundles[0], log=log, dir_fd=inbox)
+                report("done", "updated to %s" % version, version)
+            finally:
+                if inbox is not None:
+                    u.clear_inbox(inbox)
+                    os.close(inbox)
         elif args.cmd == "rollback":
             u.rollback()
     except UpdateError as e:
         print("pvj-update: %s" % e, file=sys.stderr)
+        report("failed", str(e))
         return 1
+    except Exception as e:                # anything unexpected still ends the panel's "Updating..."
+        print("pvj-update: unexpected error: %r" % e, file=sys.stderr)
+        report("failed", "unexpected error: %s" % (getattr(e, "strerror", None) or e))
+        return 1
+    finally:
+        if lock is not None:
+            lock.close()
     return 0
+
+
+def take_lock(path=None):
+    """One update at a time, whoever started it (the panel, a terminal). Returns the open lock file, or None
+    when another update holds it."""
+    import fcntl
+    path = path or os.environ.get("PVJ_UPDATE_LOCK", "/run/lock/pvj-update.lock")
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError:
+        fd = os.open(os.path.join(tempfile.gettempdir(), "pvj-update.lock"), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    f = os.fdopen(fd, "r+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f

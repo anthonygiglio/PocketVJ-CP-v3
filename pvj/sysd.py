@@ -10,7 +10,9 @@ with SO_PEERCRED), and runs only these fixed commands, as argument lists, never 
 * set_time: only while the clock has NOT been set from the network (a Pi has no clock battery, so without a network
   it starts at the last shutdown time); `timedatectl set-time` with a validated epoch, then network time back on, so
   a network that appears later still corrects it;
-* status: whether the clock is set from the network.
+* status: whether the clock is set from the network;
+* update: start pvj-update-usb@V.service or pvj-update-inbox@V.service (fixed template units, V a checked version: pvj-update checks the signature,
+  refuses older versions and rolls back by itself).
 
 It holds no capabilities of its own (systemd and timedated do the work), and OSC, MIDI and DMX cannot reach it.
 """
@@ -19,6 +21,7 @@ import datetime
 import json
 import socket
 import os
+import re
 import subprocess
 import threading
 import time
@@ -146,6 +149,28 @@ class SysService:
                         % datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")}
             return {"ok": True, "now": now}
 
+    UPDATE_SOURCES = ("usb", "inbox")
+    UPDATE_VERSION = re.compile(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}")
+
+    def update(self, source, version):
+        """Start pvj-update-<source>@<version>.service, a fixed template unit (pvj-update checks the signature,
+        refuses older versions and rolls back by itself). Only the source, from a fixed list, and a version that
+        is three numbers reach systemctl."""
+        if source not in self.UPDATE_SOURCES:
+            return {"ok": False, "error": "source must be usb or inbox"}
+        if not isinstance(version, str) or not self.UPDATE_VERSION.fullmatch(version):
+            return {"ok": False, "error": "version must look like 1.2.3"}
+        with self.lock:                       # two requests at once must not both see "nothing running"
+            code, out = self._run(["systemctl", "list-units", "--plain", "--no-legend", "--state=active,activating",
+                                   "pvj-update-usb@*.service", "pvj-update-inbox@*.service"])
+            if code != 0 or out.strip():
+                return {"ok": False, "error": "an update is already running"}
+            code, out = self._run(["systemctl", "start", "--no-block", "pvj-update-%s@%s.service" % (source, version)])
+        if code != 0:
+            return {"ok": False, "error": "could not start the update: %s" % out.strip()[-160:]}
+        self.log("pvj-sysd: update to %s from %s started by the panel" % (version, source))
+        return {"ok": True, "started": source, "version": version}
+
     def handle(self, message):
         if not isinstance(message, dict):
             return {"ok": False, "error": "bad request"}
@@ -156,6 +181,8 @@ class SysService:
             return self.power(cmd)
         if cmd == "set_time":
             return self.set_time(message.get("epoch"))
+        if cmd == "update":
+            return self.update(message.get("source"), message.get("version"))
         return {"ok": False, "error": "unknown command"}
 
 

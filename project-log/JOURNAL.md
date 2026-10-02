@@ -4,6 +4,14 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-09-30 (update button)
+
+Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting a version-pinned template unit; progress and outcome from a result file.
+
+An independent review found: root could be made to delete files through a linked upload folder (by a compromised pvj-web); a bundle with only its .sig was refused for lack of a checksum; an unexpected error left the card on "Updating" for good; two updates could start at once; an upload during an update could break it; polling stopped exactly when the panel restarted; the installed version could differ from the one confirmed; root copied untrusted files without a type or size bound (a FIFO could hang it). All fixed, each with a test.
+
+Checked on the Pi before the review: the units installed (not enabled); an unsigned upload without a checksum was refused at the first check. Not yet checked on the Pi: the reviewed version, and a signed update through the button.
+
 ## 2026-10-01 (mock-ups)
 
 Done: the screenshot job also exports every screen (phone and laptop, every module on) as SVG with named groups and real text, a layered PSD (a group per card, a layer per control) and a PNG, uploaded as the `ui-mockups` artifact; guide in docs/mockups/README.md. A drag-and-drop layout board for the owner is a private claude.ai artifact. Checked: the SVGs render on the Mac (Quick Look) with the right positions; the first run measured a scrolled page and drew boxes behind sliders, both fixed. Not checked: opening the PSDs in Photoshop (macOS reads their size and composite).
