@@ -4,6 +4,12 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (panel design playground)
+
+Done: added `tools/panel-playground` (D34), a mock-up of the panel for trying ideas: four screens and the Updates card with its states, theme colours, typefaces, about twenty size knobs, layout options, preview sizes from phone to desktop, and an export of the changed CSS and theme JSON. First built as a claude.ai page from the web-artifacts-builder template, then moved here without its component library. `npm run build` type checks and builds one self-contained `dist/index.html`.
+
+Open: it has not been looked at in a browser by anyone yet (no browser on the dev Mac for the session); the published page is private to the owner. The export maps each knob to app.css selectors by hand; check the result in the real panel before committing a design change.
+
 ## 2026-09-30 (update button)
 
 Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting a version-pinned template unit; progress and outcome from a result file.
