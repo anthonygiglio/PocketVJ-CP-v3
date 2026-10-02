@@ -902,6 +902,11 @@ class Api:
         except (OSError, ValueError):
             return None
 
+    def _update_running(self):
+        """True while an update reports progress (a stale "running" older than the units' time limit is not)."""
+        last = self._update_result()
+        return bool(last and last.get("state") == "running" and time.time() - (last.get("at") or 0) < 35 * 60)
+
     def update_status(self, body, device, client):
         """What is installed, what is waiting (on a USB drive or uploaded), and the last update's progress."""
         from . import __version__
@@ -922,14 +927,19 @@ class Api:
         return {"version": __version__, "usb": usb, "inbox": inbox, "last": self._update_result()}
 
     def start_update(self, body, device, client):
-        """{"source": "usb" | "inbox", "confirm": "update"}: pvj-sysd starts a fixed update unit as root."""
+        """{"source": "usb" | "inbox", "version": "N.N.N", "confirm": "update"}: pvj-sysd starts a fixed update unit
+        as root, for exactly the version the person confirmed."""
         if body.get("confirm") != "update":
             raise bad('send {"confirm": "update"}')
-        source = body.get("source")
+        source, version = body.get("source"), body.get("version")
         if source not in ("usb", "inbox"):
             raise bad("source must be usb or inbox")
-        self._sysd({"cmd": "update", "source": source})
-        return {"started": source}
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", version):
+            raise bad("version must look like 1.2.3")
+        if self._update_running():
+            raise ApiError(409, "an update is already running")
+        self._sysd({"cmd": "update", "source": source, "version": version})
+        return {"started": source, "version": version}
 
     def update_upload(self, name, length, read, check=None):
         """Store an update bundle, its signature or its checksum in the inbox (the panel cannot install anything:
@@ -942,6 +952,8 @@ class Api:
             raise ApiError(411, "Content-Length required")
         if length > limit:
             raise ApiError(413, "too large for an update file")
+        if self._update_running():
+            raise ApiError(409, "an update is running; upload again when it has finished")
         inbox = self._update_inbox()
         try:
             os.makedirs(inbox, mode=0o750, exist_ok=True)
@@ -953,11 +965,11 @@ class Api:
             raise ApiError(409, "another upload is in progress")
         tmp = None
         try:
-            if not m.group(2):                      # a new bundle: anything older waiting in the inbox goes
-                for old in os.listdir(inbox):
-                    om = self.UPDATE_NAME.fullmatch(old)
-                    if om and om.group(1) != m.group(1):
-                        os.unlink(os.path.join(inbox, old))
+            for old in os.listdir(inbox):
+                om = self.UPDATE_NAME.fullmatch(old)
+                stale = old.startswith(".upload-") and time.time() - os.lstat(os.path.join(inbox, old)).st_mtime > 3600
+                if stale or (om and not m.group(2) and om.group(1) != m.group(1)):
+                    os.unlink(os.path.join(inbox, old))     # a new bundle replaces any other; crashed uploads go
             fd, tmp = tempfile.mkstemp(prefix=".upload-", dir=inbox)
             got = 0
             with os.fdopen(fd, "wb") as out:

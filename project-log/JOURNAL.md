@@ -6,9 +6,11 @@ Newest entry first. One entry per working session: what was done, what merged, w
 
 ## 2026-09-30 (update button)
 
-Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting one of two fixed update units; progress and outcome from a result file; `pvj-update inbox` and `--result`. Tests for the inbox, the result file, the helper command, the API, the upload limits and the units.
+Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting a version-pinned template unit; progress and outcome from a result file.
 
-Checked on the Pi: the full installer put the two units in place (not enabled); an unsigned upload was refused at the first check ("no valid SHA-256 given"), the inbox was emptied, and the card's data showed the failure. Not checked on the Pi: a signed update installing through the button. That needs a test key in /etc/pvj/allowed_signers, which the permission check (rightly) stopped; the owner can allow it or test with the real release key.
+An independent review found: root could be made to delete files through a linked upload folder (by a compromised pvj-web); a bundle with only its .sig was refused for lack of a checksum; an unexpected error left the card on "Updating" for good; two updates could start at once; an upload during an update could break it; polling stopped exactly when the panel restarted; the installed version could differ from the one confirmed; root copied untrusted files without a type or size bound (a FIFO could hang it). All fixed, each with a test.
+
+Checked on the Pi before the review: the units installed (not enabled); an unsigned upload without a checksum was refused at the first check. Not yet checked on the Pi: the reviewed version, and a signed update through the button.
 
 ## 2026-09-30 (old OSC names)
 

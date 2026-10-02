@@ -1263,10 +1263,29 @@
   function updateCard() {
     var body = h('div', { class: 'list', id: 'updatebody' }, h('div', { class: 'k', text: 'Loading...' }));
     var card = h('div', { class: 'card', id: 'updatecard' }, h('h2', { text: 'Updates' }), body);
-    function refresh() { api('GET', '/api/system/update').then(function (r) { if (document.getElementById('updatecard') && r.ok) draw(r.data); }); }
-    function start(source, label) {
-      if (!window.confirm('Install ' + label + '? The panel and the player restart; if the new version does not come up, the box goes back to this one by itself.')) return;
-      act('POST', '/api/system/update', { source: source, confirm: 'update' }, function () { say('Update started.'); setTimeout(refresh, 1500); });
+    var watchUntil = 0, startedAt = 0;  // after Install, keep asking for a while: the panel itself restarts
+    function later() {
+      clearTimeout(updateTimer);
+      if (body.isConnected && Date.now() < watchUntil) updateTimer = setTimeout(refresh, 3000);
+    }
+    function refresh() {
+      if (!body.isConnected) return;
+      api('GET', '/api/system/update').then(function (r) {
+        if (!body.isConnected) return;
+        if (r.ok) draw(r.data); else later();
+      }, later);
+    }
+    function start(source, version, where) {
+      if (!window.confirm('Install version ' + version + where + '? The panel and the player restart; if the new version does not come up, the box goes back to this one by itself.')) return;
+      act('POST', '/api/system/update', { source: source, version: version, confirm: 'update' }, function () {
+        say('Update to ' + version + ' started.');
+        startedAt = Date.now();
+        watchUntil = startedAt + 10 * 60 * 1000;
+        later();
+      });
+    }
+    function row(text, id, onclick) {
+      return h('div', { class: 'item' }, h('span', { text: text }), h('button', { class: 'btn small', id: id, text: 'Install', onclick: onclick }));
     }
     function draw(d) {
       clearTimeout(updateTimer);
@@ -1276,19 +1295,21 @@
       if (last) {
         var words = { running: 'Updating: ', done: 'Last update: ', failed: 'Last update failed: ' };
         body.appendChild(h('div', { class: 'k', id: 'updatelast', text: (words[last.state] || '') + last.message + (last.at ? ' (' + new Date(last.at * 1000).toLocaleString() + ')' : '') }));
-        if (last.state === 'running') updateTimer = setTimeout(refresh, 3000);
+        if (last.state === 'running') watchUntil = Math.max(watchUntil, Date.now() + 60 * 1000);
+        else if (startedAt && last.at && last.at * 1000 >= startedAt - 5000) watchUntil = 0;   // the update we started has ended
       }
-      d.usb.forEach(function (b) {
-        body.appendChild(h('div', { class: 'item' },
-          h('span', { text: 'On USB drive ' + b.drive + ': version ' + b.version + (b.signed ? '' : ' (no signature: it will be refused)') }),
-          h('button', { class: 'btn small', id: 'updateusb', text: 'Install', onclick: function () { start('usb', 'version ' + b.version + ' from the USB drive'); } })));
+      var seen = {};
+      d.usb.forEach(function (b, i) {
+        if (seen[b.version]) return;
+        seen[b.version] = true;
+        body.appendChild(row('On USB drive ' + b.drive + ': version ' + b.version + (b.signed ? '' : ' (no .sig file: it will be refused)'),
+          'updateusb' + i, function () { start('usb', b.version, ' from the USB drive'); }));
       });
-      d.inbox.forEach(function (b) {
-        body.appendChild(h('div', { class: 'item' },
-          h('span', { text: 'Uploaded: version ' + b.version + (b.signed ? '' : ' (upload its .sig file too)') }),
-          h('button', { class: 'btn small', id: 'updateinbox', text: 'Install', onclick: function () { start('inbox', 'version ' + b.version); } })));
+      d.inbox.forEach(function (b, i) {
+        body.appendChild(row('Uploaded: version ' + b.version + (b.signed ? '' : ' (upload its .sig file too)'),
+          'updateinbox' + i, function () { start('inbox', b.version, ''); }));
       });
-      if (!d.usb.length && !d.inbox.length) body.appendChild(h('div', { class: 'k', text: 'No update waiting. Put pvj-N.N.N.tar.gz with its .sig file in a pvj-update folder on a USB stick, or upload them here.' }));
+      if (!d.usb.length && !d.inbox.length) body.appendChild(h('div', { class: 'k', text: 'No update waiting. Put pvj-N.N.N.tar.gz and its .sig file in a pvj-update folder on a USB stick, or upload them here.' }));
       var pick = h('input', { type: 'file', id: 'updatepick', multiple: true, accept: '.gz,.sig,.sha256', hidden: true });
       pick.addEventListener('change', function () {
         var files = Array.prototype.slice.call(pick.files);
@@ -1299,14 +1320,17 @@
           say('Uploading ' + f.name + '...');
           fetch('/api/system/update/upload?name=' + encodeURIComponent(f.name), { method: 'POST', credentials: 'same-origin',
             headers: { 'X-PVJ-Request': '1', 'Content-Type': 'application/octet-stream' }, body: f })
-            .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'upload failed'); }); })
-            .then(function () { say(f.name + ' uploaded.'); next(); }, function (e) { say(e.message, true); refresh(); });
+            .then(function (r) {
+              return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || 'upload failed (HTTP ' + r.status + ')'); });
+            })
+            .then(function () { say(f.name + ' uploaded.'); next(); }, function (e) { say(e.message || 'upload failed', true); refresh(); });
         };
         next();
       });
       body.appendChild(pick);
       body.appendChild(h('button', { class: 'btn small', id: 'updateupload', text: 'Upload an update (.tar.gz and .sig)', onclick: function () { pick.click(); } }));
-      body.appendChild(h('div', { class: 'k', text: 'Only updates signed with your key are installed; older versions are refused; a failed update goes back by itself.' }));
+      body.appendChild(h('div', { class: 'k', text: 'Only updates signed with your key are installed; older versions are refused; a failed update goes back by itself. A .sha256 file is optional.' }));
+      later();
     }
     refresh();
     return card;

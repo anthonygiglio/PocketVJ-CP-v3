@@ -83,8 +83,8 @@ WEB_UNIT="$ROOT/etc/systemd/system/pvj-web.service"
 NET_UNIT="$ROOT/etc/systemd/system/pvj-netd.service"
 SYS_UNIT="$ROOT/etc/systemd/system/pvj-sysd.service"
 SUP_UNIT="$ROOT/etc/systemd/system/pvj-supportd.service"
-UPD_USB_UNIT="$ROOT/etc/systemd/system/pvj-update-usb.service"
-UPD_INBOX_UNIT="$ROOT/etc/systemd/system/pvj-update-inbox.service"
+UPD_USB_UNIT="$ROOT/etc/systemd/system/pvj-update-usb@.service"
+UPD_INBOX_UNIT="$ROOT/etc/systemd/system/pvj-update-inbox@.service"
 WG_LOAD="$ROOT/etc/modules-load.d/pvj-wireguard.conf"
 USB_RULE="$ROOT/etc/udev/rules.d/99-pvj-usb.rules"
 BIN_LINKS="$ROOT/usr/local/bin"
@@ -262,8 +262,9 @@ if [ "$DRY" = 0 ]; then
 	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-sysd.service" > "$SYS_UNIT"
 	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-supportd.service" > "$SUP_UNIT"
 	# Updates from the panel: started on request by pvj-sysd, never enabled.
-	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-usb.service" > "$UPD_USB_UNIT"
-	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-inbox.service" > "$UPD_INBOX_UNIT"
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-usb@.service" > "$UPD_USB_UNIT"
+	sed -e "s|@PVJ_DIR@|$PREFIX/current|g" "$SRC/install/pvj-update-inbox@.service" > "$UPD_INBOX_UNIT"
+	run rm -f "$ROOT/etc/systemd/system/pvj-update-usb.service" "$ROOT/etc/systemd/system/pvj-update-inbox.service"  # the names before they took a version
 	# The support helper may not load kernel modules itself (its sandbox), so WireGuard's is loaded at boot.
 	mkdir -p "$(dirname "$WG_LOAD")"
 	echo wireguard > "$WG_LOAD"
