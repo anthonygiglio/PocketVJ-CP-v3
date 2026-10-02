@@ -78,6 +78,11 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(os.readlink(self.p("usr/local/bin/pvj-rootfs")), "/opt/pvj/current/bin/pvj-rootfs")
         self.assertEqual(json.loads(self.read(self.p("etc/pvj/install.json")))["version"], "9.9.1")
         self.assertTrue(os.path.isdir(self.p("var/lib/pvj/video")))
+        # the system log survives restarts (Raspberry Pi OS keeps it in memory); our drop-in sorts after theirs
+        log = self.read(self.p("etc/systemd/journald.conf.d/50-pvj-persistent-log.conf"))
+        self.assertIn("Storage=persistent", log)
+        self.assertIn("SystemMaxUse=64M", log)
+        self.assertGreater("50-pvj-persistent-log.conf", "40-rpi-volatile-storage.conf")
 
     def test_installed_copy_runs(self):
         install(self.src, self.stage)
@@ -147,6 +152,7 @@ class InstallTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-netd.service")))
         self.assertFalse(os.path.exists(self.p("etc/systemd/system/pvj-usb@.service")))
         self.assertFalse(os.path.exists(self.p("etc/udev/rules.d/99-pvj-usb.rules")))
+        self.assertFalse(os.path.exists(self.p("etc/systemd/journald.conf.d/50-pvj-persistent-log.conf")))
         self.assertTrue(os.path.exists(self.p("etc/pvj/pvj.env")))
         install(self.src, self.stage, "--uninstall", "--purge")
         self.assertFalse(os.path.exists(self.p("etc/pvj")))

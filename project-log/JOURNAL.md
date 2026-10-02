@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (persistent log)
+
+The owner asked for a log that survives restarts, after the Pi restarted on its own and the cause was lost. D35: the installer adds a journald drop-in that keeps the log on the card, capped at 64 MB. Tests check the installer writes it and uninstall removes it.
+
 ## 2026-09-30 (update button)
 
 Done: System > Updates (D33): install a signed bundle from a USB stick's pvj-update folder or from an upload, through pvj-sysd starting a version-pinned template unit; progress and outcome from a result file.
