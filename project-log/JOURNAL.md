@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (mock-ups)
+
+Done: the screenshot job also exports every screen (phone and laptop, every module on) as SVG with named groups and real text, a layered PSD (a group per card, a layer per control) and a PNG, uploaded as the `ui-mockups` artifact; guide in docs/mockups/README.md. A drag-and-drop layout board for the owner is a private claude.ai artifact. Checked: the SVGs render on the Mac (Quick Look) with the right positions; the first run measured a scrolled page and drew boxes behind sliders, both fixed. Not checked: opening the PSDs in Photoshop (macOS reads their size and composite).
+
 ## 2026-09-30 (health card and the box's address)
 
 Done: System > Health (`pvj/health.py`, `GET /api/health`, any paired device): power (the Pi's `rpi_volt` undervoltage alarm, readable without root, checked every 5 s and remembered in /run until a reboot, since a short drop is easy to miss), temperature with the Pi's slow-down points, the player (hardware or software decode, dropped frames a second), load and memory, whether the helpers answer, and the box's addresses; a full-access device can put the address alone on the display (a new "address" item for the access screen, with no code on it). From the manual deep dive (the old Powersupply, Check Services and GPU Usage buttons). Corrected NETWORK.md: `.local` already works.
