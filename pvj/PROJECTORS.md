@@ -59,4 +59,3 @@ Only the PJLink standard, so it works with any brand. Command details to be chec
 - Projector actions from the schedule, OSC, MIDI and DMX.
 
 **Safety and tests.** The rules above stay (private networks only, passwords never shown, one command at a time per projector, time limits). The fake projector grows a class 2 mode, with tests for every refusal and timeout. Epson's own protocol (exact volume levels) is a possible later add-on, not part of this plan.
-\n
