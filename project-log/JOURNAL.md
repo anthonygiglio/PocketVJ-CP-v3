@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (mock-ups)
+
+Done: the screenshot job also exports every screen (phone and laptop, every module on) as SVG with named groups and real text, a layered PSD (a group per card, a layer per control) and a PNG, uploaded as the `ui-mockups` artifact; guide in docs/mockups/README.md. A drag-and-drop layout board for the owner is a private claude.ai artifact. Checked: the SVGs render on the Mac (Quick Look) with the right positions; the first run measured a scrolled page and drew boxes behind sliders, both fixed. Not checked: opening the PSDs in Photoshop (macOS reads their size and composite).
+
 ## 2026-09-30 (copy from USB)
 
 Done: from the manual deep dive (the old "Loading from USB to internal"): Media > USB drive > **Copy to the box** copies a clip into the media folder in the background (`POST /api/media/import`, progress at `GET /api/media/import`, `.../cancel`), through the same code as an upload, so the same checks apply (name, free space, size limit, a hidden temporary file, no overwrite unless asked, one at a time with uploads). Tests with a fake drive, including cancel and bad references. Independent review: no high findings; fixed: the "done" line vanished at the next redraw, a stick that stops answering gets a plain message (tested with a read that fails half-way, the half file removed), an empty file is refused plainly, no leaked file handle, the copy stops if the device that started it is removed, a generic message for unexpected errors. Cancel acts between chunks (a stick that hangs without an error cannot be interrupted until it answers). Not run on the Pi with the real stick yet.
