@@ -4,6 +4,10 @@
 
 Newest entry first. One entry per working session: what was done, what merged, what is open.
 
+## 2026-10-01 (direction: Leyline)
+
+Talked through the purpose with the owner (D36): a room controller staff can use at Leyline plus the owner's VJ tool. The owner prefers ISF shaders and approved projectM as an optional module on boards that can run it, agreed a controllable video matrix is the ideal router for consoles (no model yet), and wants a private NXLX network with internet when needed. Plan for a general PJLink control system added to pvj/PROJECTORS.md; HANDOFF re-ordered. The owner will connect one Epson projector to the network on 2026-10-02 for the first real test.
+
 ## 2026-10-01 (end of the day)
 
 Merged today: the clip guide (#51), autostart modes (#52), copy from USB (#53), mock-up exports (#54), the update button with its review fixes (#55), the design playground (#56, from a second session), the Pi check log (#57), the persistent log (#58). The Pi runs master; the persistent log is installed there (seen writing to /var/log/journal; not yet seen across a restart). HANDOFF.md has a "Start here" section with the next steps. Two sessions shared one working folder and one commit landed on the other's branch; it was moved back before anything was pushed (see LESSONS).

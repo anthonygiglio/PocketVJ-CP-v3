@@ -24,15 +24,20 @@ The repository was renamed from `PocketVJ-CP-v3` to `nxlx.mastercontrol`.
 
 State at the end of 2026-10-01: master is green, **no open pull requests**, the test Pi 4 runs current master (0.1.0) with every service active.
 
-Next, in the order the owner approved after the deep dive into the old manual:
+**Direction (D36):** the box is a room controller staff can use at Leyline, and the owner's VJ and mapping tool. Weigh new work against that first. The PJLink plan is in [pvj/PROJECTORS.md](pvj/PROJECTORS.md#plan-a-general-pjlink-control-system-d36).
 
-1. **Factory reset, settings export and import, diagnostics** (a page or download with versions, health, logs). Needs no one at the box. Touches settings and root, so it gets an independent review.
-2. Display mode (resolution and refresh, with confirm-or-revert) and display sleep/wake. **Needs the owner at the monitor**; ask first.
-3. Mapper workflow: undo, number fields, export and import (including ofxPiMapper XML), switching saved mappings from the schedule, OSC, DMX and MIDI.
-4. Wall: the server lists its clients, send a clip to clients, separate horizontal and vertical bezels.
-5. Schedule with dates and intervals.
-6. Follow-on actions and music under the slideshow.
-7. Wi-Fi hotspot (large; needs the owner's go-ahead).
+**Morning of 2026-10-02:** the owner will power one Epson projector (an X27 or X39, model to confirm from its label) and connect it to the network. First the restart check below; then, with the owner, the first real PJLink test with the existing module: switch PJLink on in the projector's network menu, note its address and password, add it under System > Projectors, then on, off, mute and state. Record what it answers to `CLSS ?`, `INF1 ?`, `INF2 ?`, `INST ?` and `LAMP ?` (class and inputs decide Phase 1 and 2). Do not claim anything about real projectors before this.
+
+Next, in order:
+
+1. **PJLink Phase 1:** identify on add, input selection with friendly labels and warm-up retry, separate picture and sound mute, lamp hours and warnings in Health, background status. Extend the fake projector first; independent review (it talks to devices on the network).
+2. **PJLink Phase 2:** class 2 volume steps, freeze, input names, signal resolution, "Find projectors" search, status notices.
+3. **Groups, scenes and the Room screen** for staff (presenter and guest codes), with projector actions on the schedule, OSC, MIDI and DMX.
+4. **ISF shader playback** (the owner's preferred format), then live coding with a last-good fallback, then **projectM** as an optional module on boards with OpenGL ES 3 (measure on the Pi 4 first).
+5. **Painting-wall masks** on the second projector (likely the Pi 3B as a second synced box).
+6. **Network notes** for the private NXLX network (a dedicated router, fixed addresses, projectors without internet, staff Wi-Fi or a wall tablet).
+7. **Video matrix driver** (serial, TCP, HTTP, OSC command templates) once the owner picks a model; audio routing is undecided.
+8. The earlier parity list, now after the above: factory reset, settings export and import, diagnostics; display mode (owner at the monitor); mapper workflow; wall improvements; schedule with dates; follow-on actions; Wi-Fi hotspot.
 
 Small follow-ups: after `pvj-update rollback` from a terminal, the Updates card still says "Last update: updated to X" (the installed version line is right). Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
 
