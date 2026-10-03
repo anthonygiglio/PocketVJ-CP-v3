@@ -1027,7 +1027,10 @@ class Api:
                     inbox.append({"version": m.group(1), "signed": os.path.isfile(os.path.join(self._update_inbox(), n + ".sig"))})
         except OSError:
             pass
-        return {"version": __version__, "usb": usb, "inbox": inbox, "last": self._update_result()}
+        last = self._update_result()
+        if last and last.get("state") == "done" and last.get("version") not in (None, __version__):
+            last = None         # it says "updated to X", but X is not what runs now (a rollback from a terminal)
+        return {"version": __version__, "usb": usb, "inbox": inbox, "last": last}
 
     def start_update(self, body, device, client):
         """{"source": "usb" | "inbox", "version": "N.N.N", "confirm": "update"}: pvj-sysd starts a fixed update unit
