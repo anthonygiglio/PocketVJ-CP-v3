@@ -88,37 +88,29 @@ class Tap:
 
 
 GRAD = "vec4 hook() { return vec4(HOOKED_pos.x, HOOKED_pos.y, 0.25, 1.0); }\n"
-CASES = [
-    ("main-yuv-black", "av://lavfi:color=c=black:size=%dx%d:rate=30" % (W, H), "//!HOOK MAIN\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD, None),
-    ("native-yuv-black", "av://lavfi:color=c=black:size=%dx%d:rate=30" % (W, H), "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD, None),
-    ("native-rgb24", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H), "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD, None),
-    ("native-rgb0", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb0" % (W, H), "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD, None),
-    ("native-gbrp", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=gbrp" % (W, H), "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD, None),
-    ("native-rgb24-tiny-resized", "av://lavfi:color=c=black:size=32x18:rate=30,format=rgb24",
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!WIDTH %d\n//!HEIGHT %d\n//!DESC pvjspike\n" % (W, H)
-     + "vec4 hook() { return vec4(step(0.5, fract(HOOKED_pos.x * 40.0)), HOOKED_pos.y, HOOKED_size.x / 1000.0, 1.0); }\n", None),
-    ("main-yuv-tiny-resized", "av://lavfi:color=c=black:size=32x18:rate=30",
-     "//!HOOK MAIN\n//!BIND HOOKED\n//!WIDTH %d\n//!HEIGHT %d\n//!DESC pvjspike\n" % (W, H)
-     + "vec4 hook() { return vec4(step(0.5, fract(HOOKED_pos.x * 40.0)), HOOKED_pos.y, HOOKED_size.x / 1000.0, 1.0); }\n", None),
-    ("main-white-multiply", "av://lavfi:color=c=white:size=%dx%d:rate=30" % (W, H),
-     "//!HOOK MAIN\n//!BIND HOOKED\n//!DESC pvjspike\nvec4 hook() { return vec4(vec3(HOOKED_pos.x, HOOKED_pos.y, 0.25) * HOOKED_tex(HOOKED_pos).rgb, 1.0); }\n", None),
-    ("fragcoord", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\nvec4 hook() { return vec4(gl_FragCoord.x / %d.0, gl_FragCoord.y / %d.0, 0.25, 1.0); }\n" % (W, H), None),
-    ("frame-uniform", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\nvec4 hook() { return vec4(vec3(fract(float(frame) / 64.0)), 1.0); }\n", None),
-    ("globals-and-mod", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\nconst vec2 RENDERSIZE = vec2(320.0, 180.0);\n"
-     "vec2 pvj_norm; vec4 pvj_color;\n#line 100\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
-     "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n", None),
-    ("with-output-hook", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n" + GRAD,
-     "//!HOOK OUTPUT\n//!BIND HOOKED\n//!DESC pvjout\nvec4 hook() { return vec4(HOOKED_tex(HOOKED_pos).bgr, 1.0); }\n"),
-    ("compile-error", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC pvjspike\n#line 100\nvec4 hook() {\n    float x = 1;\n    return vec4(nonsense, 1.0);\n}\n", None),
-    ("bad-directive", "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb24" % (W, H),
-     "//!HOOK NATIVE\n//!BIND NOSUCHTEX\n//!WHAT 1\n//!DESC pvjspike\n" + GRAD, None),
-]
-
+RGB = "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb0" % (W, H)
+HEAD = "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC %s\n"
+G = {
+    "g1-all": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\nconst vec2 RENDERSIZE = vec2(320.0, 180.0);\n"
+              "vec2 pvj_norm; vec4 pvj_color;\n#line 100\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
+              "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
+    "g2-noline": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\n"
+                 "vec2 pvj_norm; vec4 pvj_color;\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
+                 "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
+    "g3-notime": "vec2 pvj_norm; vec4 pvj_color;\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5, 1.0); }\n"
+                 "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
+    "g4-locals": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\n"
+                 "vec4 pvj_main(vec2 n) { return vec4(n, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
+                 "vec4 hook() { return pvj_main(vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y)); }\n",
+    "g5-constonly": "const float speed = 0.5;\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, speed, 1.0); }\n",
+    "g6-define-only": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(TIME), 1.0); }\n",
+    "g7-global-in-hook": "vec4 pvj_color;\nvec4 hook() { pvj_color = vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5, 1.0); return pvj_color; }\n",
+    "g8-inout": "void pvj_main(vec2 pvj_norm, inout vec4 pvj_color) { pvj_color = vec4(pvj_norm, 0.5, 1.0); }\n"
+                "vec4 hook() { vec4 c = vec4(0.0, 0.0, 0.0, 1.0); pvj_main(vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y), c); return c; }\n",
+    "g9-error": "#line 100\nvec4 hook() {\n    float x = 1;\n    return vec4(nonsense, 1.0);\n}\n",
+    "g10-after-error": "vec4 hook() { return vec4(HOOKED_pos.x, HOOKED_pos.y, 0.25, 1.0); }\n",
+}
+CASES = [(k, RGB, HEAD % k.split("-")[0] + v, None) for k, v in G.items()]
 
 @unittest.skipUnless(GPU and shutil.which("mpv"), "set PVJ_GPU_TEST=1 under a display with mpv")
 class Spike(unittest.TestCase):
@@ -158,7 +150,7 @@ class Spike(unittest.TestCase):
             p.ipc.request("loadfile", carrier, "replace")
             time.sleep(1.2)
             logs = tap.drain(0.3)
-            errs = [(pre, lvl, t) for pre, lvl, t in logs if lvl in ("error", "fatal", "warn")]
+            errs = [(pre, lvl, t) for pre, lvl, t in logs if lvl in ("error", "fatal", "warn") or "user shader" in t.lower() or "hook" in t.lower()]
             print("SPIKE %s case %s: %d error/warn lines" % (extra, name, len(errs)))
             for pre, lvl, t in errs[:6] + errs[-14:]:
                 print("SPIKE    [%s] %s: %s" % (pre, lvl, t[:220]))
@@ -167,7 +159,7 @@ class Spike(unittest.TestCase):
                 print("SPIKE    vo-passes fresh: %s" % [(x.get("desc"), x.get("avg")) for x in (passes or {}).get("fresh", [])])
             except PlayerError as e:
                 print("SPIKE    vo-passes failed: %s" % e)
-            for b in (0, -50, -100):
+            for b in (0, -100):
                 p.ipc.request("set_property", "brightness", b)
                 time.sleep(0.3)
                 shot = os.path.join(d, "shot.png")
@@ -195,7 +187,7 @@ class Spike(unittest.TestCase):
         self.run_mode(["--gpu-context=x11egl", "--opengl-es=yes"])
 
     def test_desktop_gl(self):
-        self.run_mode([])
+        self.run_mode(["--gpu-context=x11egl", "--opengl-es=no"])
 
 
 if __name__ == "__main__":
