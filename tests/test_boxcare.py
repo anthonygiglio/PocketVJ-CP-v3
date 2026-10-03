@@ -106,6 +106,34 @@ class StrictJsonTest(unittest.TestCase):
         self.refused(b'{"a": ' + b"[" * 100000 + b"]" * 100000 + b'}', "nested")
 
 
+class StreamAddressTest(unittest.TestCase):
+    def test_only_the_secrets_are_cut_and_every_other_byte_stays(self):
+        srt = "srt://192.168.1.61:9000?mode=caller&streamid=#!::r=live/cam 1,m=request&latency=120"
+        for url, want in (
+                ("rtsp://user:pw@192.168.1.60:554/live?x=1", "rtsp://192.168.1.60:554/live?x=1"),
+                ("rtsp://user@cam.local/live", "rtsp://cam.local/live"),
+                ("rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b", "rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b"),
+                (srt, srt),
+                (srt + "&passphrase=Secret-1234567", srt),
+                ("srt://192.168.1.61:9000?passphrase=Secret-1234567&" + srt.split("?")[1], srt),
+                ("srt://192.168.1.61:9000?PassPhrase=Secret-1234567", "srt://192.168.1.61:9000"),
+                ("srt://192.168.1.61:9000?pbkeylen=16&passphrase=x", "srt://192.168.1.61:9000?pbkeylen=16"),
+                ("srt://192.168.1.61:9000?", "srt://192.168.1.61:9000?"),
+                ("srt://[fe80::1]:9000?passphrase=x", "srt://[fe80::1]:9000"),
+                ("rtmp://u:p@192.168.1.62/live/key", "rtmp://192.168.1.62/live/key")):
+            self.assertEqual(boxcare.strip_login(url), want)
+            self.assertEqual(boxcare.strip_login(want), want)
+        self.assertEqual(boxcare.strip_login(None), "")
+        self.assertEqual(boxcare.strip_login("not an address"), "")
+
+    def test_the_secret_pieces_are_found_even_behind_a_hash(self):
+        url = "srt://me:pw-1@192.168.1.61:9000?streamid=#!::r=live&passphrase=Phrase-9"
+        self.assertEqual(sorted(boxcare.stream_secrets(url)), ["Phrase-9", "me", "pw-1"])
+        self.assertEqual(boxcare.stream_secrets("rtsp://192.168.1.60/live"), [])
+        self.assertEqual(boxcare.stream_secrets(None), [])
+        self.assertEqual(boxcare.stream_where(url), "srt://192.168.1.61:9000")
+
+
 class ExportTest(Base):
     def test_default_export_holds_no_secret(self):
         self.h("POST", "/api/access/code", {"role": "view"}, self.full_dev)
@@ -193,6 +221,16 @@ class ImportTest(Base):
         self.assertEqual(self.settings.data["projectors"][0]["password"], PROJECTOR_PASSWORD)
         self.assertIn(STREAM_PASSWORD, self.settings.data["streams"][0]["url"])
 
+    def test_a_stream_address_arrives_unchanged_on_a_box_that_never_had_it(self):
+        srt = "srt://192.168.1.61:9000?mode=caller&streamid=#!::r=live/cam,m=request"
+        self.settings.data["streams"] = [{"id": "bbbb0009", "name": "Truck", "url": srt + "&passphrase=" + STREAM_PHRASE}]
+        file = self.export()
+        self.assertEqual(file["settings"]["streams"][0]["url"], srt)
+        self.settings.data["streams"] = []
+        st, out = self.send(file)
+        self.assertEqual((st, out["passwords_kept"]), (200, 1))          # the projector's; there was no stream to keep one from
+        self.assertEqual(self.settings.data["streams"], [{"id": "bbbb0009", "name": "Truck", "url": srt}])
+
     def test_a_kept_password_never_follows_a_changed_address(self):
         file = self.export()
         file["settings"]["projectors"][0]["host"] = "192.168.1.99"
@@ -235,35 +273,57 @@ class ImportTest(Base):
     def test_what_a_later_schema_adds_comes_from_its_own_migration(self):
         """The checks know schema 13. On a box with a later schema, what that schema adds is put back by its
         migration, and a section it adds keeps the box's value."""
-        def to14(data):
+        now, later = settings_mod.SCHEMA, settings_mod.SCHEMA + 1
+
+        def to_later(data):               # like a real one: not written to run twice, and it sets up a new section
             for p in data.get("projectors", []):
                 p.setdefault("input", "hdmi1")
-            data.setdefault("shaders", {"on": False})
+            data["shaders"] = {"on": False}
+            if "devices" in data:
+                data["devices"] = []
         self.settings._migrations = dict(settings_mod.MIGRATIONS)
-        self.settings._migrations[13] = to14
-        self.settings._current = 14
+        self.settings._migrations[now] = to_later
+        self.settings._current = later
         file = self.export()
+        self.assertEqual(file["settings"]["schema"], now)
         self.assertEqual(sorted(file["settings"]["projectors"][0]), ["host", "id", "name", "password", "port"])
-        self.settings.data["schema"] = 14
+        self.settings.data["schema"] = later
         self.settings.data["shaders"] = {"on": True}
         for p in self.settings.data["projectors"]:
             p["input"] = "hdmi2"
+        devices = copy.deepcopy(self.settings.data["devices"])
         defaults = dict(settings_mod.default_settings(), shaders={"on": False})
         with mock.patch.object(boxcare, "default_settings", lambda: copy.deepcopy(defaults)):
             st, out = self.send(file)
             self.assertEqual(st, 200, out)
             d = self.settings.data
-            self.assertEqual((d["schema"], d["shaders"]), (14, {"on": True}))
+            self.assertEqual((d["schema"], d["shaders"], d["devices"]), (later, {"on": True}, devices))   # the box's own: untouched
             self.assertEqual([p["input"] for p in d["projectors"]], ["hdmi1", "hdmi1"])
             self.assertEqual(d["projectors"][0]["password"], PROJECTOR_PASSWORD)
-            file["settings"]["schema"] = 14
+            file["settings"]["schema"] = later
             file["settings"]["shaders"] = {"on": False}
             st, out = self.send(file)
             self.assertEqual(st, 200, out)
             self.assertIn("shaders is not imported by this version; left as it is", out["notes"])
-            self.assertEqual(self.settings.data["shaders"], {"on": True})
-            file["settings"]["schema"] = 15
+            self.assertEqual((self.settings.data["shaders"], self.settings.data["devices"]), ({"on": True}, devices))
+            file["settings"]["schema"] = later + 1
             self.assertEqual(self.send(file)[0], 409)
+
+            def broken(data):
+                raise KeyError("auth")
+            self.settings._migrations[now] = broken           # a migration that needs what an export never holds
+            file["settings"]["schema"] = later
+            before = self.on_disk()
+            st, out = self.send(file)
+            self.assertEqual(st, 400, out)
+            self.assertEqual(self.on_disk(), before)
+
+    def test_every_settings_section_is_either_checked_or_never_exported(self):
+        """A new top-level section must be given a check in boxcare.SECTIONS (and KNOWN_SCHEMA raised), or be listed
+        in NEVER: otherwise it would silently be missing from every export."""
+        known = {name for name, _ in boxcare.SECTIONS} | set(boxcare.NEVER) | {"schema"}
+        self.assertEqual(sorted(set(settings_mod.default_settings()) - known), [])
+        self.assertLessEqual(boxcare.KNOWN_SCHEMA, settings_mod.SCHEMA)
 
     def test_access_data_in_a_file_is_refused(self):
         for name, value in (("devices", [{"id": "x", "name": "evil", "role": "full", "token_hash": "0" * 64, "created": 1}]),
@@ -717,7 +777,7 @@ class FactoryResetTest(Base):
         open(os.path.join(other, "mine.json"), "w").close()
         st, out = self.reset(confirm="factory-reset", media="delete")
         self.assertEqual(st, 200, out)
-        self.assertEqual(os.listdir(self.media), ["folder"])
+        self.assertEqual(sorted(os.listdir(self.media)), ["folder", "notes.txt"])            # only clips and upload pieces go
         self.assertEqual(os.listdir(os.path.join(self.media, "folder")), ["inside.mp4"])     # folders are not walked
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "secret.mp4")))               # the link went, not what it pointed at
         self.assertEqual(os.listdir(os.path.join(self.usb, "STICK")), ["show.mp4"])         # never a USB drive
@@ -726,13 +786,48 @@ class FactoryResetTest(Base):
         self.assertIn(("clear",), self.player.calls)                                        # playback stopped first
         self.assertEqual(self.settings.data["devices"], [])
 
-    def test_the_pin_screen_returns(self):
+    def test_the_pin_screen_returns_even_when_a_clip_was_looping_behind_a_blackout(self):
         from pvj.pinscreen import PinScreen
-        self.player.running = True
+        self.player.running = True                # a clip plays until the player is told to clear
+        self.player.status = lambda: {"running": True, "path": None if ("clear",) in self.player.calls else "/media/a.mp4"}
+        self.assertEqual(self.h("POST", "/api/blackout", {"on": True}, self.full_dev)[0], 200)
         screen = PinScreen(self.api, self.auth, log=lambda *_: None)
         self.assertFalse(screen.auto_wanted())
         self.assertEqual(self.reset(confirm="factory-reset", media="keep")[0], 200)
         self.assertTrue(screen.auto_wanted())
+        self.assertIn(("clear",), self.player.calls)
+        self.assertFalse(self.api.mix["blackout"])
+        self.assertEqual(self.api.mix["opacity"], 100)
+        self.assertEqual([c for c in self.player.calls if c[0] == "opacity"][-1], ("opacity", 255))
+        self.assertIn("a.mp4", os.listdir(self.media))
+
+    def test_clips_on_a_usb_drive_are_never_deleted(self):
+        """PVJ_MEDIA_DIR may point at a USB drive (the read-only root needs media off the system disk)."""
+        stick = os.path.join(self.usb, "STICK")
+        link = os.path.join(self.tmp, "usb-link")
+        os.symlink(stick, link)
+        before = self.on_disk()
+        for media_dir, usb_link in ((stick, "/nonexistent"), (os.path.join(stick, "clips"), "/nonexistent"), (self.usb, "/nonexistent"),
+                                    (link, "/nonexistent"), (stick, link)):
+            self.api.media_dir, self.api.usb_link = media_dir, usb_link
+            st, out = self.reset(confirm="factory-reset", media="delete")
+            self.assertEqual((st, "USB" in out.get("error", "")), (409, True), media_dir)
+            self.assertEqual(os.listdir(stick), ["show.mp4"])
+            self.assertEqual(self.on_disk(), before)
+        self.api.usb_root = "/nonexistent"
+        self.api.media_dir, self.api.usb_link = stick, link            # only the "newest drive" link points at it
+        self.assertEqual(self.reset(confirm="factory-reset", media="delete")[0], 409)
+        self.assertEqual(os.listdir(stick), ["show.mp4"])
+        self.assertEqual(self.reset(confirm="factory-reset", media="keep")[0], 200)       # keeping them is fine
+        self.assertEqual(os.listdir(stick), ["show.mp4"])
+
+    def test_a_clip_that_cannot_be_deleted_is_reported(self):
+        real = self.care._unlink
+        self.care._unlink = lambda path: False if path.endswith("b.mov") else real(path)
+        st, out = self.reset(confirm="factory-reset", media="delete")
+        self.assertEqual(st, 200, out)
+        self.assertEqual(out["problems"], ["could not delete b.mov"])
+        self.assertIn("b.mov", os.listdir(self.media))
 
 
 class RoutesTest(unittest.TestCase):

@@ -36,7 +36,7 @@ import socket
 import subprocess
 import threading
 import time
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from . import dmx as dmx_mod, midi as midi_mod, osc as osc_mod, projector as projector_mod, streams as streams_mod
 from . import mapper as mapper_mod, scheduler as scheduler_mod, sync as sync_mod, themes as themes_mod
@@ -133,15 +133,46 @@ def _depth(value):
 
 
 # ---- stream addresses --------------------------------------------------------------------------------------------
+def _stream_parts(url):
+    """(scheme, login or "", host and port, path, [query pairs as written]) by cutting the text, not by parsing and
+    rebuilding it: an SRT streamid may hold "#" and "," and must come out byte for byte as it went in."""
+    if not isinstance(url, str) or "://" not in url:
+        return None
+    scheme, rest = url.split("://", 1)
+    cut = re.search(r"[/?#]", rest)
+    authority, tail = (rest[:cut.start()], rest[cut.start():]) if cut else (rest, "")
+    login, _, host = authority.rpartition("@")
+    path, mark, query = tail.partition("?")
+    return scheme, login, host, path, (query.split("&") if mark else None)
+
+
+def _secret_pair(pair):
+    return pair.split("=", 1)[0].lower() in SECRET_QUERY
+
+
 def strip_login(url):
-    """A stream address without its secrets: no user name and password, no passphrase (or the like) in the query."""
-    try:
-        parts = urlsplit(url)
-    except (ValueError, AttributeError):
+    """A stream address without its secrets: no user name and password, no passphrase (or the like) in the query.
+    Everything else stays exactly as it was written."""
+    parts = _stream_parts(url)
+    if parts is None:
         return ""
-    netloc = parts.netloc.rsplit("@", 1)[-1]
-    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in SECRET_QUERY])
-    return urlunsplit((parts.scheme, netloc, parts.path, query, ""))
+    scheme, _login, host, path, query = parts
+    if query is None:
+        return scheme + "://" + host + path
+    kept = [p for p in query if not _secret_pair(p)]
+    if len(kept) == len(query):                      # nothing secret in it: the query stays as written, even an empty one
+        return scheme + "://" + host + path + "?" + "&".join(query)
+    return scheme + "://" + host + path + ("?" + "&".join(kept) if kept else "")
+
+
+def stream_secrets(url):
+    """The secret pieces of a stream address (user name, password, passphrase), to scrub from any text."""
+    parts = _stream_parts(url)
+    if parts is None:
+        return []
+    out = [x for x in parts[1].split(":", 1) if x]
+    out += [p.split("=", 1)[1] for p in parts[4] or [] if _secret_pair(p) and "=" in p]
+    return out
 
 
 def stream_where(url):
@@ -623,14 +654,16 @@ class BoxCare:
         with self.settings.lock:
             current = self.settings.data
             kept = 0 if passwords else self._keep_secrets(clean, current)
-            new = copy.deepcopy(current)
-            new.update(clean)
-            # The checks know schema KNOWN_SCHEMA: what a later schema adds is put back by its own migration.
-            new["schema"] = min(KNOWN_SCHEMA, self.settings._current)
+            # The checks know schema KNOWN_SCHEMA: what a later schema adds to these sections is put back by its own
+            # migration. Only what came from the file goes through it; the box's own sections are already current,
+            # and a migration is not written to run twice.
+            fresh = dict(copy.deepcopy(clean), schema=min(KNOWN_SCHEMA, self.settings._current))
             try:
-                migrate(new, self.settings._migrations, self.settings._current)
-            except SettingsError as e:
-                raise bad("the file cannot be used: %s" % e)
+                migrate(fresh, self.settings._migrations, self.settings._current)
+            except Exception as e:
+                raise bad("the file cannot be brought up to this version's settings: %s" % (e if isinstance(e, SettingsError) else type(e).__name__))
+            new = copy.deepcopy(current)
+            new.update({k: fresh[k] for k in clean})
             try:
                 backup = self._backup()
             except OSError as e:
@@ -652,12 +685,7 @@ class BoxCare:
         found.update(d.get("token_hash") for d in data.get("devices", []))
         found.update(p.get("password") for p in data.get("projectors", []))
         for s in data.get("streams", []):
-            try:
-                parts = urlsplit(s.get("url"))
-                found.update((parts.username, parts.password))
-                found.update(v for k, v in parse_qsl(parts.query) if k.lower() in SECRET_QUERY)
-            except (ValueError, AttributeError):
-                pass
+            found.update(stream_secrets(s.get("url")))
         found.add((data.get("support") or {}).get("server_key"))
         try:
             found.update(j["code"] for j in api.auth.list_joins())
@@ -719,22 +747,45 @@ class BoxCare:
         return {"name": self._name("diagnostics"), "file": scrub(out, secrets)}
 
     # ---- factory reset -----------------------------------------------------------------------------------------
-    def _delete_media(self):
-        """Every clip in the box's own media folder (never a USB drive): plain files and links only, one by one."""
+    def _media_on_usb(self):
+        """True when the media folder is on (or is) a USB drive: PVJ_MEDIA_DIR may point there, and a reset must
+        never empty a drive someone plugged in."""
+        api = self.api
+        media = os.path.realpath(api.media_dir)
+        for root in (api.usb_root, api.usb_link):
+            try:
+                root = os.path.realpath(root)
+                if os.path.commonpath([media, root]) == root:
+                    return True
+            except (ValueError, OSError, TypeError):
+                pass
+        return False
+
+    def _delete_media(self, problems):
+        """The clips in the box's own media folder: media files (and left-over upload pieces) at its top level only,
+        plain files and links, one by one. Anything else someone put there stays."""
         api, removed = self.api, 0
         with api._media_lock:
             try:
                 entries = list(os.scandir(api.media_dir))
-            except OSError:
+            except OSError as e:
+                problems.append("the media folder could not be read: %s" % (e.strerror or e))
                 return 0
             for entry in entries:
-                if entry.is_symlink() or entry.is_file(follow_symlinks=False):
-                    removed += self._unlink(entry.path)
+                if not (entry.is_symlink() or entry.is_file(follow_symlinks=False)):
+                    continue
+                if not (entry.name.lower().endswith(MEDIA_EXTENSIONS) or entry.name.startswith(".upload-")):
+                    continue
+                if self._unlink(entry.path):
+                    removed += 1
+                else:
+                    problems.append("could not delete %s" % _printable(entry.name))
         return removed
 
     def factory_reset(self, body, device, client):
-        """{"confirm": "factory-reset", "media": "keep" | "delete"}: settings back to defaults, every paired device,
-        join code and support session gone, a new PIN (so the PIN screen returns), and the clips kept or deleted."""
+        """{"confirm": "factory-reset", "media": "keep" | "delete"}: playback stopped, settings back to defaults, every
+        paired device, join code and support session gone, a new PIN (so the PIN screen returns), and the clips kept
+        or deleted (never on a USB drive)."""
         self._local(client, "a factory reset")
         if body.get("confirm") != CONFIRM_RESET:
             raise bad('send {"confirm": "%s"}' % CONFIRM_RESET)
@@ -750,13 +801,17 @@ class BoxCare:
             raise ApiError(409, "an update is running; reset when it has finished")
         if api._import.get("active"):
             raise ApiError(409, "a copy from USB is running; reset when it has finished")
+        if media == "delete" and self._media_on_usb():
+            raise ApiError(409, "the clips of this box are on a USB drive, which a reset never empties; choose to keep the clips")
         if not api._upload_lock.acquire(blocking=False):
             raise ApiError(409, "an upload is running; reset when it has finished")
         try:
             problems, deleted = [], 0
-            if media == "delete":
+            # Playback stops and the picture comes back from black either way: the PIN is only drawn on an idle
+            # player, and nobody would see it behind a looping clip or a blackout.
+            for call, body in ((api.blackout, {"on": False}), (api.control, {"action": "reset"}), (api.control, {"action": "stop"})):
                 try:
-                    api.control({"action": "stop"}, device, client)
+                    call(body, device, client)
                 except Exception:
                     pass
             with api.support.lock:
@@ -790,8 +845,7 @@ class BoxCare:
             except OSError:
                 pass
             if media == "delete":
-                api.sweep_stale_uploads()
-                deleted = self._delete_media()
+                deleted = self._delete_media(problems)
             problems += self._apply()
         finally:
             api._upload_lock.release()
