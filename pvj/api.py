@@ -163,6 +163,8 @@ class Api:
                                                   networks_in_use=self._support_clash_networks)
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
+        from . import boxcare as boxcare_mod
+        self.boxcare = boxcare_mod.BoxCare(self)                   # settings export and import, diagnostics, factory reset
 
     # --- helpers -------------------------------------------------------
     def _apply_opacity(self, percent):
@@ -1907,6 +1909,11 @@ class Api:
 
     # --- routing -------------------------------------------------------
     def routes(self):
+        out = self._routes()
+        out.update(self.boxcare.routes())      # /api/system/settings/*, /api/system/diagnostics, /api/system/factory-reset
+        return out
+
+    def _routes(self):
         # (method, path) -> (minimum role or None, handler)
         return {
             ("GET", "/api/hello"): (None, self.hello),
