@@ -126,3 +126,6 @@ button.linkish { background: none; border: 0; padding: 4px 0; color: inherit; fo
 .health-ok .badge { border-color: var(--ac); }
 .health-warn .badge { background: #b26a00; color: #fff; border-color: #b26a00; }
 .health-bad .badge { background: #b00020; color: #fff; border-color: #b00020; }
+/* Projectors: a warning from the projector itself stands out; the input label field leaves room for its button */
+.proj-warn { color: var(--ac); font-weight: 700; }
+.proj-label { flex: 1; min-width: 0; }

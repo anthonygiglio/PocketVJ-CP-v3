@@ -277,17 +277,36 @@ function startServer() {
     await page.waitForSelector('.sched-entry:has-text("Start script startlessonce01")');
     await page.click('.sched-entry >> button:has-text("Remove")');
     await page.waitForSelector('#schedempty');
-    // Projectors: a public address is refused; a private one is added (no projector is contacted) and removed
+    // Projectors: a public address is refused; the harness's fake PJLink projector (loopback, allowed there only)
+    // is added, says who it is, shows its state, lamp hours and a warning, takes an input, a label and a mute
     await page.click('.item:has-text("Projector control") >> button');
     await page.waitForSelector('#projline');
     await page.fill('#projname', 'Main');
     await page.fill('#projhost', '8.8.8.8');
     await page.click('#projadd');
     await page.waitForFunction(() => /private/.test(document.getElementById('msg').textContent));
-    await page.fill('#projhost', '192.168.0.50');
+    await page.fill('#projhost', '127.0.0.1');
+    await page.fill('#projport', String(info.projector_ports[0]));
     await page.fill('#projpw', 'secret1');
     await page.click('#projadd');
     await page.waitForSelector('.proj-entry:has-text("password set")');
+    if ((await page.content()).includes('secret1')) problems.push('the projector password came back to the page');
+    await page.waitForSelector('.proj-details:has-text("NXLX Test Works FP-1")', { timeout: 15000 });
+    await page.waitForSelector('.proj-status:has-text("lamp 1234 h")', { timeout: 15000 });
+    if (!/^on/i.test(await page.textContent('.proj-status'))) problems.push('the projector status does not say On: ' + await page.textContent('.proj-status'));
+    await page.waitForSelector('.proj-warn:has-text("Warning: filter")');
+    await page.selectOption('.proj-input', '31');
+    await page.waitForSelector('.proj-status:has-text("input Digital 1")', { timeout: 15000 });
+    await page.fill('.proj-label', 'Matrix');
+    await page.click('.proj-setlabel');
+    await page.waitForSelector('.proj-status:has-text("input Matrix (Digital 1)")', { timeout: 15000 });
+    await page.click('button[aria-label="Mute picture Main"]');
+    await page.waitForSelector('.proj-status:has-text("picture muted")', { timeout: 15000 });
+    await page.click('button[aria-label="Unmute picture Main"]');
+    await page.waitForFunction(() => !/muted/.test(document.querySelector('.proj-status').textContent), null, { timeout: 15000 });
+    await page.click('button[aria-label="Refresh details Main"]');
+    await page.waitForFunction(() => /Refresh details: done/.test(document.getElementById('msg').textContent));
+    await page.waitForSelector('#healthcard .item:has-text("Projector: Main"):has-text("lamp 1234 h"):has-text("Warning: filter")', { timeout: 15000 });
     if ((await page.content()).includes('secret1')) problems.push('the projector password came back to the page');
     await page.click('.proj-entry >> button:has-text("Remove")');
     await page.waitForFunction(() => !document.querySelector('.proj-entry'));
