@@ -91,24 +91,16 @@ GRAD = "vec4 hook() { return vec4(HOOKED_pos.x, HOOKED_pos.y, 0.25, 1.0); }\n"
 RGB = "av://lavfi:color=c=black:size=%dx%d:rate=30,format=rgb0" % (W, H)
 HEAD = "//!HOOK NATIVE\n//!BIND HOOKED\n//!DESC %s\n"
 G = {
-    "g1-all": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\nconst vec2 RENDERSIZE = vec2(320.0, 180.0);\n"
-              "vec2 pvj_norm; vec4 pvj_color;\n#line 100\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
-              "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
-    "g2-noline": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\n"
-                 "vec2 pvj_norm; vec4 pvj_color;\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
-                 "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
-    "g3-notime": "vec2 pvj_norm; vec4 pvj_color;\nvoid pvj_main() { pvj_color = vec4(pvj_norm, 0.5, 1.0); }\n"
-                 "vec4 hook() { pvj_norm = vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y); pvj_main(); return pvj_color; }\n",
-    "g4-locals": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nconst float speed = 0.5;\n"
-                 "vec4 pvj_main(vec2 n) { return vec4(n, 0.5 + 0.5 * sin(TIME * speed), 1.0); }\n"
-                 "vec4 hook() { return pvj_main(vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y)); }\n",
-    "g5-constonly": "const float speed = 0.5;\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, speed, 1.0); }\n",
-    "g6-define-only": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(TIME), 1.0); }\n",
-    "g7-global-in-hook": "vec4 pvj_color;\nvec4 hook() { pvj_color = vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5, 1.0); return pvj_color; }\n",
-    "g8-inout": "void pvj_main(vec2 pvj_norm, inout vec4 pvj_color) { pvj_color = vec4(pvj_norm, 0.5, 1.0); }\n"
-                "vec4 hook() { vec4 c = vec4(0.0, 0.0, 0.0, 1.0); pvj_main(vec2(HOOKED_pos.x, 1.0 - HOOKED_pos.y), c); return c; }\n",
-    "g9-error": "#line 100\nvec4 hook() {\n    float x = 1;\n    return vec4(nonsense, 1.0);\n}\n",
-    "g10-after-error": "vec4 hook() { return vec4(HOOKED_pos.x, HOOKED_pos.y, 0.25, 1.0); }\n",
+    "h0-g6again": "#define TIME (mod(float(frame), 1048576.0) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(TIME), 1.0); }\n",
+    "h1-nomacro-sin": "vec4 hook() { float t = float(frame) / 30.0; return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(t), 1.0); }\n",
+    "h2-macro-nomod": "#define TIME (float(frame) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(TIME), 1.0); }\n",
+    "h3-mod-nomacro": "vec4 hook() { float t = mod(float(frame), 1048576.0) / 30.0; return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, fract(t), 1.0); }\n",
+    "h4-othername": "#define PVJ_T (mod(float(frame), 1048576.0) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(PVJ_T), 1.0); }\n",
+    "h5-sin-direct": "vec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(float(frame) / 64.0), 1.0); }\n",
+    "h6-mod-small": "vec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, mod(float(frame), 1024.0) / 1024.0, 1.0); }\n",
+    "h7-floor": "#define TIME ((float(frame) - 1048576.0 * floor(float(frame) / 1048576.0)) / 30.0)\nvec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, 0.5 + 0.5 * sin(TIME), 1.0); }\n",
+    "h8-global-time": "float pvj_time;\n#define TIME pvj_time\nfloat wob() { return 0.5 + 0.5 * sin(TIME); }\nvec4 hook() { pvj_time = mod(float(frame), 1048576.0) / 30.0; return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, wob(), 1.0); }\n",
+    "h9-fract-ok": "vec4 hook() { return vec4(HOOKED_pos.x, 1.0 - HOOKED_pos.y, fract(float(frame) / 64.0), 1.0); }\n",
 }
 CASES = [(k, RGB, HEAD % k.split("-")[0] + v, None) for k, v in G.items()]
 
@@ -150,9 +142,9 @@ class Spike(unittest.TestCase):
             p.ipc.request("loadfile", carrier, "replace")
             time.sleep(1.2)
             logs = tap.drain(0.3)
-            errs = [(pre, lvl, t) for pre, lvl, t in logs if lvl in ("error", "fatal", "warn") or "user shader" in t.lower() or "hook" in t.lower()]
+            errs = [(pre, lvl, t) for pre, lvl, t in logs if lvl in ("error", "fatal", "warn") or (name.startswith("h0") and t.startswith("["))]
             print("SPIKE %s case %s: %d error/warn lines" % (extra, name, len(errs)))
-            for pre, lvl, t in errs[:6] + errs[-14:]:
+            for pre, lvl, t in errs[:90]:
                 print("SPIKE    [%s] %s: %s" % (pre, lvl, t[:220]))
             try:
                 passes = p.ipc.request("get_property", "vo-passes")
