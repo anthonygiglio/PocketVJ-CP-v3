@@ -566,6 +566,32 @@ class MonitorTest(unittest.TestCase):
         self.assertEqual([len(f.received) for f in fakes], asked)         # and nothing is asked any more
         self.assertEqual(self.mon.status(self.settings.data["projectors"][0]["id"]).get("power"), None)
 
+    def test_a_check_asked_for_during_a_check_is_not_lost(self):
+        fake, e = self.add()
+        gate, calls, real = threading.Event(), [], self.mon.api._pjlink
+
+        class Slow:
+            def __init__(self, link):
+                self.link = link
+
+            def __getattr__(self, name):
+                return getattr(self.link, name)
+
+            def state(self):
+                calls.append(1)
+                if len(calls) == 1:
+                    gate.wait(5)                          # the first check is still running...
+                return self.link.state()
+        self.mon.api._pjlink = lambda entry: Slow(real(entry))
+        self.mon.interval = 60
+        self.mon.apply()
+        self.assertTrue(wait_for(lambda: calls))
+        self.mon.poke(e["id"])                            # ...when a button asks for a fresh one
+        gate.set()
+        self.assertTrue(wait_for(lambda: len(calls) >= 2, 1.0))
+        time.sleep(0.3)
+        self.assertEqual(len(calls), 2)                   # one more, not a busy loop
+
     def test_a_worker_that_stops_without_apply_also_ends(self):
         fake, e = self.add()
         self.mon.apply()
@@ -809,11 +835,15 @@ class ApiTest(ServerBase):
             t.join()
             held.append(not got[0])
             return "192.168.0.7"
-        with mock.patch.object(projector, "private_address", check):
+        def refuse(addr, timeout=None):                   # the lookup above is made up: nothing may leave this machine
+            raise OSError("refused")
+        nowhere = lambda e: projector.PJLink(e["host"], e["port"], e["password"], connect=refuse)
+        with mock.patch.object(api, "_pjlink", nowhere), mock.patch.object(projector, "private_address", check):
             self.assertEqual(self.post("/api/projectors", {"add": {"host": "beamer.lan"}})[0], 200)
-            self.api.projectors.stop(final=True)          # the background check looks the name up too, never under the lock either
-        self.assertTrue(held)
-        self.assertNotIn(True, held)
+            self.assertTrue(wait_for(lambda: len(held) >= 2))     # the background check looks the name up too
+            api.projectors.stop(final=True)
+            self.assertTrue(wait_for(lambda: not api.projectors.threads(), 3))
+        self.assertNotIn(True, held)                      # never under the lock, neither the add nor the background check
 
     def projector(self):
         return self.call("GET", "/api/projectors", token=self.full)[1]["projectors"][0]
@@ -855,8 +885,9 @@ class ApiTest(ServerBase):
                              ("mute", "31"), ("unmute", "30")):
             self.assertEqual(self.post("/api/projector", {"id": pid, "action": action}, token=live)[0], 200, action)
             self.assertEqual(self.fake.mute, want, action)
-        self.assertTrue(wait_for(lambda: self.projector()["status"].get("input") == "31"))       # poked, not 45 seconds later
-        self.assertEqual(self.projector()["status"]["mute"], {"picture": False, "sound": False})
+            shows = {"picture": want in ("11", "31"), "sound": want in ("21", "31")}
+            self.assertTrue(wait_for(lambda: self.projector()["status"].get("mute") == shows), action)    # at once, not 45 seconds later
+        self.assertEqual(self.projector()["status"]["input"], "31")
         self.fake.separate_mute = False
         st, body, _ = self.post("/api/projector", {"id": pid, "action": "mute_sound"})
         self.assertEqual(st, 502)

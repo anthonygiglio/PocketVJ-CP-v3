@@ -519,10 +519,13 @@ class Monitor:
                 if pending and time.monotonic() >= pending["next"] and not w.stop.is_set():
                     self._retry(w, entry, pending)
                 if time.monotonic() >= w.due and not w.stop.is_set():
+                    with self.lock:
+                        w.due = float("inf")
                     st = self._poll(w, entry)
                     power = (st or {}).get("power")
                     with self.lock:
-                        w.due = time.monotonic() + (self.changing if power in ("warming up", "cooling down") else self.interval)
+                        if w.due == float("inf"):       # else poke() asked for another check meanwhile: keep that
+                            w.due = time.monotonic() + (self.changing if power in ("warming up", "cooling down") else self.interval)
                         if power != "on":
                             w.asked_inputs = False
                         elif not (entry.get("details") or {}).get("inputs") and not w.asked_inputs:
