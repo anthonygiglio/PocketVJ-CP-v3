@@ -412,14 +412,14 @@ function startServer() {
     await page.click('nav >> text=Live');
     await page.waitForSelector('#vibes');
     await page.click('#vibes');
-    await page.waitForFunction(() => /^Vibes: nxlx-/.test(document.getElementById('np').textContent), null, { timeout: 15000 });
-    await page.waitForFunction(() => /Vibes is on/.test(document.getElementById('vibes').textContent));
+    await page.waitForFunction(() => /^Vibes: nxlx-/.test((document.getElementById('np') || {}).textContent), null, { timeout: 15000 });
+    await page.waitForFunction(() => /Vibes is on/.test((document.getElementById('vibes') || {}).textContent));
     await page.click('nav >> text=Mix');
     await page.waitForSelector('#shadercard [data-shader="nxlx-tide.fs"]');
     assert.strictEqual(await page.locator('#shadercard [data-shader]').count(), 10, 'the ten bundled shaders are listed');
-    await page.waitForFunction(() => /Vibes is on/.test(document.getElementById('shaderline').textContent));
+    await page.waitForFunction(() => /Vibes is on/.test((document.getElementById('shaderline') || {}).textContent));
     await page.click('#shadercard [data-shader="nxlx-tide.fs"] >> text=Play');
-    await page.waitForFunction(() => /On screen: nxlx-tide/.test(document.getElementById('shaderline').textContent));
+    await page.waitForFunction(() => /On screen: nxlx-tide/.test((document.getElementById('shaderline') || {}).textContent));
     await page.waitForSelector('#shin-speed');                       // its number inputs are sliders
     const vibesAfter = await page.evaluate(() => fetch('/api/shaders').then((r) => r.json()).then((d) => d.vibes.running));
     assert.strictEqual(vibesAfter, false, 'choosing a shader by hand ends the rotation');
@@ -427,9 +427,9 @@ function startServer() {
     await page.click('#shadersave');
     await page.waitForFunction(() => fetch('/api/shaders').then((r) => r.json()).then((d) => d.config.dwell === 45));
     await page.click('nav >> text=Live');
-    await page.waitForFunction(() => /^Shader: nxlx-tide/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => /^Shader: nxlx-tide/.test((document.getElementById('np') || {}).textContent), null, { timeout: 8000 });
     await page.click('#stop');
-    await page.waitForFunction(() => /Player idle/.test(document.getElementById('np').textContent), null, { timeout: 8000 });
+    await page.waitForFunction(() => /Player idle/.test((document.getElementById('np') || {}).textContent), null, { timeout: 8000 });
 
     // Desktop width
     await page.setViewportSize({ width: 1280, height: 800 });

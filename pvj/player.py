@@ -137,6 +137,10 @@ class Ipc:
 
 
 class Player:
+    # Defaults for a Player made without __init__ (some tests do); __init__ gives every player its own lock.
+    _lock = threading.RLock()
+    _mapping_shaders, _mapping_mode, _source, _source_pid, source_epoch = [], False, None, None, 0
+
     def __init__(self, mpv_bin="mpv", extra_args=None, rundir=None):
         self.mpv_bin = mpv_bin
         self.extra_args = list(extra_args or [])
