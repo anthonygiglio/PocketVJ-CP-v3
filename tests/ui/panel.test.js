@@ -257,6 +257,7 @@ function startServer() {
     await page.click('#miditoggle');
     await page.waitForFunction(() => /waiting for a controller/.test(document.getElementById('midiline').textContent));
     await page.waitForSelector('#midinomap');
+    for (const a of ['vibes', 'vibes_next', 'vibes_dwell']) assert.strictEqual(await page.locator('#midiaction option[value="' + a + '"]').count(), 1, 'the MIDI action list offers ' + a);
     await page.selectOption('#midiaction', 'pad');
     await page.selectOption('#midibank', '1');
     await page.click('#midilearn');
