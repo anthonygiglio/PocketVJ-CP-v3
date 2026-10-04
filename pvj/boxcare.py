@@ -688,11 +688,19 @@ class BoxCare:
                 return fn()
             except Exception as e:                # a missing piece must not cost the rest
                 return {"error": "not available: %s" % (getattr(e, "message", None) or type(e).__name__)}
+
+        def player():
+            """What plays, with a stream shown only as where it comes from (its saved name stays): a path can be a
+            stream key, and the address may be one that is not among the saved streams."""
+            status = api._public_player_status()
+            if isinstance(status.get("path"), str) and "://" in status["path"]:
+                status["path"] = stream_where(status["path"])
+            return status
         from . import __version__
         out = {"made": int(self._now()), "made_utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(self._now())),
                "version": __version__, "settings_schema": data.get("schema"), "board": dict(api.board),
                "system": part(lambda: api.system_info({}, device, client)),
-               "player": part(api._public_player_status),
+               "player": part(player),
                "modules": part(lambda: [{k: m[k] for k in ("id", "version", "type", "status", "supported", "enabled")}
                                         for m in api.registry.list()]),
                "health": part(api.health.report),

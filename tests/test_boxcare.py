@@ -609,6 +609,19 @@ class DiagnosticsTest(Base):
         self.assertIn("disk", file["system"])
         # the same file through the tunnel (support is who it is for)
         self.assertNotIn(PROJECTOR_PASSWORD, json.dumps(self.get(dev, TUNNEL)))
+        # whatever stream is playing, saved or not, is shown only as where it comes from
+        self.assertEqual(file["player"], {"running": True, "path": "rtsp://192.168.1.60:554", "stream": "Camera"})
+        self.care._run = FakeJournal()
+        playing = [(x["url"], x["name"]) for x in d["streams"]] + [(a[0], None) for a in ADDRESSES]
+        playing.append(("rtsp://192.168.1.77:8554/private-path-s20?res=hd", None))
+        for url, name in playing:
+            self.player.status = lambda: {"running": True, "path": url}
+            file = self.get()
+            text = json.dumps(file)
+            self.assertEqual(file["player"].get("stream"), name)
+            self.assertEqual(file["player"]["path"], boxcare.stream_where(url))
+            for secret in secrets + ["private-path-s20"] + [x for a in ADDRESSES for x in a[2]]:
+                self.assertNotIn(secret, text, (secret, url))
 
     def test_the_log_is_asked_for_with_fixed_arguments(self):
         journal = FakeJournal(stdout="a line\n")
