@@ -5,14 +5,16 @@ software GPU. The other tests run mpv with --vo=null, which never compiles a sha
 pass there whatever the shader held. Here every claim is checked on the picture itself (a screenshot of the window),
 once on OpenGL ES (what a Raspberry Pi uses; the stricter shader language) and once on desktop OpenGL.
 
-Run:  PVJ_GPU_TEST=1 xvfb-run -a python3 -m unittest tests.test_shaders_gpu -v
-Without PVJ_GPU_TEST it is skipped (CI sets it, so there a missing display or GPU is a failure, not a skip).
+Run:  PVJ_GPU_TEST=1 xvfb-run -a python3 -m tests.test_shaders_gpu
+Run that way (as CI does), a skipped test is a failure, so a missing display or GPU cannot pass as green. Under the
+usual test discovery it is skipped unless PVJ_GPU_TEST is set.
 This is a software GPU: it says nothing about speed, and nothing about the GPU driver of a real board.
 """
 import os
 import random
 import shutil
 import struct
+import sys
 import time
 import unittest
 import zlib
@@ -312,4 +314,9 @@ class DesktopGlShaderTest(GpuCase, ServerBase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    # CI runs this file directly: here a skip is a failure. unittest alone exits 0 when every test was skipped, which
+    # would let a missing display or GPU pass as green.
+    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))
+    ran = result.testsRun - len(result.skipped)
+    print("shader GPU tests: %d run, %d skipped" % (ran, len(result.skipped)))
+    sys.exit(0 if result.wasSuccessful() and ran > 0 and not result.skipped else 1)

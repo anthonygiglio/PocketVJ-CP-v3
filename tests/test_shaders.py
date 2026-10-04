@@ -120,6 +120,7 @@ class TranslatorTest(unittest.TestCase):
         ok = "void main() { gl_FragColor = vec4(1.0); }"
         for text in (isf(body=ok + "\n//!HOOK OUTPUT\n//!BIND HOOKED\nvec4 hook() { return vec4(1.0); }"),
                      isf(body="/* //!TEXTURE X */\n" + ok), isf(body=ok + " //!SAVE MAIN"), isf(DESCRIPTION="x //!HOOK OUTPUT"),
+                     isf(body="/* a comment\n//!HOOK OUTPUT\n*/" + ok),
                      "//!HOOK OUTPUT\n" + isf()):
             self.assertIn("//!", refusal(self, text))
         for directive in ("#include \"/etc/passwd\"", "#version 100", "#extension GL_OES_standard_derivatives : enable", "#pragma optimize(off)",
@@ -128,8 +129,23 @@ class TranslatorTest(unittest.TestCase):
         self.assertTrue(S.parse(isf(body="#define TWO 2.0\n#ifdef GL_ES\n#endif\n" + ok)))
         for decl in ("uniform sampler2D secret;", "varying vec2 v;", "in vec2 p;", "out vec4 o;", "layout(location = 0) out vec4 o;", "attribute vec2 a;"):
             self.assertIn("uniform, varying, in or out", refusal(self, isf(body=decl + "\n" + ok)), decl)
-        for name in ("pvj_color", "HOOKED_tex", "pvj_main", "PASSINDEX"):
+        for name in ("pvj_color", "HOOKED_tex", "pvj_main", "PVJ_HP", "Hooked_pos", "texture0", "texcoord0", "out_color", "input_size"):
             self.assertIn("used by the player", refusal(self, isf(body="float %s = 1.0;\n%s" % (name, ok))))
+        # behind a comment, and in the middle of a line: the compiler sees these, so the checks must too
+        for hidden in ("/**/#extension GL_OES_standard_derivatives : enable", "/* */ #pragma optimize(off)", "/* a\nb */#version 100",
+                       "/**/ # include <x>"):
+            self.assertIn("not allowed", refusal(self, isf(body=hidden + "\n" + ok)), hidden)
+        for decl in ("float q; uniform sampler2D tex;", "float q;\n /* x */ uniform float u;", "float f() { return 1.0; } in vec2 p;",
+                     "float q; layout(location = 1) out vec4 o;"):
+            self.assertIn("uniform, varying, in or out", refusal(self, isf(body=decl + "\n" + ok)), decl)
+        self.assertTrue(S.parse(isf(body="void twice(in float a, out float b, inout float c) { b = a; }\n" + ok)))   # parameters are fine
+        self.assertIn("used by the player", refusal(self, isf(body="void main() { gl_FragColor = texture2D(texture0, vec2(0.5)); }")))
+        for line in ("#undef PVJ_HP", "#define hook x", "#define HOOK x", "#define TIME 0.0", "#undef RENDERSIZE", "#define gl_Position x",
+                     "#define frame 0", "#define a__b 1"):
+            self.assertIn("is not allowed", refusal(self, isf(body=line + "\n" + ok)), line)
+        self.assertIn("not allowed", refusal(self, isf(body="#define TWO \\\n 2.0\n" + ok)))       # no line continuations
+        self.assertIn("never closed", refusal(self, isf(body=ok + "\n/* open")))
+        self.assertNotIn("secret", S.translate(S.parse(isf(body=ok + " // secret\n/* secret */")), (640, 360)))
         for text in (isf(body=ok + "\n// café"), isf(body=ok + "\x00"), isf(body=ok + "\x1b[2J"), isf(body=ok + "\x0c")):
             self.assertIn("ASCII", refusal(self, text))
         self.assertIn("exactly one void main", refusal(self, isf(body="float f() { return 1.0; }")))
@@ -139,6 +155,7 @@ class TranslatorTest(unittest.TestCase):
         def one(spec):
             return isf(INPUTS=[spec])
         for name in ("gl_FragColor", "hook", "frame", "random", "main", "TIME", "RENDERSIZE", "sin", "float", "pvj_x", "isf_x", "HOOKED_pos",
+                     "PVJ_HP", "Hook", "Time", "rendersize", "Gl_x", "hooked_x", "texture0", "TEXCOORD0",
                      "a b", "a;float b", "1a", "_a", "a__b", "", "x" * 33, "speed\n", "café", None, 7, ["a"]):
             with self.assertRaises(S.ShaderError, msg=repr(name)):
                 S.parse(one({"NAME": name, "TYPE": "float"}))
@@ -150,7 +167,7 @@ class TranslatorTest(unittest.TestCase):
         # json.loads accepts NaN and Infinity, which are not valid GLSL numbers
         for word in ("NaN", "Infinity", "-Infinity", "1e999"):
             text = '/*{"INPUTS": [{"NAME": "a", "TYPE": "float", "DEFAULT": %s}]}*/\nvoid main() { gl_FragColor = vec4(a); }' % word
-            self.assertIn("must be a number", refusal(self, text), word)
+            self.assertRegex(refusal(self, text), "must be a number|not a number", word)
         for spec in ({"TYPE": "long", "VALUES": [1, 2], "DEFAULT": 3}, {"TYPE": "long", "VALUES": "x"}, {"TYPE": "long", "DEFAULT": 1.5},
                      {"TYPE": "long", "VALUES": [1, "2"]}, {"TYPE": "long", "VALUES": list(range(65))}, {"TYPE": "bool", "DEFAULT": "yes"},
                      {"TYPE": "bool", "DEFAULT": 2}, {"TYPE": "color", "DEFAULT": [1, 1]}, {"TYPE": "color", "DEFAULT": "red"},
@@ -160,6 +177,47 @@ class TranslatorTest(unittest.TestCase):
         p = S.parse(one({"NAME": "a", "TYPE": "float", "MIN": 0, "MAX": 10, "DEFAULT": 50, "LABEL": "A\x00 \x1b[31mlabel\n"}))
         self.assertEqual((p["inputs"][0]["default"], p["inputs"][0]["label"]), (10.0, "A [31mlabel"))
         self.assertEqual(S.parse(one({"NAME": "c", "TYPE": "color", "DEFAULT": [2, -1, 0.5]}))["inputs"][0]["default"], [1.0, 0.0, 0.5, 1.0])
+
+    def test_header_values_that_made_the_parser_raise_are_refused_plainly(self):
+        """Each of these raised an uncaught exception (OverflowError, ValueError) instead of a ShaderError."""
+        ok = "\nvoid main() { gl_FragColor = vec4(1.0); }"
+        huge = "9" * 400
+        for inputs in ('{"NAME": "a", "TYPE": "long", "DEFAULT": NaN}', '{"NAME": "a", "TYPE": "long", "DEFAULT": Infinity}',
+                       '{"NAME": "a", "TYPE": "long", "DEFAULT": -Infinity}', '{"NAME": "a", "TYPE": "long", "DEFAULT": %s}' % huge,
+                       '{"NAME": "a", "TYPE": "float", "MIN": %s}' % huge, '{"NAME": "a", "TYPE": "float", "MAX": -%s}' % huge,
+                       '{"NAME": "a", "TYPE": "color", "DEFAULT": [1, %s, 1, 1]}' % huge, '{"NAME": "a", "TYPE": "point2D", "DEFAULT": [%s, 0]}' % huge,
+                       '{"NAME": "a", "TYPE": "long", "VALUES": [1, %s]}' % huge, '{"NAME": "a", "TYPE": "bool", "DEFAULT": NaN}'):
+            with self.assertRaises(S.ShaderError, msg=inputs[:60]):
+                S.parse('/*{"INPUTS": [%s]}*/%s' % (inputs, ok))
+
+    def test_a_header_key_given_twice_is_refused(self):
+        """The last one won: an INPUTS list with an image input, then an empty one; PASSES twice."""
+        ok = "\nvoid main() { gl_FragColor = vec4(1.0); }"
+        for head in ('{"INPUTS": [{"NAME": "pic", "TYPE": "image"}], "INPUTS": []}', '{"PASSES": [{"TARGET": "a"}, {}], "PASSES": []}',
+                     '{"INPUTS": [{"NAME": "a", "TYPE": "float", "MAX": 1e9, "MAX": 1}]}', '{"DESCRIPTION": "a", "DESCRIPTION": "b"}'):
+            with self.assertRaises(S.ShaderError, msg=head) as c:
+                S.parse("/*" + head + "*/" + ok)
+            self.assertIn("twice", str(c.exception))
+
+    def test_a_file_built_to_make_the_checks_slow_is_checked_quickly(self):
+        """"void main(" followed by 31,000 spaces took 2.9 s with the first pattern."""
+        import time
+        ok = "void main() { gl_FragColor = vec4(1.0); }\n"
+        for tail in ("void main(" + " " * 31000, "void" + " " * 31000 + "main", "#" + " " * 31000, ("void main( " * 2500), "/" * 31000,
+                     ";" + " " * 31000 + "x", "\t" * 31000 + "#define", "{ " * 15000):
+            started = time.perf_counter()
+            try:
+                S.translate(S.parse("/*{}*/\n" + ok + tail), (1280, 720))
+            except S.ShaderError:
+                pass
+            self.assertLess(time.perf_counter() - started, 0.5, tail[:12])
+
+    def test_the_code_is_translated_once_per_file_not_at_every_show(self):
+        p = S.parse(isf())
+        self.assertIn("void pvj_main()", p["code"])
+        import unittest.mock
+        with unittest.mock.patch.object(S.re, "sub", side_effect=AssertionError("translate must not search the code again")):
+            self.assertIn(p["code"], S.translate(p, (1280, 720), {"speed": 2}))
 
     def test_files_that_are_not_isf_or_too_large_are_refused(self):
         ok = "void main() { gl_FragColor = vec4(1.0); }"
@@ -251,6 +309,7 @@ class SourcePlayer:
         self.rundir, self.socket_path = rundir, os.path.join(rundir, "player.sock")
         self.source_epoch, self.source_shader, self.path, self.vo = 0, None, None, "null"
         self.calls, self.drawn, self.down, self.pass_ns = [], [], False, 1500000
+        self.level, self.carrier = 100.0, None
         self.ipc = FakeIpc(self)
 
     def osd_size(self):
@@ -268,10 +327,32 @@ class SourcePlayer:
         with open(shader) as f:
             text = f.read()
         self.drawn = [re.search(r"//!DESC (.*)", text).group(1)]
-        self.source_shader, self.path = shader, carrier
+        self.source_shader, self.path, self.carrier = shader, carrier, carrier
         self.source_epoch += 1
         self.calls.append(("play_source", shader, carrier))
         return self.source_epoch
+
+    def claim_screen(self):
+        self.source_epoch += 1
+
+    def opacity(self, value):
+        self.level = value / 2.55
+        self.calls.append(("opacity", value))
+
+    def source_opacity(self, value, epoch):
+        if epoch != self.source_epoch:
+            return False
+        self.opacity(value)
+        return True
+
+    def opacity_now(self):
+        return self.level
+
+    def clear_source(self, epoch):
+        if epoch != self.source_epoch or self.carrier is None:
+            return False
+        self.clear()
+        return True
 
     def swap_source(self, shader, epoch):
         if epoch != self.source_epoch:
@@ -282,16 +363,16 @@ class SourcePlayer:
 
     def play(self, paths, *a, **k):
         self.source_epoch += 1
-        self.source_shader, self.path = None, paths[0]
+        self.source_shader, self.path, self.carrier = None, paths[0], None
         self.calls.append(("play", paths))
 
     def clear(self):
         self.source_epoch += 1
-        self.source_shader, self.path = None, None
+        self.source_shader, self.path, self.carrier = None, None, None
         self.calls.append(("clear",))
 
     def __getattr__(self, name):
-        if name in ("set_shaders", "set_mapping_mode", "opacity", "overlay_remove", "pause", "size", "position", "speed", "rotate", "flip"):
+        if name in ("set_shaders", "set_mapping_mode", "overlay_remove", "pause", "size", "position", "speed", "rotate", "flip"):
             return lambda *a: self.calls.append((name,) + a)
         raise AttributeError(name)
 
@@ -506,6 +587,60 @@ class EngineTest(Base):
             self.engine.show("broken.fs")
         self.assertEqual(c.exception.status, 422)
 
+    def test_a_file_put_in_the_folder_by_hand_cannot_take_the_list_down(self):
+        """GET /api/shaders answered 500 and Vibes could not start for anyone."""
+        folder = os.path.join(self.tmp, "shaders")
+        os.makedirs(folder)
+        ok = "\nvoid main() { gl_FragColor = vec4(1.0); }"
+        for n, head in (("nan.fs", '{"INPUTS": [{"NAME": "a", "TYPE": "long", "DEFAULT": NaN}]}'),
+                        ("huge.fs", '{"INPUTS": [{"NAME": "a", "TYPE": "float", "MIN": %s}]}' % ("9" * 400)),
+                        ("digits.fs", '{"INPUTS": [{"NAME": "a", "TYPE": "float", "MIN": %s}]}' % ("9" * 6000))):
+            with open(os.path.join(folder, n), "w") as f:
+                f.write("/*" + head + "*/" + ok)
+        real = S.parse
+
+        def trips(data):
+            if b"digits" in data or len(data) > 6000:
+                raise RuntimeError("something unforeseen")
+            return real(data)
+        S.parse = trips
+        self.addCleanup(setattr, S, "parse", real)
+        rows = {s["id"]: s for s in self.engine.library()}
+        self.assertEqual(len(rows), 13)
+        for n in ("nan.fs", "huge.fs", "digits.fs"):
+            self.assertTrue(rows[n]["error"] and not rows[n]["vibes"], rows[n])
+        self.assertEqual(len(self.engine.vibes_ids()), 10)
+        self.assertEqual(self.api.handle("GET", "/api/shaders", {}, {"id": "t", "role": "view"}, "t")[0], 200)
+        self.api.vibes._use_thread = False
+        self.assertTrue(self.api.vibes.start()["running"])
+        st, body = self.api.handle("POST", "/api/shaders", {"action": "upload", "name": "up.fs", "source": '/*{"INPUTS": [{"NAME": "a", "TYPE": "long", "DEFAULT": NaN}]}*/' + ok},
+                                   {"id": "t", "role": "full"}, "t")
+        self.assertEqual(st, 422, body)
+
+    def test_reading_what_is_on_screen_never_changes_it(self):
+        """Every status poll called on_screen without the lock, and it could write "nothing is playing" just after a
+        show had set it, which ended Vibes."""
+        self.engine.show("nxlx-aurora.fs")
+        was = self.engine.playing
+        self.player.path = "/media/other.mp4"
+        self.assertIsNone(self.engine.on_screen())
+        self.assertIs(self.engine.playing, was)
+        self.player.path = was["carrier"]
+        self.assertIs(self.engine.on_screen(), was)
+
+    def test_off_never_stops_a_clip_that_was_started_meanwhile(self):
+        r = self.engine.show("nxlx-aurora.fs")
+        self.player.play(["/media/clip.mp4"])
+        self.engine.off(r["epoch"])
+        self.assertEqual((self.player.path, self.player.calls[-1][0]), ("/media/clip.mp4", "play"))
+        r = self.engine.show("nxlx-aurora.fs")
+        other = self.engine.show("nxlx-tide.fs")
+        self.engine.off(r["epoch"])                                   # an old epoch: the newer shader and its file stay
+        self.assertEqual(self.engine.state()["playing"]["id"], "nxlx-tide.fs")
+        self.assertTrue(os.path.exists(self.player.source_shader))
+        self.engine.off(other["epoch"])
+        self.assertEqual((self.player.path, self.generated()), (None, []))
+
     def test_settings_need_no_migration_and_are_checked(self):
         self.assertEqual(SCHEMA, 13)
         self.assertNotIn("shaders", self.settings.data)               # nothing is written until something changes
@@ -596,9 +731,17 @@ class VibesTest(Base):
         self.now[0] += 1
         self.assertTrue(self.vibes.tick())
         self.assertNotEqual(self.vibes.current, first)
-        # the panel's own fade: down over half the Mix duration, the change in the dark, up again
-        self.assertEqual(self.events, [("ramp", 100, 0, 1.0), ("sleep", 1.0), ("ramp", 0, 100, 1.0)])
-        self.assertIn(("opacity", 0), self.player.calls)
+        # down over half the Mix duration, the change in the dark, up again
+        del self.player.calls[:self.player.calls.index(("opacity", 242))]
+        levels = [c[1] for c in self.player.calls if c[0] == "opacity"]
+        self.assertEqual(len(levels), 40)                              # 20 steps down over half the Mix duration, 20 up
+        self.assertEqual(levels[:20], sorted(levels[:20], reverse=True))
+        self.assertEqual(levels[20:], sorted(levels[20:]))
+        self.assertEqual((levels[0], levels[19], levels[20], levels[39]), (242, 0, 13, 255))
+        self.assertEqual([e for e in self.events if e[0] != "sleep"], [])  # the panel's Fader is never touched (see the review)
+        self.assertAlmostEqual(sum(e[1] for e in self.events), 2.0)
+        dark = [c[0] for c in self.player.calls].index("play_source")
+        self.assertEqual(self.player.calls[dark - 1], ("opacity", 0))  # the change happens in the dark
         self.assertEqual(self.vibes.status()["rounds"], 2)
 
     def test_the_rotation_is_shuffled_and_shows_every_enabled_shader_before_any_again(self):
@@ -697,7 +840,87 @@ class VibesTest(Base):
         self.player.play(["/media/clip.mp4"])
         self.vibes.start()
         self.assertTrue(self.vibes.tick())
-        self.assertEqual([e for e in self.events if e[0] != "cancel"], [("ramp", 100, 0, 1.0), ("sleep", 1.0), ("ramp", 0, 100, 1.0)])
+        levels = [c[1] for c in self.player.calls if c[0] == "opacity"]
+        self.assertEqual(len(levels), 40)                              # 20 steps down over half the Mix duration, 20 up
+        self.assertEqual(levels[:20], sorted(levels[:20], reverse=True))
+        self.assertEqual(levels[20:], sorted(levels[20:]))
+        self.assertEqual((levels[0], levels[19], levels[20], levels[39]), (242, 0, 13, 255))
+        self.assertEqual([e for e in self.events if e[0] != "sleep"], [])  # the panel's Fader is never touched (see the review)
+        self.assertAlmostEqual(sum(e[1] for e in self.events), 2.0)
+
+    def test_an_operators_fade_out_is_not_undone_by_the_next_change(self):
+        """The change dipped from 100 and faded back up: a picture the operator had faded out flashed up from black."""
+        self.vibes.start()
+        self.vibes.tick()
+        self.player.opacity(0)                                         # what Fade out leaves: the mix value is still 100
+        del self.player.calls[:]
+        self.now[0] += 180
+        self.assertTrue(self.vibes.tick())                             # the shader changes, in the dark
+        self.assertEqual([c for c in self.player.calls if c[0] == "opacity"], [])
+        self.assertEqual(self.player.level, 0)
+        self.player.opacity(255)                                       # Fade in: the next change dips as usual
+        self.now[0] += 180
+        self.assertTrue(self.vibes.tick())
+        self.assertEqual(self.player.level, 100)
+
+    def test_stop_during_the_dip_does_not_leave_the_screen_dark(self):
+        """Brightness stayed at 0 after a Stop (or a Vibes stop) that landed inside the dip."""
+        for how in ("panel stop", "vibes stop", "error"):
+            self.vibes.start()
+            self.vibes.tick()
+            self.now[0] += 180
+            steps = [0]
+
+            def during():
+                steps[0] += 1
+                if steps[0] == 12:                                     # more than half way down
+                    if how == "panel stop":
+                        self.api.control({"action": "stop"}, None, "t")
+                    elif how == "vibes stop":
+                        self.vibes.stop()
+                    else:
+                        self.player.down = True
+                        self.player.source_epoch += 1
+                        self.player.path = None
+            self.during_dip = during
+            self.assertFalse(self.vibes.tick(), how)
+            self.during_dip = None
+            self.player.down = False
+            self.assertEqual((self.vibes.running, self.player.path, self.player.level), (False, None, 100), how)
+
+    def test_ending_because_the_module_went_off_takes_the_shader_off(self):
+        self.vibes.start()
+        self.vibes.tick()
+        self.api.registry.set_enabled("shaders", False)                # not through the API, which stops Vibes itself
+        self.assertFalse(self.vibes.tick())
+        self.assertEqual((self.vibes.running, self.player.path, self.player.source_shader), (False, None, None))
+        self.assertIn("module was switched off", self.vibes.status()["last"]["message"])
+
+    def test_start_stop_and_next_never_wait_for_a_change_in_progress(self):
+        """They took the lock that a change holds through its dip and the wait for the GPU: a second /pvj/vibes/next
+        stalled every later OSC cue, Blackout and Stop included."""
+        import threading
+        import time
+        inside, go = threading.Event(), threading.Event()
+        self.vibes.start()
+        self.vibes.tick()
+        self.now[0] += 180
+        self.during_dip = lambda: (inside.set(), go.wait(5))
+        worker = threading.Thread(target=self.vibes.tick, daemon=True)
+        worker.start()
+        self.assertTrue(inside.wait(5))
+        try:
+            for call in (self.vibes.skip, self.vibes.status, lambda: self.vibes.set_dwell(60), self.vibes.tick,
+                         lambda: self.api.handle("POST", "/api/vibes", {"next": True}, {"id": "osc", "role": "live"}, "t"),
+                         self.vibes.stop, self.vibes.yield_screen, self.vibes.start, self.vibes.stop):
+                started = time.perf_counter()
+                call()
+                self.assertLess(time.perf_counter() - started, 0.1, call)
+        finally:
+            go.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual((self.vibes.running, self.player.path, self.player.level), (False, None, 100))   # the stop was carried out
 
     def test_stop_clears_the_screen_only_while_vibes_has_it(self):
         self.vibes.start()
@@ -799,6 +1022,104 @@ class VibesTest(Base):
         while time.monotonic() < deadline and any(t.name == "vibes" for t in threading.enumerate()):
             time.sleep(0.02)
         self.assertFalse(any(t.name == "vibes" for t in threading.enumerate()))
+
+
+class RealFaderTest(Base):
+    """The review's high finding, with the panel's real Fader and the Mix transition set to Dip. A play that waits for
+    its dip is kept by the Fader as a callback; Vibes used the same Fader, which dropped the callback: the API
+    answered {"playing": "a.mp4"} and the clip never played."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings.data["mix"] = {"transition": "dip", "duration": 0.4}
+        self.now = [1000.0]
+        self.hook = None
+        self.vibes = self.api.vibes = V.Vibes(self.api, self.engine, clock=lambda: self.now[0], sleep=self.sleep,
+                                              rng=random.Random(5), thread=False, log=lambda *_: None)
+
+    def sleep(self, seconds):
+        self.now[0] += seconds
+        if self.hook:
+            hook, self.hook = self.hook, None
+            hook()
+
+    def wait_for_clip(self, name):
+        import time
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not (self.player.path or "").endswith(name):
+            time.sleep(0.02)
+        self.assertTrue((self.player.path or "").endswith(name), "the clip was accepted and never played: %s" % self.player.path)
+
+    def test_a_clip_tapped_during_the_vibes_dip_plays_and_vibes_ends(self):
+        self.vibes.start()
+        self.vibes.tick()
+        self.now[0] += 180
+        answer = []
+        self.hook = lambda: answer.append(self.api.play({"file": "a.mp4"}, None, "t"))
+        self.assertFalse(self.vibes.tick())
+        self.assertEqual(answer, [{"playing": "a.mp4"}])
+        self.wait_for_clip("a.mp4")
+        self.assertFalse(self.vibes.running)
+        import time
+        time.sleep(0.4)                                                # the clip's own fade up is left alone
+        self.assertEqual((self.player.level, self.player.source_shader), (100, None))
+        for _ in range(3):
+            self.now[0] += 500
+            self.assertFalse(self.vibes.tick())
+        self.assertTrue(self.player.path.endswith("a.mp4"))
+
+    def test_a_clip_tapped_just_before_a_change_comes_due_plays(self):
+        self.vibes.start()
+        self.vibes.tick()
+        self.now[0] += 180
+        self.assertEqual(self.api.play({"file": "a.mp4"}, None, "t"), {"playing": "a.mp4"})    # its dip has begun
+        self.assertFalse(self.vibes.tick())                            # the change is due, but the screen is taken
+        self.assertFalse(self.vibes.running)
+        self.wait_for_clip("a.mp4")
+
+    def test_the_other_ways_to_play_are_not_cancelled_either(self):
+        import os as _os
+        for name in ("pic1.png", "pic2.png"):
+            open(_os.path.join(self.media, name), "w").close()
+        self.settings.data["pads"]["banks"][0]["pads"][0] = {"label": "", "file": "b.mov", "ending": "loop"}
+        for body, want in (({"pad": [0, 0]}, "b.mov"), ({"preset": "startless"}, ".mp4"), ({"slideshow": {"source": "media", "seconds": 5}}, "pic1.png")):
+            self.vibes.start()
+            self.vibes.tick()
+            self.now[0] += 180
+            self.hook = lambda: self.api.play(body, None, "t")
+            self.assertFalse(self.vibes.tick(), body)
+            self.wait_for_clip(want)
+            self.assertFalse(self.vibes.running)
+        self.vibes.start()
+        self.vibes.tick()
+        self.now[0] += 180
+        self.hook = lambda: self.api.test_pattern({"on": True}, None, "t")
+        self.assertFalse(self.vibes.tick())
+        self.assertEqual((self.player.path, self.vibes.running), (self.player.TEST_PATTERN, False))
+
+    def test_vibes_never_calls_the_panels_fader(self):
+        used = []
+        self.api.fader.ramp = lambda *a, **k: used.append("ramp")
+        self.api.fader.cancel = lambda: used.append("cancel")
+        self.player.play(["/media/clip.mp4"])
+        self.vibes.start()
+        for _ in range(3):
+            self.assertTrue(self.vibes.tick())
+            self.now[0] += 180
+        self.vibes.stop()
+        self.assertEqual(used, [])
+
+
+class GpuStepTest(unittest.TestCase):
+    def test_the_ci_step_fails_when_its_tests_are_skipped(self):
+        """"A skip here is a failure" was not true: unittest exits 0 when every test was skipped."""
+        import subprocess
+        import sys
+        env = {k: v for k, v in os.environ.items() if k != "PVJ_GPU_TEST"}
+        r = subprocess.run([sys.executable, "-m", "tests.test_shaders_gpu"], capture_output=True, text=True, env=env, timeout=120,
+                           cwd=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        self.assertEqual(r.returncode, 1, r.stdout[-300:] + r.stderr[-300:])
+        self.assertIn("0 run", r.stdout)
 
 
 class OtherWaysInTest(Base):

@@ -62,12 +62,16 @@ ceil fract mod min max clamp mix step smoothstep length distance dot cross norma
 TIME TIMEDELTA DATE FRAMEINDEX PASSINDEX RENDERSIZE isf_FragNormCoord vv_FragNormCoord
 IMG_PIXEL IMG_NORM_PIXEL IMG_THIS_PIXEL IMG_THIS_NORM_PIXEL IMG_SIZE
 """.split())
-_MAIN = re.compile(r"\bvoid\s+main\s*\(\s*(?:void)?\s*\)")
-_DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w*)", re.M)
+RESERVED_LOWER = frozenset(w.lower() for w in RESERVED)
+# No nested optional white space: "(\s*(?:void)?\s*)" took seconds on "void main(" followed by 31,000 spaces.
+_MAIN = re.compile(r"\bvoid\s+main\s*\(\s*(?:void\s*)?\)")
+_DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w*)(?:[ \t]+(\w+))?", re.M)
 _ALLOWED_DIRECTIVES = ("define", "undef", "if", "ifdef", "ifndef", "else", "elif", "endif")
-_GLOBAL_IO = re.compile(r"^[ \t]*(?:uniform|varying|attribute|layout|in|out)\b", re.M)
+_GLOBAL_IO = re.compile(r"\b(?:uniform|varying|attribute|layout)\b|(?:^|[;{}])\s*(?:in|out)\s")
 _IMG = re.compile(r"\bIMG_(?:PIXEL|NORM_PIXEL|THIS_PIXEL|THIS_NORM_PIXEL|SIZE)\b")
-_OWN = re.compile(r"\b(?:pvj_\w*|HOOKED\w*|PASSINDEX)\b")
+# Names the player and this translator own, in any letter case: the hook, mpv's textures and their companions.
+_OWN = re.compile(r"\b(?:pvj_\w*|hooked\w*|texture\d+|texcoord\d+|texture_(?:size|rot|off)\d+|pixel_size\d+|texmap\d+"
+                  r"|out_color|input_size|target_size|tex_offset)\b", re.I)
 
 
 class ShaderError(ValueError):
@@ -76,7 +80,11 @@ class ShaderError(ValueError):
 
 # ---- numbers ---------------------------------------------------------------------------------------------------------
 def _num(v, what, limit=1e6):
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or abs(v) > limit:
+    try:            # a whole number of 400 digits makes isfinite raise instead of answering
+        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and abs(v) <= limit
+    except (OverflowError, ValueError):
+        ok = False
+    if not ok:
         raise ShaderError("%s must be a number" % what)
     return float(v)
 
@@ -101,7 +109,8 @@ def _input(spec, seen):
     name, kind = spec.get("NAME"), spec.get("TYPE")
     if not isinstance(name, str) or not INPUT_NAME.fullmatch(name):
         raise ShaderError("an input name must be 1 to 32 letters, digits or _ and start with a letter")
-    if name in RESERVED or name.startswith(("gl_", "pvj_", "isf_", "HOOKED")) or "__" in name:
+    if (name.lower() in RESERVED_LOWER or name.lower().startswith(("gl_", "pvj_", "isf_", "hooked")) or "__" in name
+            or _OWN.fullmatch(name)):
         raise ShaderError("the input name %s is taken by the shader language or the player" % name)
     if name in seen:
         raise ShaderError("two inputs are called %s" % name)
@@ -133,7 +142,11 @@ def _input(spec, seen):
             out["values"] = list(values)
             if "DEFAULT" not in spec:
                 d = values[0]
-        if isinstance(d, bool) or not isinstance(d, (int, float)) or d != int(d) or abs(d) > 100000:
+        try:
+            d = _num(d, "DEFAULT of " + name, 100000)
+        except ShaderError:
+            raise ShaderError("DEFAULT of %s must be a whole number" % name)
+        if d != int(d):
             raise ShaderError("DEFAULT of %s must be a whole number" % name)
         if values is not None and int(d) not in values:
             raise ShaderError("DEFAULT of %s is not one of its VALUES" % name)
@@ -152,6 +165,41 @@ def _input(spec, seen):
     else:                                   # an event: a button in ISF; it is never pressed here
         out["default"] = False
     return out
+
+
+def _no_constant(word):
+    raise ShaderError("the JSON header holds %s, which is not a number a shader can use" % word)
+
+
+def _no_repeats(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:              # the last one would win: an INPUTS list that is checked, and another that is used
+            raise ShaderError("the JSON header has %s twice" % _text(str(key), 40))
+        out[key] = value
+    return out
+
+
+def strip_comments(body):
+    """The code without its comments (each replaced by a space, line breaks kept so line numbers stay true). The
+    checks below read what the compiler will read: a directive hidden behind /**/ is a directive."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        two = body[i:i + 2]
+        if two == "//":
+            j = body.find("\n", i)
+            i = n if j < 0 else j
+            out.append(" ")
+        elif two == "/*":
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise ShaderError("a /* comment in the code is never closed")
+            out.append(" " + "\n" * body.count("\n", i, j))
+            i = j + 2
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
 
 
 def parse(source):
@@ -178,7 +226,9 @@ def parse(source):
     if end < 0 or end - start > MAX_HEADER:
         raise ShaderError("the JSON header comment is not closed, or is larger than %d KB" % (MAX_HEADER // 1024))
     try:
-        head = json.loads(source[start + 2:end])
+        head = json.loads(source[start + 2:end], parse_constant=_no_constant, object_pairs_hook=_no_repeats)
+    except ShaderError:
+        raise
     except (ValueError, RecursionError):
         raise ShaderError("the JSON header at the top cannot be read")
     if not isinstance(head, dict):
@@ -204,9 +254,16 @@ def parse(source):
     bad = sorted({ch for ch in body if not (" " <= ch <= "~" or ch in "\n\t")})
     if bad:
         raise ShaderError("the shader code may hold plain ASCII text only (found %r)" % bad[0])
+    if "\\" in body:
+        raise ShaderError("the character \\ is not allowed in the code (no line continuations)")
+    body = strip_comments(body)
     for m in _DIRECTIVE.finditer(body):
         if m.group(1) not in _ALLOWED_DIRECTIVES:
             raise ShaderError("the line #%s is not allowed (no includes, versions, extensions or pragmas)" % (m.group(1) or "?"))
+        word = m.group(2) or ""
+        if m.group(1) in ("define", "undef") and (word.lower() in RESERVED_LOWER or _OWN.fullmatch(word)
+                                                   or word.lower().startswith(("gl_", "isf_")) or "__" in word):
+            raise ShaderError("#%s %s is not allowed: the name belongs to the shader language or the player" % (m.group(1), word))
     if _GLOBAL_IO.search(body):
         raise ShaderError("the code declares its own uniform, varying, in or out, which the player cannot fill")
     if _IMG.search(body):
@@ -216,8 +273,12 @@ def parse(source):
         raise ShaderError("the name %s is used by the player; rename it" % own.group(0))
     if len(_MAIN.findall(body)) != 1:
         raise ShaderError("the code must have exactly one void main()")
+    # The code as the player will get it, made once per file: comments gone, ISF's names exchanged for ours.
+    code = re.sub(r"\bgl_FragColor\b", "pvj_color", body)
+    code = re.sub(r"\bgl_FragCoord\b", "pvj_coord", code)
+    code = _MAIN.sub("void pvj_main()", code).rstrip()
     return {"description": _text(head.get("DESCRIPTION")), "credit": _text(head.get("CREDIT")), "cost": _text(head.get("COST")),
-            "inputs": clean, "body": body, "line": source.count("\n", 0, end + 2) + 1}
+            "inputs": clean, "body": body, "code": code, "line": source.count("\n", 0, end + 2) + 1}
 
 
 def clean_values(parsed, values):
@@ -287,10 +348,7 @@ def translate(parsed, size, values=None, hue=0.0, offset=0.0, desc="nxlx shader"
             lines.append("const vec4 %s = vec4(%s);" % (i["name"], ", ".join(_f(c) for c in d)))
         else:
             lines.append("const vec2 %s = vec2(%s, %s);" % (i["name"], _f(d[0]), _f(d[1])))
-    body = re.sub(r"\bgl_FragColor\b", "pvj_color", parsed["body"])
-    body = re.sub(r"\bgl_FragCoord\b", "pvj_coord", body)
-    body = _MAIN.sub("void pvj_main()", body)
-    lines += ["#line %d" % parsed["line"], body.rstrip("\n"), "",
+    lines += ["#line %d" % parsed["line"], parsed["code"], "",
               "vec4 hook() {",
               # frame = hi * 512 + lo, in whole numbers small enough for 16 bits; hi starts again after 8192 (38.8 hours)
               "    int pvj_hi = frame / 512;",
@@ -306,7 +364,8 @@ def translate(parsed, size, values=None, hue=0.0, offset=0.0, desc="nxlx shader"
     if hue:
         h = hue_matrix(hue)
         lines.append("    c = clamp(mat3(%s) * c, 0.0, 1.0);" % ", ".join(_f(h[r * 3 + col]) for col in range(3) for r in range(3)))
-    lines += ["    c += (fract(sin(dot(pvj_coord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;",
+    # half a step of noise against bands in slow gradients: a fine diagonal pattern from the pixel's own position
+    lines += ["    c += (fract(pvj_coord.x * 0.6113 + pvj_coord.y * 0.3791) - 0.5) / 255.0;",
               "    return vec4(c, 1.0);",
               "}", ""]
     return "\n".join(lines)
@@ -494,6 +553,8 @@ class Engine:
                     result = (parse(data), hashlib.sha256(data).hexdigest())
                 except ShaderError as e:
                     result = e
+                except Exception as e:      # one file that trips the parser must not take the whole list down
+                    result = ShaderError("the file could not be checked (%s)" % type(e).__name__)
                 if len(self._cache) > 4 * MAX_UPLOADS:
                     self._cache.clear()
                 hit = self._cache[path] = ((st.st_mtime_ns, st.st_size), result)
@@ -615,17 +676,15 @@ class Engine:
 
     def on_screen(self):
         """The shader that is on the screen now, or None: the player must still be playing the carrier it was given."""
-        p = self.playing
+        p = self.playing            # read once; nothing is written here (it runs from every status poll, unlocked)
         if p is None:
             return None
         player = self.api.player
         try:
             if player.source_epoch != p["epoch"] or player.ipc.request("get_property", "path") != p["carrier"]:
-                p = None
+                return None
         except Exception:
-            p = None
-        if p is None:
-            self.playing = None
+            return None
         return p
 
     def show(self, sid, values=None, hue=0.0, offset=0.0, epoch=None, cut=True):
@@ -701,19 +760,16 @@ class Engine:
         `epoch`, also stop a bare carrier (black, after a refused shader) that this epoch put there."""
         with self._lock:
             player = self.api.player
-            bare = False
-            if epoch is not None and self.playing is None:
-                try:
-                    bare = player.source_epoch == epoch and is_carrier(player.ipc.request("get_property", "path"))
-                except Exception:
-                    bare = False
-            if self.on_screen() is not None or bare:
-                try:
-                    self.api.player.clear()
+            if epoch is None:
+                epoch = self.playing["epoch"] if self.playing else None
+            if epoch is not None:
+                try:                        # the player checks the epoch and stops in one step: a clip started
+                    player.clear_source(epoch)      # in between is never stopped
                 except PlayerError:
                     pass
-            self.playing = None
-            self._cleanup(set())
+            if self.on_screen() is None:    # nothing of ours is showing (another shader may have taken the screen)
+                self.playing = None
+                self._cleanup({player.source_shader} if player.source_shader else set())
 
     # -- uploads --
     def upload(self, name, source, replace=False):

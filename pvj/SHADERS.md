@@ -20,9 +20,9 @@ Switch the **Shaders and Vibes** module on under System > Modules (beta, off by 
 
 - Picks from the shaders that are **In Vibes** (bundled and uploaded), in a shuffled order; every shader is shown once before any comes again, and never the same one twice in a row.
 - Each stays for the **dwell time** (default 180 seconds, 10 to 3600).
-- Between shaders: a **dip to black** with the panel's own fade, over the Mix screen's transition duration (down for half of it, up for half). During a Blackout nothing fades.
+- Between shaders: a **dip to black** over the Mix screen's transition duration (down for half of it, up for half). During a Blackout, and after you have faded the picture out, nothing fades and the screen stays dark: the shaders go on changing unseen until you show the picture again.
 - **Variation each round** (can be switched off): every number input gets a new value between its MIN and MAX, pulled towards the default (at most 60 percent of the way to either end, since the author chose the default as the good place); the palette is turned by up to 120 degrees either way around the grey axis (black, white and greys stay as they are); and the shader's time starts somewhere else. The values come from a random generator seeded when the service starts.
-- **It never fights the operator** (the autostart rule, D18). It ends when anything else is played (a pad, a clip, a stream, a live input, the test pattern, a schedule entry, a sync server's clip), when Stop is pressed, when one shader is chosen by hand, when the module is switched off, and when the player is restarted. It does not come back by itself; after a player restart it starts again only if Autostart is set to Vibes. The reason it ended is shown on the card.
+- **It never fights the operator** (the autostart rule, D18). It ends when anything else is played (a pad, a clip, a stream, a live input, the test pattern, a schedule entry, a sync server's clip), when Stop is pressed, when one shader is chosen by hand, when the module is switched off, and when the player is restarted. It does not come back by itself; after a player restart it starts again only if Autostart is set to Vibes. The reason it ended is shown on the card. A clip tapped in the middle of a change plays, also with the Mix transition on Dip to black (the first version lost such a clip; see the review notes in the project log).
 - A shader the GPU refuses is left out for the rest of that run and the next one is shown; if every shader is refused, Vibes ends and the screen is cleared.
 
 ## The bundled shaders
@@ -31,13 +31,13 @@ Ten original generator shaders, written for this project (Apache-2.0, in `pvj/sh
 
 | Shader | Picture | Inputs | Rough cost per pixel |
 | --- | --- | --- | --- |
-| nxlx-aurora | curtains of light over a dark sky | speed, height, tint | low: 4 bands, about 12 sines |
-| nxlx-drift | soft clouds of colour | speed, scale, warmth | medium: 2 clouds of 3 octaves, 24 hashes |
+| nxlx-aurora | curtains of light over a dark sky | speed, height, tint | low: 4 bands, about 12 sines and 4 colour blends |
+| nxlx-drift | soft clouds of colour | speed, scale, warmth | medium: 2 clouds of 3 octaves, 24 lattice values |
 | nxlx-ember | warm blobs that merge and part | speed, blob size, glow colour | low: 5 blobs, 10 sines |
 | nxlx-horizon | a dusk sky with a slow sun and haze | speed, sun height, haze | low: 4 sines, one length, 4 exponentials |
 | nxlx-lattice | two grids turning against each other (moire) | speed, density, colour | low: 4 sines |
-| nxlx-nebula | clouds bent by more clouds | speed, fold, scale | medium to high: 3 clouds of 2 octaves, 24 hashes |
-| nxlx-prism | rings of colour around the centre | speed, rings, petals | low: one atan, one length, 5 cosines |
+| nxlx-nebula | clouds bent by more clouds | speed, fold, scale | medium to high: 3 clouds of 2 octaves, 24 lattice values |
+| nxlx-prism | rings of colour around the centre | speed, rings, petals | low: one atan, one length, 2 cosines, a colour blend |
 | nxlx-pulse | ripples from three wandering points | speed, ripples, calm | low: 3 lengths, 9 sines |
 | nxlx-silk | fine flowing lines | speed, lines, sheen | low: 7 sines |
 | nxlx-tide | layers of slow waves | speed, swell, night colours | low: 5 layers, 10 sines |
@@ -100,10 +100,12 @@ With a player that has no GPU output (the tests' `--vo=null`), nothing can be ch
 
 - An uploaded file is at most 32 KB of text, its JSON header at most 8 KB, with at most 24 inputs; at most 64 uploads.
 - Input names are checked with a full match (a letter, then letters, digits or `_`, 32 at most) and may not be a word of the shader language or a name the player uses; numbers must be finite (JSON's `NaN` and `Infinity` are refused); labels and descriptions are cut and stripped of control characters and only ever shown as text.
-- The text `//!` is refused anywhere in the file, comments and JSON included: mpv reads such lines as commands wherever they stand, and a file could otherwise add its own hook on the OUTPUT stage (over the mapping), a texture or a second pass. Preprocessor lines other than `#define`, `#undef` and the `#if` family are refused (no `#include`, `#version`, `#extension`, `#pragma`, `#line`), and so are `uniform`, `varying`, `in`, `out`, `layout` and `attribute` declarations. The code must be plain ASCII and have exactly one `void main()`.
+- The text `//!` is refused anywhere in the file, comments and JSON included: mpv reads such lines as commands wherever they stand, and a file could otherwise add its own hook on the OUTPUT stage (over the mapping), a texture or a second pass.
+- The code is checked as the compiler will read it: comments are taken out first (and are not passed on), and a backslash is refused, so nothing can hide behind `/**/` or a continued line. Preprocessor lines other than `#define`, `#undef` and the `#if` family are refused (no `#include`, `#version`, `#extension`, `#pragma`, `#line`), and `#define` or `#undef` of a name that belongs to the shader language, to ISF or to the player. `uniform`, `varying`, `layout` and `attribute` are refused anywhere, and `in` or `out` as a declaration of their own (they stay allowed for function parameters). The player's own names (`hook`, `HOOKED...`, `pvj_...`, mpv's `texture0` and its companions) are refused in any letter case. The code must be plain ASCII and have exactly one `void main()`.
+- The JSON header may not name a key twice (the last one would win over the one that was checked), and `NaN` and `Infinity` are refused. A file that trips the checks in a way nobody foresaw is listed as broken and skipped; it cannot take the list or Vibes down.
 - File names: letters, digits, spaces and `. _ -`, ending in `.fs`, checked with a full match and the same rules as media names; a bundled name cannot be taken. Uploads are stored in `<state>/shaders` (beside the settings file), never through a link, written to a temporary name first and never over an existing file unless replacement is asked for. They are translated before they are stored; what is refused is never written.
 - The generated GLSL is written to the player's runtime folder (`/run/pvj`) as `shader-<pid>-<n>.glsl`, mode 0640, under a fresh name each time, and removed when replaced, like the mapper's files; the player cannot read the state folder.
-- What remains: the shader code itself is GLSL from a full-access device and runs on the GPU. It cannot read files or reach the network, but it can be slow.
+- What remains: the shader code itself is GLSL from a full-access device and runs on the GPU. It cannot read files or reach the network, but it can be slow. A remote-support login that the studio gave the full role may upload shaders too, like any full-access device, for as long as the session lasts.
 
 ## API
 
@@ -121,5 +123,6 @@ Settings live under `"shaders"` in the settings file once something is changed; 
 - **Never seen on a display, by anyone.** Checked only through screenshots of a 320 x 180 window on a software GPU in CI.
 - **No speed measured on any board.** Not run on a Raspberry Pi, a Pi's GPU driver, or any real GPU. The 8-bit buffers and the default of 720 lines are choices made from the mapper's measurements on a Pi 4, not from measurements of this module.
 - mpv 0.37 only (Ubuntu's, in CI). Not run on mpv 0.35 (Raspberry Pi OS Bookworm) or 0.40 (Trixie, on the test Pi).
+- **Sync and the video wall.** A sync server that plays a shader or Vibes sends its clients "stop" (a shader is not a file they could play), so the clients go black; shaders in step on several boxes are not built. The wall crop over the carrier picture has not been tried.
 - TIME over hours; the 16-bit question above; a player crash and restart during Vibes on a real box; Vibes from autostart across a real reboot; OSC from a real controller.
 - Uploaded ISF files from other programs: the translator was tested with files written for the tests, not with a collection of real-world ISF shaders.
