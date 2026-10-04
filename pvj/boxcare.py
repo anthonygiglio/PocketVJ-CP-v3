@@ -480,7 +480,7 @@ class BoxCare:
         envelope = parse_strict(raw)
         if envelope.get("format") != FORMAT:
             raise bad("this is not a settings export of nxlx.mastercontrol")
-        if envelope.get("format_version") != FORMAT_VERSION:
+        if type(envelope.get("format_version")) is not int or envelope["format_version"] != FORMAT_VERSION:      # true == 1
             raise bad("this export has a format this version does not know; update the box first", 409)
         extra = sorted(k for k in envelope if k not in ENVELOPE)
         if extra:

@@ -364,7 +364,8 @@ class ImportTest(Base):
     def test_what_is_not_a_settings_export_is_refused(self):
         good = self.export()
         before = self.on_disk()
-        cases = [dict(good, format="something else"), dict(good, format_version=2), dict(good, extra=1), dict(good, settings=[]),
+        cases = [dict(good, format="something else"), dict(good, format_version=2), dict(good, format_version=True),
+                 dict(good, format_version=1.0), dict(good, format_version="1"), dict(good, extra=1), dict(good, settings=[]),
                  dict(good, passwords_included="no"), {k: v for k, v in good.items() if k != "settings"},
                  dict(good, settings=dict(good["settings"], surprise={"x": 1})), self.settings.data]
         for file in cases:
