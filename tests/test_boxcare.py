@@ -283,11 +283,19 @@ class ImportTest(Base):
             del s[name]
         self.settings.data["sync"]["group"] = "stage"
         self.settings.data["mapper"]["on"] = True
+        self.settings.data["mix"] = {"transition": "cut", "duration": 1.0}
+        mine = copy.deepcopy(self.settings.data)
         st, out = self.send(file)
         self.assertEqual(st, 200, out)
         d = self.settings.data
         self.assertEqual(d["schema"], settings_mod.SCHEMA)
-        self.assertEqual((d["projectors"], d["sync"], d["mapper"]["on"]), ([], settings_mod.default_settings()["sync"], False))
+        # a section the old file does not hold is left as the box has it, not replaced by the migration's default
+        self.assertEqual((d["projectors"], d["sync"], d["mapper"]), (mine["projectors"], mine["sync"], mine["mapper"]))
+        self.assertEqual(d["projectors"][0]["password"], PROJECTOR_PASSWORD)
+        for name in ("projectors", "mapper", "sync"):
+            self.assertIn("%s is not in the file; left as it is" % name, out["notes"])
+            self.assertNotIn(name, out["imported"])
+        self.assertEqual(d["mix"], {"transition": "dip", "duration": 2.5})       # what the file does hold is imported
         self.assertTrue(d["devices"])                           # the migration to 12 adds "support": the box's own stays
         for bad in (0, -1, True, "13", None, 1.5):
             file["settings"]["schema"] = bad

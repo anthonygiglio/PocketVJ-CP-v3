@@ -499,7 +499,7 @@ class BoxCare:
         current = self.settings._current
         if isinstance(data.get("schema"), bool) or not isinstance(data.get("schema"), int):
             raise bad("the file does not say which settings schema it holds")
-        schema = data["schema"]
+        schema, present = data["schema"], set(data)       # an older file: the migrations add the sections it lacks
         try:
             migrate(data, self.settings._migrations, current)          # the same path as a normal load
         except SettingsError as e:
@@ -516,7 +516,7 @@ class BoxCare:
         self._notes = []
         clean = {}
         for name, check in SECTIONS:
-            if name not in data:
+            if name not in present or name not in data:      # what a migration added is a default, not the file's word
                 self.note("%s is not in the file; left as it is" % name)
                 continue
             try:
