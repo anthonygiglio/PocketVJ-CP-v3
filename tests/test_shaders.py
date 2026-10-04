@@ -44,6 +44,7 @@ class TranslatorTest(unittest.TestCase):
         p = S.parse(isf())
         self.assertEqual([i["type"] for i in p["inputs"]], ["float", "bool", "long", "color", "point2D", "event"])
         t = S.translate(p, (1280, 720), desc="nxlx shader 7")
+        self.assertIn("\n// nxlx shader 7\n", t)                    # the name is in the code too, so no two texts are alike
         head = t.split("\n\n")[0].splitlines()
         self.assertEqual(head[1:], ["//!HOOK NATIVE", "//!BIND HOOKED", "//!WIDTH 1280", "//!HEIGHT 720", "//!DESC nxlx shader 7"])
         self.assertEqual(t.count("//!"), 5)                          # only the commands written here

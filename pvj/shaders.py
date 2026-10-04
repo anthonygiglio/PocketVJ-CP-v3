@@ -259,6 +259,10 @@ def translate(parsed, size, values=None, hue=0.0, offset=0.0, desc="nxlx shader"
     t = time.localtime() if today is None else today
     lines = ["// nxlx.mastercontrol shader source (generated; do not edit)",
              "//!HOOK NATIVE", "//!BIND HOOKED", "//!WIDTH %d" % width, "//!HEIGHT %d" % height, "//!DESC %s" % desc, "",
+             # The name again, inside the code: mpv remembers a shader text it could not compile and says nothing the
+             # second time (seen in CI: the same broken shader was "taken" on a second try). A text that differs is
+             # compiled, and complained about, afresh.
+             "// %s" % desc,
              "#if defined(GL_ES) && (__VERSION__ >= 300 || defined(GL_FRAGMENT_PRECISION_HIGH))",
              "precision highp float;", "precision highp int;", "#define PVJ_HP highp",
              "#else", "#define PVJ_HP", "#endif",
