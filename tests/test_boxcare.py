@@ -31,6 +31,8 @@ class Base(SupportBase):
     def setUp(self):
         super().setUp()
         self.care = self.api.boxcare
+        self.projector_applies = []          # the background checks would open connections to the projectors in the settings
+        self.api.projectors.apply = lambda: self.projector_applies.append([p["id"] for p in self.settings.data["projectors"]])
         self.view_dev = self.auth.authenticate(self.call("POST", "/api/devices/invite", {"name": "g", "role": "view"}, token=self.full)[1]["token"])
         d = self.settings.data
         d["projectors"] = [{"id": "aaaa0001", "name": "Left", "host": "192.168.1.50", "port": 4352, "password": PROJECTOR_PASSWORD},
@@ -265,18 +267,48 @@ class ImportTest(Base):
                 self.assertEqual((out["passwords_kept"], self.settings.data["projectors"][0]["password"]), (0, ""))
             self.assertNotIn(STREAM_PASSWORD, json.dumps(self.settings.data["streams"]))
 
-    def test_projector_keys_this_version_does_not_know_are_dropped_silently(self):
-        """A later version keeps more about a projector ("details", "labels"); until this file's checks know them
-        they are neither exported nor imported, and a file that holds them is not refused."""
-        keys = ["host", "id", "name", "password", "port"]
-        self.settings.data["projectors"][0].update(details={"maker": "ACME"}, labels={"31": "HDMI 1"})
-        file = self.export(passwords=True)
-        self.assertEqual([sorted(p) for p in file["settings"]["projectors"]], [keys, keys])
-        file["settings"]["projectors"][1].update(details={"maker": "Other"}, labels={"32": "HDMI 2"})
-        st, out = self.send(file)
-        self.assertEqual((st, out["problems"]), (200, []), out)
-        self.assertEqual([sorted(p) for p in self.settings.data["projectors"]], [keys, keys])
-        self.assertEqual(self.settings.data["projectors"][0]["password"], PROJECTOR_PASSWORD)
+    def test_a_projector_s_details_and_input_labels_go_round(self):
+        """What the projector said it is and the labels given to its inputs are no secrets: they are exported, and
+        checked on import the way the box checks them itself."""
+        details = {"class": "2", "name": "Beamer", "maker": "ACME", "model": "X-1", "info": None, "inputs": ["31", "32", "11"], "read": 1790000000}
+        self.settings.data["projectors"][0].update(details=copy.deepcopy(details), labels={"31": "Matrix", "11": "Box"})
+        before = copy.deepcopy(self.settings.data["projectors"])
+        file = self.export()
+        self.assertEqual((file["settings"]["projectors"][0]["details"], file["settings"]["projectors"][0]["labels"]), (details, {"31": "Matrix", "11": "Box"}))
+        self.assertEqual(sorted(file["settings"]["projectors"][1]), ["host", "id", "name", "password", "port"])     # none read yet: none exported
+        self.settings.data["projectors"] = []
+        self.assertEqual(self.send(file)[0], 200)
+        self.assertEqual(self.settings.data["projectors"], [dict(before[0], password=""), before[1]])
+        self.settings.data["projectors"] = copy.deepcopy(before)
+        self.assertEqual(self.send(file)[0], 200)
+        self.assertEqual(self.settings.data["projectors"], before)                 # the password kept, the rest as it was
+        st, out = self.call("GET", "/api/projectors", token=self.full)[:2]
+        if st == 200:                                                              # the module is on: the panel shows them
+            self.assertEqual(out["projectors"][0]["inputs"][0], {"code": "31", "name": "Digital 1", "label": "Matrix"})
+        # text is cleaned as an answer from the projector is, a key nobody knows is dropped, an empty label goes
+        entry = file["settings"]["projectors"][0]
+        entry["details"] = dict(details, name="Bea\u202emer\x07 ", maker="M" * 40, surprise=1)
+        entry["labels"] = {"31": " Matrix ", "32": ""}
+        self.assertEqual(self.send(file)[0], 200)
+        got = self.settings.data["projectors"][0]
+        self.assertEqual((got["details"], got["labels"]), (dict(details, maker="M" * 32), {"31": "Matrix"}))
+        disk = self.on_disk()
+        for key, value in (("labels", {"33": "Not one of its inputs"}), ("labels", {"31": "x" * 25}), ("labels", {"31": "a\u202eb"}),
+                           ("labels", {"31": 5}), ("labels", ["31"]), ("details", "ACME"), ("details", dict(details, inputs=["31", "31"])),
+                           ("details", dict(details, inputs=["99"])), ("details", dict(details, inputs="31")),
+                           ("details", {"class": "12"}), ("details", dict(details, name=5)), ("details", dict(details, read=True)),
+                           ("details", dict(details, read=-1))):
+            bad = copy.deepcopy(file)
+            bad["settings"]["projectors"][0][key] = value
+            if key == "details":
+                bad["settings"]["projectors"][0]["labels"] = {}
+            st, out = self.send(bad)
+            self.assertEqual(st, 400, (key, value, out))
+            self.assertTrue(out["error"].startswith("projectors:"), out)
+            self.assertEqual(self.on_disk(), disk)
+        file["settings"]["projectors"][0]["details"] = {}                         # a label without a list of inputs to belong to
+        file["settings"]["projectors"][0]["labels"] = {"31": "Matrix"}
+        self.assertEqual(self.send(file)[0], 400)
 
     def test_a_newer_file_is_refused_plainly_and_nothing_changes(self):
         file = self.export()
@@ -640,6 +672,7 @@ class ImportTest(Base):
         st, out = self.send(self.export())
         self.assertEqual(st, 200)
         self.assertEqual(applied, ["osc", "sync"])
+        self.assertEqual(self.projector_applies, [["aaaa0001", "aaaa0002"]])      # the background checks follow the new list
         self.assertEqual(out["problems"], ["Mapper: no screen"])         # reported, and the rest still happened
 
 
@@ -996,6 +1029,7 @@ class FactoryResetTest(Base):
             for h in hashes:
                 self.assertNotIn(h, text, name)
         self.assertEqual(os.listdir(inbox), [])
+        self.assertEqual(self.projector_applies[-1], [])                              # no projector is asked anything any more
         self.assertEqual(sorted(os.listdir(self.media)), media)                       # the clips stay
 
     def test_no_way_in_made_while_the_reset_runs_survives_it(self):

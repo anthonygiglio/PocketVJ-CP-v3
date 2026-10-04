@@ -301,6 +301,33 @@ def check_overlay(v, care):
     return out
 
 
+def _projector_details(v):
+    """What a projector said it is, as projector.py stores it: text cleaned the way an answer from the projector is,
+    the input list only codes the standard knows. A key this version does not know is dropped."""
+    _obj(v, "a projector's details")
+    out = {}
+    for key, limit in (("name", 64), ("maker", 32), ("model", 32), ("info", 32)):
+        if key in v:
+            if v[key] is not None and not isinstance(v[key], str):
+                raise ValueError("a projector's %s must be text" % key)
+            out[key] = None if v[key] is None else projector_mod.clean_text(v[key], limit)
+    if "class" in v:
+        if v["class"] is not None and not (isinstance(v["class"], str) and re.fullmatch(r"[1-9]", v["class"])):
+            raise ValueError("a projector's class is one digit")
+        out["class"] = v["class"]
+    if "inputs" in v:
+        codes = v["inputs"]
+        if codes is not None and not (isinstance(codes, list) and len(set(map(str, codes))) == len(codes)
+                                      and all(isinstance(c, str) and projector_mod._INPUT.fullmatch(c) for c in codes)):
+            raise ValueError("a projector's inputs are codes such as 31, each once")
+        out["inputs"] = None if codes is None else list(codes)
+    if "read" in v:
+        if type(v["read"]) is not int or v["read"] < 0:
+            raise ValueError("when a projector's details were read must be a time")
+        out["read"] = v["read"]
+    return out
+
+
 def check_projectors(v, care):
     if not isinstance(v, list) or len(v) > projector_mod.MAX_PROJECTORS:
         raise ValueError("at most %d projectors" % projector_mod.MAX_PROJECTORS)
@@ -311,6 +338,12 @@ def check_projectors(v, care):
         if isinstance(given, str) and _ID.fullmatch(given) and given not in seen:
             clean["id"] = given
         seen.add(clean["id"])
+        if "details" in entry:
+            clean["details"] = _projector_details(entry["details"])
+        if "labels" in entry:                      # a label is for one of the inputs the projector itself listed
+            known = (clean.get("details") or {}).get("inputs") or []
+            labels = {code: projector_mod.validate_label(known, code, label) for code, label in _obj(entry["labels"], "labels").items()}
+            clean["labels"] = {code: label for code, label in labels.items() if label}
         try:                                       # an address is judged now; a name is looked up (and judged) at each use
             ipaddress.ip_address(clean["host"])
         except ValueError:
@@ -482,8 +515,10 @@ class BoxCare:
         for name, _check in SECTIONS:
             if name in data:
                 out[name] = data[name]
-        out["projectors"] = [{"id": p["id"], "name": p["name"], "host": p["host"], "port": p["port"],
-                              "password": p.get("password", "") if passwords else ""} for p in out.get("projectors", [])]
+        out["projectors"] = [dict({"id": p["id"], "name": p["name"], "host": p["host"], "port": p["port"],
+                                   "password": p.get("password", "") if passwords else ""},
+                                  **{k: p[k] for k in ("details", "labels") if k in p})       # what it said it is; input labels
+                             for p in out.get("projectors", [])]
         out["streams"] = [{"id": s["id"], "name": s["name"], "url": s["url"] if passwords else strip_login(s["url"])}
                           for s in out.get("streams", [])]
         from . import __version__
@@ -619,7 +654,7 @@ class BoxCare:
                         manager.apply()
         for label, fn in (("OSC", api.osc.apply if api.osc else None), ("DMX and MIDI", control), ("Sync", api.sync.apply),
                           ("Mapper", api.mapper.apply), ("Picture over the video", api.apply_overlay),
-                          ("Sound output", api.apply_audio)):
+                          ("Sound output", api.apply_audio), ("Projectors", api.projectors.apply)):
             if fn is None:
                 continue
             try:
