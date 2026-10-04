@@ -37,9 +37,9 @@ Next, in order:
 5. **Painting-wall masks** on the second projector (likely the Pi 3B as a second synced box).
 6. **Network notes** for the private NXLX network (a dedicated router, fixed addresses, projectors without internet, staff Wi-Fi or a wall tablet).
 7. **Video matrix driver** (serial, TCP, HTTP, OSC command templates) once the owner picks a model; audio routing is undecided.
-8. The earlier parity list, now after the above: factory reset, settings export and import, diagnostics; display mode (owner at the monitor); mapper workflow; wall improvements; schedule with dates; follow-on actions; Wi-Fi hotspot.
+8. The earlier parity list, now after the above: display mode (owner at the monitor); mapper workflow; wall improvements; schedule with dates; follow-on actions; Wi-Fi hotspot.
 
-Small follow-ups: after `pvj-update rollback` from a terminal, the Updates card still says "Last update: updated to X" (the installed version line is right). Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
+Small follow-ups: a factory reset cannot remove the root-only update backups in `/var/lib/pvj/backups` (they hold the old devices and passwords, and `pvj-update rollback` after a reset brings them back); it needs a pvj-sysd action. Box care (PR #62, D39) has not been run on the Pi: export and import, the diagnostics file (does it say the log is not readable), a factory reset with the PIN screen returning. Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
 
 Owner's open items: a layout board at https://claude.ai/artifact/Bc24QHaMhyeS3eZfFyamLJ (press Save, then ask Claude to read it back) and editable mock-ups (SVG, layered PSD, PNG) in `docs/mockups/current/` (not in git; CI artifact `ui-mockups`). The design playground (D34, `tools/panel-playground`) has a preview at https://claude.ai/artifact/DYUr95vVi1jJyGquxhqZTu. A Pi 3B for two-box sync tests is waiting for a spare SD card (never touch its current card).
 
@@ -58,6 +58,7 @@ Merged to `master`: the security hotfix, the platform layer, the installer and s
 | PIN and the box's address drawn on the screen | `pvj/pinscreen.py` | on |
 | Health card (power, temperature, helpers, addresses) | `pvj/health.py` | on |
 | Updates card: signed bundles from USB or upload, rollback (D33) | `pvj/README.md` | on (needs a signing key) |
+| Settings export and import, diagnostics file, factory reset (D39; not run on hardware) | `pvj/boxcare.py`, `docs/MANUAL.md` | on |
 | Remote support over WireGuard, on request only | `docs/REMOTE-SUPPORT.md` | off |
 | Old OSC command names | `pvj/OSC.md` | with OSC |
 | Autostart (file, all, slideshow, pad, USB, preset) | `pvj/AUTOSTART.md` | off |
@@ -84,7 +85,7 @@ One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 25
 - The read-only root (`pvj-rootfs`), the Network module (test with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
 - Pi 3, Pi 5 and x86.
 
-Not built: crossfade (needs a second player), display mode, factory reset, settings export and import, diagnostics, Wi-Fi and hotspot, updates from the network, NDI, AES67/Dante, presenter, importing old mapper files, MIDI controller profiles and feedback, custom DMX layouts.
+Not built: crossfade (needs a second player), display mode, Wi-Fi and hotspot, updates from the network, NDI, AES67/Dante, presenter, importing old mapper files, MIDI controller profiles and feedback, custom DMX layouts.
 
 Known limits: the panel cannot restart a wedged mpv (unprivileged by design). Merged branches on GitHub are not deleted (ask the owner). GitHub ruleset "Protect master" requires 9 checks and pull requests; do not change it without asking.
 

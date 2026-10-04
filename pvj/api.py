@@ -152,6 +152,7 @@ class Api:
         self.capture = None       # Capture or None (live input from a USB capture device)
         self._import = {}         # the USB copy running or last run
         self._import_lock = threading.Lock()
+        self._care_busy = None    # "an import" or "a factory reset" while boxcare runs one (set and read under _import_lock)
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
         from . import shaders as shaders_mod, vibes as vibes_mod
@@ -168,6 +169,8 @@ class Api:
         self.projectors = projector_mod.Monitor(self, log=lambda line: self.log(line))    # started by server.build and the module switch
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
+        from . import boxcare as boxcare_mod
+        self.boxcare = boxcare_mod.BoxCare(self)                   # settings export and import, diagnostics, factory reset
 
     # --- helpers -------------------------------------------------------
     def _apply_opacity(self, percent):
@@ -499,6 +502,9 @@ class Api:
             f.close()
             raise bad("that file is empty")
         with self._import_lock:
+            if self._care_busy == "a factory reset":      # it may be deleting the clips right now
+                f.close()
+                raise ApiError(409, "a factory reset is running")
             if self._import.get("active"):
                 f.close()
                 raise ApiError(409, "a copy is already running")
@@ -802,7 +808,7 @@ class Api:
     def get_streams(self, body, device, client):
         self._need_streams()
         return {"streams": [{"id": s["id"], "name": s["name"], "url": streams_mod.redact(s["url"]),
-                             "has_login": s["url"] != streams_mod.redact(s["url"])}
+                             "has_login": streams_mod.redact(s["url"]) != s["url"]}
                             for s in self.settings.data["streams"]],
                 "schemes": list(streams_mod.SCHEMES)}
 
@@ -1020,7 +1026,10 @@ class Api:
     def _update_running(self):
         """True while an update reports progress (a stale "running" older than the units' time limit is not)."""
         last = self._update_result()
-        return bool(last and last.get("state") == "running" and time.time() - (last.get("at") or 0) < 35 * 60)
+        at = last.get("at") if last else None
+        if type(at) not in (int, float):         # the file is written by another program: text, a list or true is "no time"
+            at = 0
+        return bool(last and last.get("state") == "running" and time.time() - at < 35 * 60)
 
     def update_status(self, body, device, client):
         """What is installed, what is waiting (on a USB drive or uploaded), and the last update's progress."""
@@ -1039,7 +1048,10 @@ class Api:
                     inbox.append({"version": m.group(1), "signed": os.path.isfile(os.path.join(self._update_inbox(), n + ".sig"))})
         except OSError:
             pass
-        return {"version": __version__, "usb": usb, "inbox": inbox, "last": self._update_result()}
+        last = self._update_result()
+        if last and last.get("state") == "done" and last.get("version") not in (None, __version__):
+            last = None         # it says "updated to X", but X is not what runs now (a rollback from a terminal)
+        return {"version": __version__, "usb": usb, "inbox": inbox, "last": last}
 
     def start_update(self, body, device, client):
         """{"source": "usb" | "inbox", "version": "N.N.N", "confirm": "update"}: pvj-sysd starts a fixed update unit
@@ -1051,9 +1063,12 @@ class Api:
             raise bad("source must be usb or inbox")
         if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", version):
             raise bad("version must look like 1.2.3")
-        if self._update_running():
-            raise ApiError(409, "an update is already running")
-        self._sysd({"cmd": "update", "source": source, "version": version})
+        with self._import_lock:                  # checked and started in one step: an import or reset cannot begin between
+            if self._care_busy:
+                raise ApiError(409, "%s is running; update when it has finished" % self._care_busy)
+            if self._update_running():
+                raise ApiError(409, "an update is already running")
+            self._sysd({"cmd": "update", "source": source, "version": version})
         return {"started": source, "version": version}
 
     def update_upload(self, name, length, read, check=None):
@@ -1233,11 +1248,23 @@ class Api:
     def devices(self, body, device, client):
         return {"devices": self.auth.list_devices()}
 
+    def _still_paired(self, device):
+        """False when the device this request came from is gone: a factory reset (or a revoke) ran while the request
+        was on its way, after its token was checked. What it made in the meantime is taken back."""
+        if not device:
+            return False
+        if device.get("remote"):
+            return self.support.session is not None
+        return any(d["id"] == device.get("id") for d in self.settings.data["devices"])
+
     def invite(self, body, device, client):
         try:
             token, dev = self.auth.invite(str(body.get("name", "guest"))[:40], body.get("role"))
         except AuthError as e:
             raise bad(str(e))
+        if not self._still_paired(device):
+            self.auth.revoke(dev["id"])
+            raise ApiError(401, "this device is no longer paired")
         out = {"device": dev, "token": token, "note": "Share this token once; it is not shown again."}
         origin = body.get("origin")
         if isinstance(origin, str) and re.fullmatch(r"https?://[A-Za-z0-9.\-:\[\]]{1,100}", origin):
@@ -1738,9 +1765,12 @@ class Api:
 
     def make_join_code(self, body, device, client):
         try:
-            self.auth.create_join(body.get("role"), body.get("minutes", auth_mod.JOIN_DEFAULT_MINUTES), body.get("uses", auth_mod.JOIN_DEFAULT_USES))
+            code = self.auth.create_join(body.get("role"), body.get("minutes", auth_mod.JOIN_DEFAULT_MINUTES), body.get("uses", auth_mod.JOIN_DEFAULT_USES))
         except AuthError as e:
             raise bad(str(e))
+        if not self._still_paired(device):
+            self.auth.cancel_join(code)
+            raise ApiError(401, "this device is no longer paired")
         return self._access_state()
 
     def cancel_join_code(self, body, device, client):
@@ -1979,6 +2009,11 @@ class Api:
 
     # --- routing -------------------------------------------------------
     def routes(self):
+        out = self._routes()
+        out.update(self.boxcare.routes())      # /api/system/settings/*, /api/system/diagnostics, /api/system/factory-reset
+        return out
+
+    def _routes(self):
         # (method, path) -> (minimum role or None, handler)
         return {
             ("GET", "/api/hello"): (None, self.hello),
