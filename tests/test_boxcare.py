@@ -231,6 +231,13 @@ class ImportTest(Base):
         st, out = self.send(file)
         self.assertEqual((st, out["passwords_kept"]), (200, 1 + len([a for a in ADDRESSES if a[2]])), out)
         self.assertEqual(self.settings.data["streams"], full)             # every stream still plays
+        # the file comes back by way of a box that never had the streams: its export cuts an RTMP path once more
+        there = copy.deepcopy(file)
+        for s in there["settings"]["streams"]:
+            s["url"] = boxcare.strip_login(s["url"])
+        self.assertIn("rtmp://192.168.1.62", [s["url"] for s in there["settings"]["streams"]])
+        self.assertEqual(self.send(there)[0], 200)
+        self.assertEqual(self.settings.data["streams"], full)
         self.settings.data["streams"] = []                               # a box that never had them gets what the file holds
         st, out = self.send(file)
         self.assertEqual((st, out["passwords_kept"]), (200, 1))          # the projector's; there was no stream to keep one from

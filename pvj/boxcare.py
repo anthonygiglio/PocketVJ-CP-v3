@@ -627,10 +627,23 @@ class BoxCare:
         mine = {s["id"]: s for s in current.get("streams", [])}
         for s in clean.get("streams", []):
             old = mine.get(s["id"])
-            if old and old["url"] != s["url"] and strip_login(old["url"]) == s["url"]:
+            if old and old["url"] != s["url"] and self._shortened(old["url"], s["url"]):
                 s["url"] = old["url"]
                 kept += 1
         return kept
+
+    @staticmethod
+    def _shortened(full, short):
+        """Is `short` what is left of `full` after its secrets were cut, once or more than once? An RTMP address
+        loses the last part of its path at every export, so a file that went through a box that never had the
+        stream holds less than this box's own export would. Cutting never changes the scheme, host or port."""
+        while True:
+            less = strip_login(full)
+            if less == short:
+                return True
+            if less == full or not less:
+                return False
+            full = less
 
     def _backup(self):
         """The settings as they are now, beside the file, for whoever wants them back (mode 0600; the last few)."""
