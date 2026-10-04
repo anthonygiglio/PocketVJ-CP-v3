@@ -552,7 +552,9 @@ function startServer() {
     await page.waitForSelector('#shadercard [data-shader="nxlx-tide.fs"]');
     assert.strictEqual(await page.locator('#shadercard [data-shader]').count(), 10, 'the ten bundled shaders are listed');
     await page.waitForFunction(() => /Vibes is on/.test((document.getElementById('shaderline') || {}).textContent));
-    await page.click('#shadercard [data-shader="nxlx-tide.fs"] >> text=Play');
+    // By its label, not its text: when the rotation happens to be showing this very shader (1 time in 10) the button
+    // reads "On screen", and a click on "Play" then waited for 30 seconds and failed.
+    await page.click('#shadercard [data-shader="nxlx-tide.fs"] button[aria-label="Play nxlx-tide"]');
     await page.waitForFunction(() => /On screen: nxlx-tide/.test((document.getElementById('shaderline') || {}).textContent));
     await page.waitForSelector('#shin-speed');                       // its number inputs are sliders
     const vibesAfter = await page.evaluate(() => fetch('/api/shaders').then((r) => r.json()).then((d) => d.vibes.running));
