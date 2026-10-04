@@ -26,12 +26,11 @@ import uuid
 
 from .api import ApiError, MEDIA_EXTENSIONS, valid_name
 
-ACTIONS = ("play", "stop", "blackout", "show", "preset", "projector_on", "projector_off", "vibes")
+ACTIONS = ("play", "stop", "blackout", "show", "preset", "projector_on", "projector_off", "vibes", "scene")
 MAX_ENTRIES = 50
 MAX_CATCHUP_MINUTES = 2
 _TIME = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 _ID = re.compile(r"^[0-9a-f]{8}$")
-ACTIONS += ("scene",)             # a Room scene, by its id (room.py)
 
 
 class ScheduleError(Exception):
