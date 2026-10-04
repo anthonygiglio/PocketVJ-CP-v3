@@ -6,7 +6,7 @@
         "Generator",
         "Ambient"
     ],
-    "COST": "medium to high: 3 clouds of 2 octaves, 24 hashes a pixel",
+    "COST": "medium to high: 3 clouds of 2 octaves, 24 lattice values a pixel",
     "INPUTS": [
         {
             "NAME": "speed",
@@ -39,14 +39,19 @@
 // An original shader written for nxlx.mastercontrol.
 
 float cell(vec2 p) {
-    return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453);
+    vec2 a = fract(p * vec2(0.2861, 0.3359) + vec2(0.419, 0.263));
+    float m = a.x * 61.37 + a.y * 79.11 + a.x * a.y * 33.7;
+    return fract(m * (1.0 + fract(m * 0.5381)));
 }
 
+// Smooth noise: the four corner values of the lattice square around p, blended with an eased weight.
 float soft(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(cell(i), cell(i + vec2(1.0, 0.0)), u.x), mix(cell(i + vec2(0.0, 1.0)), cell(i + vec2(1.0, 1.0)), u.x), u.y);
+    vec2 corner = floor(p);
+    vec2 w = p - corner;
+    w = w * w * w * (w * (w * 6.0 - 15.0) + 10.0);
+    float low = mix(cell(corner), cell(corner + vec2(1.0, 0.0)), w.x);
+    float high = mix(cell(corner + vec2(0.0, 1.0)), cell(corner + vec2(1.0, 1.0)), w.x);
+    return mix(low, high, w.y);
 }
 
 float cloud(vec2 p) {

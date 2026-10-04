@@ -6,7 +6,7 @@
         "Generator",
         "Ambient"
     ],
-    "COST": "low: one atan, one length, 5 cosines a pixel",
+    "COST": "low: one atan, one length, 2 cosines and a colour blend a pixel",
     "INPUTS": [
         {
             "NAME": "speed",
@@ -51,7 +51,17 @@
 // An original shader written for nxlx.mastercontrol.
 
 vec3 tone(float t) {
-    return vec3(0.5) + vec3(0.5) * cos(6.28318 * (vec3(t) + vec3(0.0, 0.33, 0.67)));
+    float f = fract(t) * 3.0;
+    vec3 rose = vec3(0.95, 0.25, 0.45);
+    vec3 gold = vec3(0.98, 0.78, 0.20);
+    vec3 sea = vec3(0.15, 0.65, 0.90);
+    if (f < 1.0) {
+        return mix(rose, gold, smoothstep(0.0, 1.0, f));
+    }
+    if (f < 2.0) {
+        return mix(gold, sea, smoothstep(1.0, 2.0, f));
+    }
+    return mix(sea, rose, smoothstep(2.0, 3.0, f));
 }
 
 void main() {

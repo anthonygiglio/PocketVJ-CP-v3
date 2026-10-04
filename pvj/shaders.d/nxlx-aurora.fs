@@ -6,7 +6,7 @@
         "Generator",
         "Ambient"
     ],
-    "COST": "low: 4 bands, about 12 sines a pixel",
+    "COST": "low: 4 bands, about 12 sines and 4 colour blends a pixel",
     "INPUTS": [
         {
             "NAME": "speed",
@@ -39,7 +39,17 @@
 // An original shader written for nxlx.mastercontrol.
 
 vec3 tone(float t) {
-    return vec3(0.5) + vec3(0.5) * cos(6.28318 * (vec3(t) + vec3(0.55, 0.25, 0.05) + vec3(tint)));
+    float f = fract(t + tint) * 3.0;
+    vec3 green = vec3(0.15, 0.95, 0.55);
+    vec3 teal = vec3(0.10, 0.60, 0.95);
+    vec3 violet = vec3(0.70, 0.30, 0.95);
+    if (f < 1.0) {
+        return mix(green, teal, smoothstep(0.0, 1.0, f));
+    }
+    if (f < 2.0) {
+        return mix(teal, violet, smoothstep(1.0, 2.0, f));
+    }
+    return mix(violet, green, smoothstep(2.0, 3.0, f));
 }
 
 void main() {
