@@ -265,6 +265,19 @@ class ImportTest(Base):
                 self.assertEqual((out["passwords_kept"], self.settings.data["projectors"][0]["password"]), (0, ""))
             self.assertNotIn(STREAM_PASSWORD, json.dumps(self.settings.data["streams"]))
 
+    def test_projector_keys_this_version_does_not_know_are_dropped_silently(self):
+        """A later version keeps more about a projector ("details", "labels"); until this file's checks know them
+        they are neither exported nor imported, and a file that holds them is not refused."""
+        keys = ["host", "id", "name", "password", "port"]
+        self.settings.data["projectors"][0].update(details={"maker": "ACME"}, labels={"31": "HDMI 1"})
+        file = self.export(passwords=True)
+        self.assertEqual([sorted(p) for p in file["settings"]["projectors"]], [keys, keys])
+        file["settings"]["projectors"][1].update(details={"maker": "Other"}, labels={"32": "HDMI 2"})
+        st, out = self.send(file)
+        self.assertEqual((st, out["problems"]), (200, []), out)
+        self.assertEqual([sorted(p) for p in self.settings.data["projectors"]], [keys, keys])
+        self.assertEqual(self.settings.data["projectors"][0]["password"], PROJECTOR_PASSWORD)
+
     def test_a_newer_file_is_refused_plainly_and_nothing_changes(self):
         file = self.export()
         file["settings"]["schema"] = settings_mod.SCHEMA + 1
