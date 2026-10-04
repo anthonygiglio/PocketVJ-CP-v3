@@ -99,7 +99,7 @@
       d.shaders.forEach(function (s) {
         var on = !!(d.playing && d.playing.id === s.id);
         var about = s.error ? 'Cannot be shown: ' + s.error : [s.description, s.cost ? 'Cost: ' + s.cost : '', s.source === 'uploaded' ? 'uploaded' : ''].filter(Boolean).join(' · ');
-        body.appendChild(h('div', { class: 'item map-entry' + (on ? ' on' : ''), 'data-shader': s.id },
+        body.appendChild(h('div', { class: 'item shader-entry' + (on ? ' on' : ''), 'data-shader': s.id },
           h('span', {}, s.name, h('br'), h('span', { class: 'k', text: about })),
           h('div', { class: 'row' },
             h('button', { class: 'btn small' + (on ? ' on' : ''), text: on ? 'On screen' : 'Play', 'aria-label': 'Play ' + s.name, disabled: !live || !!s.error,

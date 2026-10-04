@@ -245,7 +245,17 @@ class GpuCase:
         self.assertEqual(self.real.ipc.request("get_property", "fbo-format"), "auto")
 
     # -- handing the screen over --
+    def clip_colours(self, wait):
+        """How many colours the clip's test picture shows; polls up to `wait` seconds for more than 20."""
+        deadline, seen = time.monotonic() + wait, []
+        while True:
+            seen.append(len({c for row in self.shot()[::9] for c in row[::9]}))
+            if seen[-1] > 20 or time.monotonic() > deadline:
+                return seen
+            time.sleep(0.25)
+
     def test_playing_a_clip_takes_the_shader_off_before_the_clip_starts(self):
+        self.assertGreater(self.clip_colours(5)[-1], 20, "the clip itself draws no picture here")
         self.engine.upload("probe.fs", PROBE)
         r = self.show("probe.fs")
         self.assertEqual(self.real.ipc.request("get_property", "fbo-format"), "rgba8")
@@ -256,9 +266,10 @@ class GpuCase:
         self.assertIsNone(self.engine.state()["playing"])
         self.assertIsNone(self.engine.show("probe.fs", epoch=r["epoch"]))      # an old epoch can no longer take the screen
         self.assertEqual((self.shaders_in_player(), self.real.ipc.request("get_property", "path")), ([], CLIP))
-        time.sleep(0.3)
-        colours = {c for row in self.shot()[::9] for c in row[::9]}
-        self.assertGreater(len(colours), 20)                         # the clip's test picture, not black and not the probe
+        seen = self.clip_colours(5)                                  # the clip's test picture, not black and not the probe
+        self.assertGreater(seen[-1], 20, "colours seen after the clip took over: %s; fbo-format %s, shaders %s, time-pos %s" % (
+            seen, self.real.ipc.request("get_property", "fbo-format"), self.shaders_in_player(), self.real.ipc.request("get_property", "time-pos")))
+        self.assertEqual(len(seen), 1, "the clip's picture came late: %s" % seen)
 
     def test_vibes_changes_shaders_on_the_same_carrier(self):
         now = [0.0]
