@@ -24,6 +24,9 @@ class FakeNm:
         self.profiles = {"Wired connection 1": {"uuid": UUID_OLD, "ipv4.method": "auto",
                                                 "connection.autoconnect": "yes", "connection.autoconnect-priority": "0"}}
         self.active = "Wired connection 1"
+        self.wifi_active = None          # the profile active on wlan0 (profiles with "_dev": "wlan0")
+        self.radio_hw, self.radio = "enabled", "enabled"
+        self.scan_text = ""
         self.calls = []
         self.fail_on = None
         self.fail_times = None
@@ -49,12 +52,50 @@ class FakeNm:
         if argv[0] == "ip":
             return done(0, json.dumps(self.addrs))
         if argv[:5] == ["nmcli", "-t", "-f", "UUID,DEVICE", "connection"]:
+            out = ""
             if self.active in self.profiles:
-                return done(0, "%s:eth0\n" % self.profiles[self.active]["uuid"])
-            return done(0, "")
+                out += "%s:eth0\n" % self.profiles[self.active]["uuid"]
+            if self.wifi_active in self.profiles:
+                out += "%s:wlan0\n" % self.profiles[self.wifi_active]["uuid"]
+            return done(0, out)
+        if argv[1:5] == ["-t", "-f", "WIFI-HW,WIFI", "radio"]:
+            return done(0, "%s:%s\n" % (self.radio_hw, self.radio))
+        if argv[1:3] == ["radio", "wifi"]:
+            self.radio = "enabled" if argv[3] == "on" else "disabled"
+            if argv[3] == "off":
+                self.wifi_active = None
+            return done()
+        if argv[1:7] == ["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,CHAN", "device", "wifi", "list"]:
+            return done(0, self.scan_text)
+        if argv[1:4] == ["-t", "-g", "802-11-wireless.ssid,802-11-wireless.mode"]:
+            name = self._by_uuid(argv[-1])
+            p = self.profiles.get(name, {})
+            return done(0, "%s\n%s\n" % (p.get("_ssid", ""), p.get("_mode", ""))) if name else done(10)
+        if argv[1:3] == ["device", "disconnect"]:
+            self.wifi_active = None
+            return done()
         if argv[1:4] == ["-t", "-f", "connection.id"]:
             return done(0 if argv[-1] in self.profiles else 10, argv[-1] + "\n" if argv[-1] in self.profiles else "")
         verb = argv[2]
+        if verb == "load":
+            path = argv[3]
+            st = os.lstat(path)
+            if st.st_mode & 0o077:
+                return done(1, "", "Error: file is readable by others")
+            kf = {}
+            section = None
+            with open(path) as f:
+                for line in f.read().splitlines():
+                    if line.startswith("["):
+                        section = line.strip("[]")
+                    elif "=" in line:
+                        k, v = line.split("=", 1)
+                        kf["%s.%s" % (section, k)] = v
+            ssid = bytes(int(b) for b in kf["wifi.ssid"].rstrip(";").split(";")).decode()
+            self.profiles[kf["connection.id"]] = {"uuid": kf["connection.uuid"], "_dev": "wlan0", "_keyfile": path,
+                                                  "_ssid": ssid, "_mode": kf["wifi.mode"], "_kf": kf,
+                                                  "connection.autoconnect": "no"}
+            return done()
         if verb == "add":
             self._n += 1
             props = dict(zip(argv[9::2], argv[10::2]))
@@ -71,22 +112,33 @@ class FakeNm:
                 self.profiles[new_id] = self.profiles.pop(name)
                 if self.active == name:
                     self.active = new_id
+                if self.wifi_active == name:
+                    self.wifi_active = new_id
         elif verb == "up":
             name = self._by_uuid(argv[4]) if argv[3] == "uuid" else argv[4]
             if name not in self.profiles:
                 return done(10, "", "Error: unknown connection")
             if self.on_up:
                 self.on_up()
-            self.active = name
+            if self.profiles[name].get("_dev") == "wlan0":
+                self.wifi_active = name
+            else:
+                self.active = name
         elif verb == "down":
             if self.active == argv[4]:
                 self.active = None
+            if self.wifi_active == argv[4]:
+                self.wifi_active = None
         elif verb == "delete":
             if argv[4] not in self.profiles:
                 return done(10, "", "Error: unknown connection")
-            self.profiles.pop(argv[4])
+            gone = self.profiles.pop(argv[4])
+            if gone.get("_keyfile"):
+                os.unlink(gone["_keyfile"])   # NetworkManager removes the file a profile came from
             if self.active == argv[4]:
                 self.active = None
+            if self.wifi_active == argv[4]:
+                self.wifi_active = None
         return done()
 
 
@@ -332,7 +384,8 @@ class ServiceTest(unittest.TestCase):
         self.svc.apply(dict(STATIC))
         with open(self.state) as f:
             data = json.load(f)
-        self.assertEqual(set(data), {"phase", "iface", "previous_uuid"})
+        self.assertEqual(set(data), {"phase", "iface", "previous_uuid", "radio_was_off", "keyfile"})
+        self.assertEqual((data["radio_was_off"], data["keyfile"]), (False, None))
         self.assertEqual(oct(os.stat(self.state).st_mode & 0o777), "0o600")
 
     def test_state_directory_must_be_private(self):
@@ -347,6 +400,197 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(netd.safe_state_dir(), good)
         os.environ["STATE_DIRECTORY"] = loose
         self.assertIsNone(netd.safe_state_dir())
+
+
+UUID_WIFI = "5d0c2f57-7d0a-4a5e-9d6a-1f2e3d4c5b6a"
+JOIN = {"iface": "wlan0", "mode": "dhcp", "ssid": "Leyline Staff", "password": "s3cret pass", "revert_seconds": 120}
+
+
+class WifiServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.nm = FakeNm()
+        self.nm.profiles["Home"] = {"uuid": UUID_WIFI, "_dev": "wlan0", "_ssid": "Home", "_mode": "infrastructure"}
+        self.nm.wifi_active = "Home"
+        self.now = [1000.0]
+        self.dir = tempfile.mkdtemp()
+        self.kdir = tempfile.mkdtemp()
+        os.chmod(self.dir, 0o700)
+        os.chmod(self.kdir, 0o700)
+        self.state = os.path.join(self.dir, "net-pending.json")
+        self.logs = []
+        self.sysfs = make_sysfs()
+        self.tokens = iter(["0000aaaa", "0000bbbb", "0000cccc", "0000dddd"])
+        self.svc = self.make_service()
+
+    def make_service(self):
+        return NetService(runner=self.nm, clock=lambda: self.now[0], sysfs=self.sysfs, state_dir=self.dir,
+                          log=self.logs.append, keyfile_dir=self.kdir, new_token=lambda: next(self.tokens))
+
+    def keyfiles(self):
+        return sorted(os.listdir(self.kdir))
+
+    def assert_no_password_anywhere(self, *extra):
+        everything = repr(self.nm.calls) + repr(self.logs) + repr(extra) + repr(self.svc.status(wifi=True))
+        if os.path.exists(self.state):
+            with open(self.state) as f:
+                everything += f.read()
+        self.assertNotIn("s3cret", everything)
+
+    def test_joining_writes_a_root_only_keyfile_and_brings_the_candidate_up(self):
+        reply = self.svc.handle({"cmd": "apply", "config": dict(JOIN)})
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(reply["pending"]["ssid"], "Leyline Staff")
+        self.assertEqual(self.keyfiles(), ["pvj-wlan0-try-0000aaaa.nmconnection"])
+        path = os.path.join(self.kdir, self.keyfiles()[0])
+        self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
+        cand = self.nm.profiles["pvj-wlan0-try"]
+        self.assertEqual((cand["_ssid"], cand["_kf"]["wifi-security.psk"], cand["ipv4.method"], cand["connection.autoconnect"]),
+                         ("Leyline Staff", "s3cret\\spass", "auto", "no"))
+        self.assertEqual(self.nm.wifi_active, "pvj-wlan0-try")
+        self.assertEqual(self.nm.active, "Wired connection 1")      # the wired port is not touched
+        self.assert_no_password_anywhere(reply)
+
+    def test_confirm_keeps_the_new_network(self):
+        self.svc.apply(dict(JOIN))
+        self.svc.confirm()
+        self.assertEqual(self.nm.wifi_active, "pvj-wlan0")
+        self.assertEqual(self.nm.profiles["pvj-wlan0"]["connection.autoconnect"], "yes")
+        self.assertIn("Home", self.nm.profiles)
+        self.assertFalse(os.path.exists(self.state))
+        # a second change replaces the first: the old confirmed profile and its file go
+        self.svc.apply(dict(JOIN, ssid="Other"))
+        self.svc.confirm()
+        self.assertEqual(self.nm.profiles["pvj-wlan0"]["_ssid"], "Other")
+        self.assertEqual(self.keyfiles(), ["pvj-wlan0-try-0000bbbb.nmconnection"])
+
+    def test_no_confirmation_goes_back_to_the_previous_network_and_removes_the_keyfile(self):
+        self.svc.apply(dict(JOIN))
+        self.now[0] += 121
+        self.assertTrue(self.svc.tick())
+        self.assertEqual(self.nm.wifi_active, "Home")
+        self.assertNotIn("pvj-wlan0-try", self.nm.profiles)
+        self.assertEqual(self.keyfiles(), [])
+        self.assertFalse(os.path.exists(self.state))
+        self.assert_no_password_anywhere()
+
+    def test_a_radio_that_was_off_is_switched_on_and_back_off(self):
+        self.nm.radio, self.nm.wifi_active = "disabled", None
+        self.svc.apply(dict(JOIN))
+        self.assertEqual(self.nm.radio, "enabled")
+        self.svc.revert()
+        self.assertEqual(self.nm.radio, "disabled")
+        self.assertEqual(self.keyfiles(), [])
+
+    def test_a_restart_while_pending_undoes_everything(self):
+        self.nm.radio, self.nm.wifi_active = "disabled", None
+        self.svc.apply(dict(JOIN))
+        with open(self.state) as f:
+            self.assertEqual(json.load(f)["keyfile"], "0000aaaa")
+        fresh = self.make_service()          # pvj-netd restarted (or the box rebooted)
+        self.assertTrue(fresh.recover())
+        self.assertNotIn("pvj-wlan0-try", self.nm.profiles)
+        self.assertEqual((self.nm.radio, self.keyfiles()), ("disabled", []))
+
+    def test_a_keyfile_written_but_never_loaded_is_removed(self):
+        self.nm.fail_on = "connection load"
+        with self.assertRaises(NetError):
+            self.svc.apply(dict(JOIN))
+        self.assertEqual(self.keyfiles(), [])
+        self.assertEqual(self.nm.wifi_active, "Home")
+        self.assertIsNone(self.svc.status()["pending"])
+
+    def test_a_failed_connection_goes_back(self):
+        self.nm.fail_on = "connection up id pvj-wlan0-try"
+        with self.assertRaises(NetError):
+            self.svc.apply(dict(JOIN))
+        self.assertEqual((self.nm.wifi_active, self.keyfiles()), ("Home", []))
+        self.assertNotIn("pvj-wlan0-try", self.nm.profiles)
+
+    def test_hotspot(self):
+        self.svc.apply({"iface": "wlan0", "mode": "hotspot", "ssid": "NXLX", "password": "s3cret pass", "band": "a"})
+        cand = self.nm.profiles["pvj-wlan0-try"]
+        self.assertEqual((cand["_mode"], cand["_kf"]["wifi.band"], cand["ipv4.method"], cand["ipv4.addresses"]),
+                         ("ap", "a", "shared", "10.43.0.1/24"))
+        self.svc.confirm()
+        st = self.svc.status(wifi=True)
+        self.assertEqual(st["wifi"]["ports"]["wlan0"], {"ssid": "NXLX", "hotspot": True})
+        self.assert_no_password_anywhere()
+
+    def test_wifi_off_disconnects_and_the_radio_goes_off_on_confirm(self):
+        self.svc.apply({"iface": "wlan0", "mode": "off"})
+        self.assertIsNone(self.nm.wifi_active)
+        self.assertEqual(self.nm.radio, "enabled")       # still undoable
+        self.svc.revert()
+        self.assertEqual(self.nm.wifi_active, "Home")
+        self.svc.apply({"iface": "wlan0", "mode": "off"})
+        self.svc.confirm()
+        self.assertEqual(self.nm.radio, "disabled")
+        self.assertIn("Home", self.nm.profiles)           # saved networks are kept
+        with self.assertRaises(NetError):
+            self.svc.apply({"iface": "wlan0", "mode": "off"})
+
+    def test_blocked_wifi_is_refused_before_anything_runs(self):
+        self.nm.radio_hw = "disabled"
+        n = len(self.nm.calls)
+        with self.assertRaises(NetError) as cm:
+            self.svc.apply(dict(JOIN))
+        self.assertIn("blocked", str(cm.exception))
+        self.assertFalse([c for c in self.nm.calls[n:] if c[0] == "nmcli" and c[1] != "-t"])   # only questions were asked
+        self.assertEqual(self.keyfiles(), [])
+        self.assertIsNone(self.svc.pending)
+
+    def test_an_unsafe_profile_folder_is_refused(self):
+        os.chmod(self.kdir, 0o770)
+        with self.assertRaises(NetError):
+            self.svc.apply(dict(JOIN))
+        self.assertEqual(self.nm.wifi_active, "Home")
+        os.chmod(self.kdir, 0o700)
+        link = os.path.join(self.dir, "linked")
+        os.symlink(self.kdir, link)
+        self.svc.keyfile_dir = link
+        with self.assertRaises(NetError):
+            self.svc.apply(dict(JOIN))
+
+    def test_a_planted_file_is_never_followed_or_overwritten(self):
+        victim = os.path.join(self.dir, "victim")
+        with open(victim, "w") as f:
+            f.write("do not touch")
+        os.symlink(victim, os.path.join(self.kdir, "pvj-wlan0-try-0000aaaa.nmconnection"))
+        with self.assertRaises(NetError):
+            self.svc.apply(dict(JOIN))
+        with open(victim) as f:
+            self.assertEqual(f.read(), "do not touch")
+
+    def test_saved_state_with_an_odd_keyfile_name_is_ignored(self):
+        for bad in ("../../etc/passwd", "ABCDEF01", 5, "0000aaaa\n"):
+            with open(self.state, "w") as f:
+                json.dump({"phase": "pending", "iface": "wlan0", "previous_uuid": None, "keyfile": bad}, f)
+            self.assertFalse(self.make_service().recover(), bad)
+        with open(self.state, "w") as f:
+            json.dump({"phase": "pending", "iface": "wlan0", "previous_uuid": None, "radio_was_off": "yes"}, f)
+        self.assertFalse(self.make_service().recover())
+
+    def test_plan_shows_commands_but_never_the_password(self):
+        reply = self.svc.handle({"cmd": "plan", "config": dict(JOIN)})
+        self.assertTrue(reply["ok"])
+        self.assertNotIn("password", reply["config"])
+        self.assertNotIn("s3cret", json.dumps(reply))
+        self.assertEqual(self.keyfiles(), [])
+        self.assertEqual(self.nm.wifi_active, "Home")
+
+    def test_scan(self):
+        self.nm.scan_text = "*:Home:70:WPA2:6\n :Leyline Staff:60:WPA2 WPA3:36\n :Guest:20::1\n"
+        reply = self.svc.handle({"cmd": "scan", "iface": "wlan0"})
+        self.assertEqual([n["ssid"] for n in reply["networks"]], ["Home", "Leyline Staff", "Guest"])
+        for bad in ("eth0", "wlan9", None, "wlan0; reboot"):
+            self.assertFalse(self.svc.handle({"cmd": "scan", "iface": bad})["ok"], bad)
+        self.nm.radio = "disabled"
+        self.assertIn("off", self.svc.handle({"cmd": "scan", "iface": "wlan0"})["error"])
+
+    def test_status_reports_what_wifi_is_doing(self):
+        st = self.svc.handle({"cmd": "status", "wifi": True})
+        self.assertEqual(st["wifi"], {"hardware": True, "radio": True, "ports": {"wlan0": {"ssid": "Home", "hotspot": False}}})
+        self.assertNotIn("wifi", self.svc.handle({"cmd": "status"}))
 
 
 class SocketTest(unittest.TestCase):
