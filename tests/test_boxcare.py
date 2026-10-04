@@ -418,6 +418,10 @@ class ImportTest(Base):
             ("streams", [{"id": "bbbb0001", "name": "x", "url": "rtsp://192.168.1.2/x"}, {"id": "bbbb0001", "name": "y", "url": "rtsp://192.168.1.3/x"}]),
             ("control", {"dmx": {"enabled": True, "protocol": "artnet", "universe": 99999, "start": 1, "allow": []}, "midi": {}}),
             ("control", {"dmx": {}, "midi": {"enabled": True, "map": [{"kind": "note", "number": 300, "action": "pad"}]}}),
+            ("control", {"dmx": {}, "midi": {"map": [{"id": "dddd0001", "kind": "note", "number": 5, "action": "stop"},
+                                                     {"id": "dddd0002", "kind": "note", "number": 5, "channel": 0, "source": "*", "action": "blackout"}]}}),
+            ("control", {"dmx": {}, "midi": {"map": [{"id": "dddd0001", "kind": "cc", "number": 5, "action": "stop"},
+                                                     {"id": "dddd0001", "kind": "note", "number": 5, "action": "stop"}]}}),
             ("autostart", {"mode": "file", "file": ""}),
             ("autostart", {"mode": "pad", "pad": [2, 5]}),                  # that pad has no clip
             ("audio", {"device": 5}),
@@ -432,12 +436,17 @@ class ImportTest(Base):
             ("sync", {"role": "boss"}),
             ("sync", {"wall": {"cols": 2, "rows": 2, "col": 5, "row": 0}}),
         ]
+        self.assertEqual({section for section, _ in bad}, {name for name, _ in boxcare.SECTIONS})      # no section without a bad value
         for section, value in bad:
             st, out = self.send(with_(section, value))
             self.assertEqual(st, 400, (section, value, out))
             self.assertTrue(out["error"].startswith(section + ":"), out)
             self.assertEqual(self.on_disk(), before)
         self.assertEqual(self.care._siblings(".before-import-"), [])
+        two = {"dmx": {}, "midi": {"map": [{"kind": "note", "number": 5, "action": "stop"}, {"kind": "note", "number": 5, "channel": 1, "action": "stop"},
+                                         {"kind": "cc", "number": 5, "action": "stop"}, {"kind": "note", "number": 5, "source": "Pad 1", "action": "stop"}]}}
+        self.assertEqual(self.send(with_("control", two))[0], 200)       # the same number on another channel, kind or controller is another control
+        self.assertEqual(len(self.settings.data["control"]["midi"]["map"]), 4)
         self.assertEqual(self.send(good)[0], 200)
 
     def test_autostart_from_a_pad_is_checked_against_the_box_s_pads_when_the_file_has_none(self):

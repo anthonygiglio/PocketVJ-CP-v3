@@ -277,6 +277,8 @@ def check_control(v, care):
     midi["map"] = [midi_mod.validate_entry(e, keep_id=True) for e in entries]
     if len({e["id"] for e in midi["map"]}) != len(midi["map"]):
         raise ValueError("two MIDI mappings have the same id")
+    if len({(e["kind"], e["number"], e["source"], e["channel"]) for e in midi["map"]}) != len(midi["map"]):
+        raise ValueError("two MIDI mappings are for the same control")        # the panel replaces; a file may not hold both
     return {"dmx": dmx, "midi": midi}
 
 
