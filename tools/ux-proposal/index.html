@@ -108,9 +108,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dock .btn { flex: 1 1 0; }
 .dock + .tabs { border-top: 0; }
 .banner { border: 1.5px dashed var(--ac); border-radius: 6px; padding: 8px 12px; font-size: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.toast { position: absolute; left: 12px; right: 12px; bottom: 132px; z-index: 25; background: var(--fg); color: var(--bg); border-radius: 8px; padding: 10px 12px; font-weight: 600; font-size: 14px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
-.toast.err { background: var(--bad); color: var(--onbad); }
-.toast button { background: none; border: 1.5px solid currentColor; border-radius: 6px; min-height: 36px; padding: 0 10px; font-weight: 700; cursor: pointer; color: inherit; flex: none; }
+/* shared patterns: helper sentences, status lines, the message line under the header, "Saved", the inline confirm */
+.hint { font-size: 13px; color: var(--mu); }
+.state { font-size: 14px; }
+.msg.stick { position: sticky; top: 0; z-index: 5; min-height: 0; }
+.msg.stick.full { background: var(--fg); color: var(--bg); border-radius: 6px; padding: 8px 12px; font-weight: 600; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.msg.stick.full.err { background: var(--bad); color: var(--onbad); }
+.msg.stick button { background: none; border: 1.5px solid currentColor; border-radius: 6px; min-height: 44px; padding: 0 12px; font-weight: 700; cursor: pointer; color: inherit; flex: none; }
+.saved { font-size: 13px; font-weight: 600; color: var(--ac); }
+.banner.confirm { flex-wrap: wrap; border-style: solid; border-color: var(--bad); }
+.add { border-style: dashed; text-align: left; }
+.tick { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 14px; cursor: pointer; }
+.tick input { width: 22px; height: 22px; accent-color: var(--ac); }
+.lrow { border-top: 1px solid var(--ln); }
+.lrow:first-child { border-top: 0; }
+.lrow .clip { border-top: 0; }
+.clip .nm small.state { font-size: 14px; }
+.clip .nm small.prob { color: var(--ac); font-weight: 700; font-size: 13px; }
+.more { display: flex; flex-direction: column; gap: 8px; padding: 0 0 12px; }
 .switch { flex: none; width: 56px; height: 34px; border-radius: 17px; border: 1.5px solid var(--ln); background: var(--bg); position: relative; cursor: pointer; padding: 0; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 25px; height: 25px; border-radius: 50%; background: var(--mu); }
 .switch[aria-checked="true"] { background: var(--ac); border-color: var(--ac); }
@@ -121,7 +136,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .mrow { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--ln); min-height: 64px; }
 .mrow .go { flex: 1; min-width: 0; background: none; border: 0; padding: 8px 0; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
 .mrow .go .nm { font-weight: 600; }
-.mrow .go .st { font-size: 13px; color: var(--mu); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mrow .go .st { font-size: 14px; color: var(--mu); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .mrow .chev { color: var(--mu); font-size: 20px; flex: none; }
 .back { align-self: flex-start; background: none; border: 0; padding: 8px 0; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .kv { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--ln); padding: 10px 0; font-size: 14px; }
@@ -188,7 +203,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   var ROLE_CAN = { view: 'You can watch what is playing. You cannot change anything.',
     live: 'You can play clips, start ambience, black out and switch projectors. Settings stay with the owner.',
     full: 'You can do everything, including settings.' };
-  var SHADERS = ['aurora', 'drift', 'ember', 'horizon', 'lattice', 'nebula', 'prism', 'pulse', 'silk', 'tide'];
+  // The ten bundled shaders with their real number inputs (pvj/shaders.d): [name, label, min, max, default]. The last two are made-up uploads.
+  var SP = ['speed', 'Speed', 0.2, 2, 1];
+  var SH = [
+    ['nxlx-aurora', 'Slow curtains of light over a dark sky.', 'Light', 'low: 4 bands, about 12 sines and 4 colour blends a pixel', [SP, ['height', 'Height', 0.6, 1.3, 1], ['tint', 'Tint', 0, 1, 0]]],
+    ['nxlx-drift', 'Soft clouds of colour drifting slowly.', 'Medium', 'medium: 2 clouds of 3 octaves, 24 lattice values a pixel', [SP, ['scale', 'Scale', 1, 4, 2], ['warmth', 'Warmth', 0, 1, 0.5]]],
+    ['nxlx-ember', 'Warm glowing blobs that merge and part, like embers.', 'Light', 'low: 5 blobs, 10 sines a pixel', [SP, ['size', 'Blob size', 0.5, 1.5, 1]], 'Glow colour'],
+    ['nxlx-horizon', 'A wide sky at dusk with a slow sun and drifting haze.', 'Light', 'low: 4 sines, one length and 4 exponentials a pixel', [SP, ['sun', 'Sun height', 0.35, 0.7, 0.45], ['haze', 'Haze', 0, 1, 0.5]]],
+    ['nxlx-lattice', 'Two fine grids turning against each other: a slow moire.', 'Light', 'low: 4 sines a pixel', [SP, ['density', 'Density', 8, 40, 18]], 'Colour'],
+    ['nxlx-nebula', 'Folded clouds of gas: noise bent by more noise.', 'Heavy', 'medium to high: 3 clouds of 2 octaves, 24 lattice values a pixel', [SP, ['fold', 'Fold', 0.5, 3, 1.5], ['scale', 'Scale', 1, 3, 1.6]]],
+    ['nxlx-prism', 'Soft rings of colour turning around the centre.', 'Light', 'low: one atan, one length, 2 cosines and a colour blend a pixel', [SP, ['rings', 'Rings', 1, 6, 3]], 'Petals'],
+    ['nxlx-pulse', 'Slow ripples spreading from three wandering points.', 'Light', 'low: 3 lengths and 9 sines a pixel', [SP, ['ripple', 'Ripples', 4, 24, 10], ['calm', 'Calm', 0, 1, 0.4]]],
+    ['nxlx-silk', 'Fine flowing lines, like folds of silk in a slow wind.', 'Light', 'low: 7 sines a pixel', [SP, ['lines', 'Lines', 4, 30, 12], ['sheen', 'Sheen', 0, 1, 0.5]]],
+    ['nxlx-tide', 'Layers of slow waves, deep water colours.', 'Light', 'low: 5 layers, 10 sines a pixel', [SP, ['swell', 'Swell', 0.3, 1.5, 1]], 'Night colours']];
   var B = {
     now: { kind: 'clip', file: 'loop-a.mkv', label: 'Loop A', dur: 200, pos: 74, loop: true },
     paused: false, blackout: false, faded: false, test: false, scene: '',
@@ -211,8 +238,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
         .forEach(function (p, i) { pads[i] = { file: p[0], label: p[1], ending: p[2] }; });
       return { name: name, pads: pads };
     }),
-    free: 84.4, proj: [{ n: 'Main wall', on: true, input: 'HDMI 1', lamp: 412 }, { n: 'Painting wall', on: false, input: 'HDMI 1', lamp: 1310 }],
-    uploads: [], copy: null
+    free: 84.4, proj: [{ n: 'Main wall', addr: '192.168.1.50', on: true, input: 'HDMI 1', lamp: 412 }, { n: 'Painting wall', addr: '192.168.1.51', on: false, input: 'HDMI 1', lamp: 1310 }],
+    vibes: { dwell: '3 minutes', secs: 180, vary: true, lines: '720 lines' }, shv: {}, fsErr: '',
+    sh: SH.map(function (x) { return { id: x[0], desc: x[1], cost: x[2], long: x[3], inputs: x[4], other: x[5] || '', vibes: x[0] !== 'nxlx-nebula', up: false, err: '' }; }).concat([
+      { id: 'leyline-glow', desc: 'A warm glow that breathes slowly (an example of an uploaded shader).', cost: 'Medium', long: 'not stated', inputs: [SP, ['warmth', 'Warmth', 0, 1, 0.6]], other: '', vibes: true, up: true, err: '' },
+      { id: 'glitch-test', desc: 'An uploaded shader with a mistake in its code.', cost: 'Light', long: 'not stated', inputs: [SP], other: '', vibes: false, up: true, err: 'line 42: \'smoothstepp\': no matching overloaded function found' }]),
+    uploads: [], copy: null, guestCode: ''
   };
   // Modules and settings pages. on: the switch; setup: the first-run step is done; armed: today's second switch in the card.
   var M = {
@@ -224,22 +255,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     support: { on: false, setup: false }, health: { on: true, setup: true }, box: { on: true, setup: true }, diag: { on: true, setup: true },
     restart: { on: true, setup: true }, reset: { on: true, setup: true }
   };
-  var GROUPS = [['room', 'Room and everyday'], ['picture', 'Sources and picture'], ['control', 'Controllers'], ['once', 'Set once'], ['box', 'This box']];
+  var GROUPS = [['room', 'Everyday'], ['picture', 'Show tools'], ['box', 'This box']];   // the three groups of the System index
   var MODS = [
     { id: 'projector', name: 'Projectors', old: 'Projector control', group: 'room', sw: true, find: 'pjlink epson lamp input mute on off',
       about: 'Switch the room\'s projectors on and off, choose their input and mute them, from the Room screen or here.',
       need: 'add a projector', steps: [{ t: 'Add your first projector', hint: 'First switch PJLink on in the projector\'s own network menu, and note its address.', fields: ['Name (for example Main wall)', 'Address (for example 192.168.1.50)', 'Password, if it has one'], go: 'Add projector' }],
       active: function () { var n = B.proj.filter(function (p) { return p.on; }).length; return n ? n + ' of ' + B.proj.length + ' switched on' : ''; },
       ready: function () { return B.proj.length + ' projectors, all off'; } },
-    { id: 'shaders', name: 'Ambience (Shaders and Vibes)', old: 'Shaders and Vibes', group: 'room', sw: true, find: 'vibes isf shader ambience generator',
-      about: 'Moving pictures drawn by the box itself. Vibes plays them endlessly with one tap: the Ambience button on Live and Room.',
-      active: function () { return B.now && B.now.kind === 'vibes' ? 'Vibes is on: ' + SHADERS[B.now.idx] : ''; }, ready: function () { return '10 shaders, 8 in Vibes, 3 minutes each'; } },
+    { id: 'shaders', name: 'Shaders and Vibes', old: 'Shaders and Vibes', group: 'room', sw: true, find: 'vibes isf shader ambience generator',
+      about: 'Moving pictures the box draws by itself, one after another, for as long as you like. Start and stop it with the Vibes button on Live. The shaders themselves are on Mix.',
+      active: function () { return shOn() ? (vibesOn() ? 'Vibes: ' : 'Showing ') + shOn().id : ''; }, ready: function () { return usable().length + ' of ' + B.sh.length + ' shaders in Vibes, ' + B.vibes.dwell + ' each'; } },
     { id: 'scheduler', name: 'Weekly schedule', old: 'Weekly schedule', group: 'room', sw: true, find: 'time clock timer opening closing',
       about: 'Start ambience, play a clip, black out or switch projectors at set times on chosen days.',
-      need: 'add a first entry', steps: [{ t: 'Check the box clock', hint: 'The box says it is Saturday 16:42. A Pi has no clock battery, so check this after a power cut.', fields: [], go: 'The clock is right' }, { t: 'Add your first entry', hint: 'For example: every day at 17:00, start ambience.', fields: ['Time (for example 17:00)', 'What happens'], go: 'Add entry' }],
-      ready: function () { return '3 entries. Next: Start ambience, today 17:00'; } },
+      need: 'add a first entry', steps: [{ t: 'Check the box clock', hint: 'The box says it is Saturday 16:42. A Pi has no clock battery, so check this after a power cut.', fields: [], go: 'The clock is right' }, { t: 'Add your first entry', hint: 'For example: every day at 17:00, start Vibes.', fields: ['Time (for example 17:00)', 'What happens'], go: 'Add entry' }],
+      ready: function () { return '3 entries. Next: Start Vibes, today 17:00'; } },
     { id: 'autostart', name: 'At power-up', old: 'Autostart', group: 'room', find: 'autostart boot start crash usb',
-      about: 'What the box plays by itself when it gets power, and after a crash.', ready: function () { return 'Starts ambience (Vibes) after 10 seconds'; } },
+      about: 'What the box plays by itself when it gets power, and after a crash.', ready: function () { return 'Starts Vibes after 10 seconds'; } },
     { id: 'audio', name: 'Sound output', old: 'Sound output', group: 'room', find: 'audio hdmi headphones speaker test tone volume',
       about: 'Where the sound goes, with a test tone for left and right.', ready: function () { return 'Automatic: the HDMI port with the screen'; } },
     { id: 'appearance', name: 'Look of this panel', old: 'Appearance', group: 'room', find: 'theme colour color dark night red accent contrast',
@@ -280,13 +311,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     { id: 'restart', name: 'Restart and power off', old: 'Box, Player', group: 'box', find: 'restart reboot power off shutdown player stuck', about: 'Restart the player if the picture is stuck, restart the whole box, or power it off safely.', ready: function () { return 'Player running for 6 hours'; } },
     { id: 'reset', name: 'Factory reset', old: 'Factory reset', group: 'box', danger: true, find: 'factory reset erase wipe unpair', about: 'Every setting goes back to how a new box starts and every device is unpaired. Clips stay.', ready: function () { return 'Erases every setting. Asks twice'; } }
   ];
+  MODS.forEach(function (m) { if (m.group === 'control') m.group = 'picture'; if (m.group === 'once') m.group = m.id === 'access' ? 'room' : 'box'; });
+  ['box', 'health'].forEach(function (id) { var i = MODS.map(function (m) { return m.id; }).indexOf(id); var first = MODS.map(function (m) { return m.group; }).indexOf('box'); MODS.splice(first, 0, MODS.splice(i, 1)[0]); });
   var PLANNED = ['NDI', 'AES67 and Dante audio', 'Presenter', 'Layout import (MadMapper, Resolume)', 'PiWall (legacy, Pi 3 only)'];
   function mod(id) { return MODS.filter(function (m) { return m.id === id; })[0]; }
   function mstate(m) {
     var s = M[m.id];
     if (m.sw && !s.on) return ['off', 'Off', m.offText || ''];
     if (m.prob && m.prob()) return ['problem', 'Problem', m.prob()];
-    if (m.steps && !s.setup) return ['setup', 'Needs setup', 'To finish: ' + m.need];
+    if (m.steps && !s.setup) return ['setup', 'Set up', 'To finish: ' + m.need];
     var a = m.active && m.active();
     if (a) return ['active', 'Active', a];
     return ['ready', m.sw ? 'Ready' : '', m.ready()];
@@ -294,11 +327,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
   // ---- prototype state ---------------------------------------------------
   var UI = { mode: 'new', role: 'full', joined: true, tab: 'system', page: null, from: 'system', sheet: null, editing: false, bank: 0, msg: '', msgErr: false,
-    toast: null, find: '', theme: 'dark-stage', owner: false, step: 0, snap: '', more: false, welcome: false };
+    toast: null, find: '', shFrom: 'system', adv: false, theme: 'dark-stage', owner: false, step: 0, snap: '', more: false, welcome: false };
   function can(r) { return RANK[UI.role] >= RANK[r]; }
   function isNew() { return UI.mode === 'new'; }
-  var toastTimer = null;
-  function toast(text, label, fn, err) { UI.toast = { text: text, label: label, fn: fn, err: err }; clearTimeout(toastTimer); toastTimer = setTimeout(function () { UI.toast = null; drawToast(); }, 6000); drawToast(); }
+  var toastTimer = null, askTimer = null, savedTimer = null;
+  // The proposed panel answers in the message line (#msg) directly under each screen's header; it stays on screen while scrolling.
+  function toast(text, label, fn, err) { UI.toast = { text: text, label: label, fn: fn, err: err }; clearTimeout(toastTimer); toastTimer = setTimeout(function () { UI.toast = null; drawToast(); }, label ? 8000 : 6000); drawToast(); }
+  function msgNew() { return h('div', { id: 'msg', class: 'msg stick', role: 'status' }); }
+  // Inline confirm: the tapped row is replaced by a question naming the thing and the consequence; it reverts after 8 s.
+  function ask(key) { UI.ask = key; clearTimeout(askTimer); askTimer = setTimeout(function () { if (UI.ask === key) { UI.ask = null; render(); } }, 8000); render(); }
+  function confirmRow(question, danger, fn) {
+    return h('div', { class: 'banner confirm', role: 'alert' }, h('span', { text: question }), h('div', { class: 'row' },
+      h('button', { class: 'btn danger', text: danger, onclick: function () { UI.ask = null; fn(); } }), h('button', { class: 'btn', text: 'Cancel', onclick: function () { UI.ask = null; render(); } })));
+  }
+  // Save rule: a control with one safe effect applies on tap and shows "Saved" beside it for 2 s.
+  function mark(key) { UI.saved = key; clearTimeout(savedTimer); savedTimer = setTimeout(function () { UI.saved = null; render(); }, 2000); }
+  function savedTag(key) { return UI.saved === key ? h('span', { class: 'saved', role: 'status', text: 'Saved' }) : null; }
   function say(text, err) { UI.msg = text || ''; UI.msgErr = !!err; var m = $('msg'); if (m) { m.textContent = UI.msg; m.className = 'msg' + (err ? ' err' : ''); } }
   // tell: the proposed panel answers in a toast on every screen; today's panel writes to the one message line.
   function tell(now, old, err, label, fn) { if (isNew()) toast(now, label, fn, err); else if (old !== null) say(old === undefined ? now : old, err); }
@@ -308,13 +352,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   function title() {
     if (B.test) return 'Test pattern (colour bars)';
     if (!B.now) return isNew() ? 'Nothing playing' : 'Player idle';
-    if (B.now.kind === 'vibes') return (isNew() ? 'Ambience: ' : 'Vibes: ') + SHADERS[B.now.idx];
+    if (B.now.kind === 'vibes') return (B.now.single ? 'Shader: ' : 'Vibes: ') + B.sh[B.now.idx].id;
     return isNew() ? B.now.label : B.now.file;
   }
+  function vibesOn() { return !!B.now && B.now.kind === 'vibes' && !B.now.single; }
   function stateWord() { return B.blackout ? 'Blackout' : B.faded ? 'Faded out' : !B.now && !B.test ? 'Idle' : B.paused ? 'Paused' : 'Playing'; }
   function timeLeft() {
     if (!B.now || B.test) return '';
-    if (B.now.kind === 'vibes') return 'next in ' + short(B.now.dur - B.now.pos);
+    if (B.now.kind === 'vibes') return B.now.single ? 'stays until you play something else' : 'next in ' + short(B.now.dur - B.now.pos);
     if (!B.now.dur) return 'picture';
     return short(B.now.dur - B.now.pos) + ' left' + (B.now.loop ? ', then again' : '');
   }
@@ -322,8 +367,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     if (!can('live')) return deny();
     var m = B.media.filter(function (x) { return x.n === file; })[0] || B.usb.files.filter(function (x) { return x.n === file; })[0] || { dur: 0 };
     B.now = { kind: 'clip', file: file, label: label || stem(file), dur: m.dur, pos: 0, loop: ending ? ending === 'loop' : true, ending: ending || 'loop' };
-    B.paused = false; B.test = false; B.scene = '';
-    if (B.blackout || B.faded) tell('Playing ' + B.now.label + ', but the screen is still black.', '', false, 'Bring picture back', show);
+    B.paused = false; B.test = false; B.scene = ''; B.faded = false;   // a new clip ends a fade out, as on the box; a blackout stays
+    if (B.blackout) tell('Playing ' + B.now.label + ', but the screen is still black.', '', false, 'Bring picture back', show);
     else tell('Playing ' + B.now.label + '.', 'Playing ' + file);
     render();
   }
@@ -336,9 +381,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   }
   function vibes(on) {
     if (!can('live')) return deny();
-    if (on) { B.now = { kind: 'vibes', idx: Math.floor(Math.random() * 10), dur: 180, pos: 0 }; B.paused = false; B.test = false; }
+    if (on) {
+      var u = usable();
+      if (!u.length) return tell('Nothing is in the Vibes rotation. Tick "In Vibes" on at least one shader.', 'Vibes ended: no shader is switched on for Vibes', true);
+      B.now = { kind: 'vibes', idx: u[Math.floor(Math.random() * u.length)], dur: B.vibes.secs, pos: 0 }; B.paused = false; B.test = false;
+    }
     else { B.now = null; B.scene = ''; }
-    tell(on ? 'Ambience is on. It runs until you stop it or play something.' : 'Ambience stopped. The screen is black.', null);
+    if (on) B.faded = false;
+    tell(on ? 'Vibes is playing. It runs until you stop it or play something else.' : 'Vibes stopped. The screen is black.', null);
     render();
   }
   function blackout(on) { if (!can('live')) return deny(); B.blackout = on; if (!on) B.faded = false; render(); }
@@ -354,7 +404,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     if (B.now && !B.paused) {
       B.now.pos += B.now.kind === 'clip' ? B.mix.speed / 100 : 1;
       if (B.now.dur && B.now.pos >= B.now.dur) {
-        if (B.now.kind === 'vibes') { B.now.idx = (B.now.idx + 1) % 10; B.now.pos = 0; }
+        if (B.now.kind === 'vibes') { nextVibe(); }
         else if (B.now.loop) B.now.pos = 0;
         else if (B.now.ending === 'hold') { B.now.pos = B.now.dur; B.paused = true; }
         else { B.now = null; render(); }
@@ -377,6 +427,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     if ((el = $('seek')) && document.activeElement !== el) el.value = Math.round(frac * 1000);
     if ((el = $('st-time'))) el.textContent = [stateWord(), timeLeft()].filter(Boolean).join(' · ');
     if ((el = $('np-left'))) el.textContent = timeLeft();
+    if ((el = $('shleft')) && B.now) el.textContent = 'Vibes · next one in ' + short(B.now.dur - B.now.pos);
     if ((el = $('np-bar'))) el.style.width = Math.round(frac * 100) + '%';
     if (busy) B.uploads.forEach(function (u, i) { var b = $('up' + i), t = $('upt' + i); if (b) b.style.width = u.pct + '%'; if (t && u.state === 'up') t.textContent = 'Uploading ' + u.n + ': ' + u.pct + '%'; });
     if (busy && B.copy && (el = $('importline'))) el.textContent = B.copy.pct >= 100 ? B.copy.n + ' is now on the box.' : 'Copying ' + B.copy.n + ': ' + B.copy.pct + '%';
@@ -390,8 +441,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       h('div', { class: 'sheet', role: 'dialog', 'aria-label': title }, h('h2', { text: title }), kids));
   }
   function closeBtn(label) { return h('button', { class: 'btn', text: label || 'Cancel', onclick: function () { UI.sheet = null; render(); } }); }
-  function go(tab) { UI.tab = tab; UI.page = null; UI.msg = ''; UI.find = ''; UI.editing = false; scrollTop = 0; render(); }
-  function openMod(id, from) { UI.page = id; UI.from = from || UI.tab; UI.step = 0; scrollTop = 0; render(); }
+  function go(tab) { UI.tab = tab; UI.page = null; UI.msg = ''; UI.find = ''; UI.editing = false; UI.moreKey = null; UI.form = null; UI.ask = null; scrollTop = 0; render(); }
+  function openMod(id, from) { UI.page = id; if (id === 'shaders') UI.shFrom = from || UI.tab; else UI.from = from || UI.tab; UI.step = 0; UI.moreKey = null; UI.form = null; UI.ask = null; scrollTop = 0; render(); }
   function padOf(file) { var hit = ''; B.banks.forEach(function (b) { b.pads.forEach(function (p, i) { if (!hit && p.file === file) hit = b.name + ', pad ' + (i + 1); }); }); return hit; }
 
   // ==== TODAY'S PANEL (rebuilt from pvj/web/app.js: same order, same words) ====
@@ -426,8 +477,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
         play(p.file, p.label, p.ending); say('');
       } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) }), h('span', { class: 't', text: p.label || (p.file ? stem(p.file) : 'Empty') })));
     });
-    var vb = M.shaders.on ? h('div', { class: 'row' }, h('button', { class: 'btn big grow' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), disabled: !live,
-      text: B.now && B.now.kind === 'vibes' ? 'Vibes is on. Stop' : 'Vibes', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } })) : null;
+    var vb = M.shaders.on ? h('div', { class: 'row' }, h('button', { class: 'btn big grow' + (vibesOn() ? ' on' : ''), disabled: !live,
+      text: vibesOn() ? 'Vibes is on. Stop' : 'Vibes', onclick: function () { vibes(!(vibesOn())); } })) : null;
     return h('div', { class: 'screen' },
       h('div', { class: 'top' }, h('h1', { text: 'nxlx.mastercontrol' }), h('div', { class: 'pill k', text: 'PI4 · 52°C · OK' })),
       h('div', { class: 'card' }, h('div', { class: 'k', text: 'Now playing' }), h('div', { id: 'np' }),
@@ -534,11 +585,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
         h('button', { class: 'btn' + (m.overlay ? ' on' : ''), text: m.overlay ? 'Overlay is on. Turn off' : 'Show overlay', disabled: !live, onclick: function () { m.overlay = !m.overlay; render(); } })),
       h('div', { class: 'card' }, h('div', { class: 'k', text: 'Projection mapping (beta)' }),
         h('div', { class: 'k', text: M.mapper.on ? 'Mapping is off. (The editor card is not rebuilt in this prototype.)' : 'Off. Switch on "Projection mapper" under System > Modules (beta).' })),
-      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Shaders and Vibes (beta)' }),
-        M.shaders.on ? [h('div', { class: 'k', text: B.now && B.now.kind === 'vibes' ? 'On screen: nxlx-' + SHADERS[B.now.idx] + ' · Vibes is on' : 'No shader on screen.' }),
-          h('button', { class: 'btn' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), disabled: !live, text: B.now && B.now.kind === 'vibes' ? 'Vibes is on. Stop' : 'Start Vibes', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } }),
-          h('div', { class: 'k', text: '(The list of ten shaders follows here in the real panel.)' })]
-          : h('div', { class: 'k', text: 'Off. Switch on "Shaders and Vibes" under System > Modules (beta).' })),
+      oldShaderCard(),
       h('div', { class: 'card' }, h('div', { class: 'k', text: 'Rotate' }), choice([['0°', 0], ['90°', 90], ['180°', 180], ['270°', 270]], m.rotate, function (v) { m.rotate = v; })),
       h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Loop: ' + (B.now && B.now.loop ? 'on' : 'off'), disabled: !live, onclick: function () { if (B.now) B.now.loop = !B.now.loop; render(); } }),
         h('button', { class: 'btn grow', text: 'Audio: ' + (m.muted ? 'mute' : 'on'), disabled: !live, onclick: function () { m.muted = !m.muted; render(); } }),
@@ -593,7 +640,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
   // ==== THE PROPOSAL ====
   function newConnect() {
-    var code = h('input', { class: 'text-input mono', id: 'joincode', inputmode: 'numeric', maxlength: 6, placeholder: '6 digit code', style: 'font-size:24px;min-height:60px;text-align:center;letter-spacing:.2em',
+    var code = h('input', { class: 'text-input mono', id: 'joincode', inputmode: 'numeric', maxlength: 6, placeholder: '123456', style: 'font-size:24px;min-height:60px;text-align:center;letter-spacing:.2em',
       'aria-label': 'Code shown on the big screen (6 digits)', value: UI.scanned ? '123456' : '' });
     var err = h('div', { class: 'msg err', id: 'joinerr', role: 'status' });
     var pins = [0, 1, 2, 3].map(function (i) { return h('input', { inputmode: 'numeric', maxlength: 1, id: 'pin' + i, 'aria-label': 'PIN digit ' + (i + 1), oninput: function (e) { if (e.target.value && pins[i + 1]) pins[i + 1].focus(); } }); });
@@ -601,19 +648,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     return h('div', { class: 'screen' },
       h('h1', { text: 'Join the room', style: 'font-size:26px' }),
       h('p', { style: 'margin:0', text: UI.scanned ? 'Code read from the QR code. Tap Join.' : 'Scan the QR code on the big screen with your camera, or type the 6 digit code shown next to it.' }),
-      code, err,
+      h('label', { class: 'k', for: 'joincode', text: 'Code' }), code,
       h('button', { class: 'btn on big', id: 'joinbtn', text: 'Join', onclick: function () {
         if (code.value.length !== 6) { err.textContent = 'The code has 6 digits. It is on the big screen, next to the QR code.'; return; }
         if (code.value !== '123456' && code.value !== '654321') { err.textContent = 'That code is wrong or has expired. Ask the person in charge for a new one.'; return; }
         join(code.value === '123456' ? 'live' : 'view');
-      } }),
-      h('div', { class: 'k', text: 'No internet needed. This phone is remembered until someone removes it.' }),
+      } }), err,
+      h('div', { class: 'hint', text: 'No internet needed. This phone is remembered until someone removes it.' }),
       h('div', { class: 'grow', style: 'min-height:24px' }),
-      UI.owner ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Owner PIN: on the box\'s screen at first start, or run sudo pvj-pin' }), h('div', { class: 'pin-row' }, pins),
+      UI.owner ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Owner PIN' }), h('div', { class: 'hint', text: 'Four digits. A new box shows it on its own screen; on a running box, run sudo pvj-pin.' }), h('div', { class: 'pin-row' }, pins),
         h('button', { class: 'btn big', id: 'pairbtn', text: 'Pair as owner', onclick: function () {
-          if (pins.map(function (p) { return p.value; }).join('').length !== 4) { err.textContent = 'Enter the 4 digit owner PIN.'; return; }
+          if (pins.map(function (p) { return p.value; }).join('').length !== 4) { $('pinerr').textContent = 'Enter all 4 digits of the owner PIN.'; return; }
           join('full');
-        } }))
+        } }), h('div', { class: 'msg err', id: 'pinerr', role: 'status' }))
         : h('button', { class: 'btn', text: 'I am the owner (use the PIN)', onclick: function () { UI.owner = true; render(); } }),
       h('button', { class: 'back', text: UI.scanned ? 'Show the screen without a scanned code' : 'Show what a scanned QR code looks like', onclick: function () { UI.scanned = !UI.scanned; render(); } }));
   }
@@ -627,26 +674,28 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   }
   function watchBanner() { return can('live') ? null : h('div', { class: 'banner' }, h('span', { text: 'You are watching only. To control the room, ask for a presenter code.' })); }
   function newRoom() {
-    var live = can('live'), amb = B.now && B.now.kind === 'vibes';
+    var live = can('live'), onCount = B.proj.filter(function (p) { return p.on; }).length;
     function scene(id, name, what, fn) { return h('button', { class: 'btn scene' + (B.scene === id ? ' on' : ''), disabled: !live, onclick: function () { fn(); B.scene = id; render(); } }, h('span', { text: name }), h('small', { text: what })); }
-    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Room' })), watchBanner(),
-      h('div', { class: 'banner' }, h('span', { text: 'Placeholder. The real Room screen (groups, scenes) is being built on the branch room-scenes. This page only shows where it lives: first tab, the screen staff land on.' })),
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Room' })), msgNew(), watchBanner(),
+      h('div', { class: 'hint', text: 'Placeholder. The real Room screen (groups and scenes) is being built on the branch room-scenes. This only shows where it lives: the first tab, where staff land.' }),
       h('div', { class: 'k', text: 'Scenes' }),
       h('div', { class: 'grid2' },
-        M.shaders.on ? scene('amb', 'Ambience', amb ? 'On now' : 'Projectors on, Vibes', function () { B.proj[0].on = true; vibes(true); }) : null,
+        M.shaders.on ? scene('amb', 'Vibes', 'Main wall on, Vibes', function () { B.proj[0].on = true; vibes(true); }) : null,
         scene('movie', 'Movie night', 'Main wall, HDMI 2', function () { B.proj[0].on = true; B.proj[0].input = 'HDMI 2'; B.now = null; toast('Movie night: Main wall on, input HDMI 2.'); }),
         scene('games', 'Games', 'Both walls, consoles', function () { B.proj.forEach(function (p) { p.on = true; p.input = 'HDMI 2'; }); B.now = null; toast('Games: both projectors on, input HDMI 2.'); }),
         scene('talk', 'Presentation', 'Main wall, this box', function () { B.proj[0].on = true; B.proj[0].input = 'HDMI 1'; toast('Presentation: Main wall on, showing this box.'); })),
       h('div', { class: 'k', text: 'Projectors' }),
-      h('div', { class: 'card' }, B.proj.map(function (p) {
-        return h('div', { class: 'mrow', style: 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: p.n }),
-          h('span', { class: 'st' }, h('span', { class: 'chip ' + (p.on ? 'active' : 'off'), text: p.on ? 'On' : 'Off' }), p.on ? p.input : 'Switched off')),
-          sw(p.on, p.n + ' power', function (v) { p.on = v; B.scene = ''; toast(p.n + (v ? ' is switching on. It needs about 30 seconds to warm up.' : ' is switching off.')); render(); }, !live));
+      h('div', { class: 'card', style: 'padding:0 12px;gap:0' }, B.proj.map(function (p, i) {
+        return h('div', { class: 'mrow', style: i ? '' : 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: p.n }),
+          h('span', { class: 'st' }, h('span', { class: 'chip ' + (p.on ? 'active' : 'off'), text: p.on ? 'Active' : 'Off' }), p.on ? 'On, ' + p.input : 'Switched off')),
+          sw(p.on, p.n, function (v) { p.on = v; B.scene = ''; toast(p.n + (v ? ' is switching on. It needs about 30 seconds to warm up.' : ' is switching off.')); render(); }, !live));
       })),
-      live ? h('button', { class: 'btn big', text: 'Close the room (everything off)', onclick: function () { UI.sheet = { kind: 'close' }; render(); } }) : null);
+      live ? (UI.ask === 'close' ? confirmRow('Close the room? Playback stops and ' + onCount + (onCount === 1 ? ' projector switches' : ' projectors switch') + ' off. The box stays on.', 'Close the room', closeRoom)
+        : h('button', { class: 'btn big', text: 'Close the room', onclick: function () { ask('close'); } })) : null,
+      live ? h('div', { class: 'hint', text: 'Stops playback and switches every projector off, for the end of the day.' }) : null);
   }
   function newLive() {
-    var live = can('live'), full = can('full'), amb = B.now && B.now.kind === 'vibes', dur = B.now && B.now.dur;
+    var live = can('live'), full = can('full'), amb = vibesOn(), dur = B.now && B.now.dur;
     var pads = h('div', { class: 'pads' });
     B.banks[UI.bank].pads.forEach(function (p, i) {
       if (!p.file && !full) return;
@@ -655,35 +704,37 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
         if (!p.file || UI.editing) { if (full) { UI.sheet = { kind: 'pad', index: i, file: p.file, ending: p.ending, label: p.label }; render(); } return; }
         play(p.file, p.label, p.ending);
       } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) + (p.file ? ' · ' + ({ loop: 'loops', stop: 'once', hold: 'once, holds' })[p.ending] : '') }),
-        h('span', { class: 't', text: p.file ? (UI.editing ? 'Change: ' : '') + p.label : '+ Add clip' })));
+        h('span', { class: 't', text: p.file ? (UI.editing ? 'Change: ' : '') + p.label : '+ Add a clip' })));
     });
-    return h('div', { class: 'screen' }, watchBanner(),
+    return h('div', { class: 'screen' }, msgNew(), watchBanner(),
       h('div', { class: 'card' },
-        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On the screen now' }), h('span', { class: 'chip ' + (B.blackout || B.faded ? 'problem' : B.now && !B.paused ? 'active' : 'off'), text: stateWord() })),
+        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (B.blackout || B.faded ? 'problem' : (B.now || B.test) && !B.paused ? 'active' : 'off'), text: stateWord() })),
         h('div', { class: 'np-title', id: 'np', text: title() }),
-        B.now && B.now.kind === 'clip' && B.now.label !== stem(B.now.file) ? h('div', { class: 'k', text: 'Clip ' + B.now.file }) : null,
+        B.now && B.now.kind === 'clip' && B.now.label !== stem(B.now.file) ? h('div', { class: 'hint', text: 'Clip ' + B.now.file }) : null,
         B.now ? h('div', { class: 'progress' }, h('div', { id: 'np-bar' })) : null,
-        h('div', { class: 'row between' }, h('div', { class: 'np-left', id: 'np-left', text: timeLeft() }), dur && B.now.kind === 'clip' ? h('div', { class: 'k', text: 'of ' + short(dur) }) : null),
+        h('div', { class: 'row between' }, h('div', { class: 'np-left', id: 'np-left', text: timeLeft() }), dur && B.now.kind === 'clip' ? h('div', { class: 'hint', text: 'of ' + short(dur) }) : null),
         live && (B.now || B.test) ? h('div', { class: 'row' },
           B.now && B.now.kind === 'clip' ? h('button', { class: 'btn grow', id: 'freeze', text: B.paused ? 'Resume' : 'Pause', onclick: pause }) : null,
-          amb ? h('button', { class: 'btn grow', text: 'Next shader', onclick: function () { B.now.idx = (B.now.idx + 1) % 10; B.now.pos = 0; render(); } }) : null,
+          amb ? h('button', { class: 'btn grow', id: 'vibesnext', text: 'Next one', onclick: function () { nextVibe(); render(); } }) : null,
           h('button', { class: 'btn grow', id: 'stop', text: 'Stop', onclick: function () { if (B.test) { B.test = false; return render(); } stop(); } })) : null,
-        !B.now && !B.test ? h('div', { class: 'k', text: live ? 'Tap a pad below to play it' + (M.shaders.on ? ', or start ambience.' : '.') : 'Nothing is playing.' }) : null),
-      M.shaders.on ? (live ? h('button', { class: 'btn big' + (amb ? ' on' : ''), id: 'vibes', 'aria-pressed': amb ? 'true' : 'false', text: amb ? 'Ambience is on. Tap to stop' : 'Start ambience (Vibes)', onclick: function () { vibes(!amb); } }) : null)
-        : (full ? h('button', { class: 'btn', text: 'Ambience (Vibes) is switched off. Set it up', onclick: function () { openMod('shaders', 'live'); } }) : null),
-      UI.editing ? h('div', { class: 'banner' }, h('span', { text: 'Editing pads. Tap a pad to change it.' }), h('button', { class: 'btn small on', text: 'Done', onclick: function () { UI.editing = false; render(); } })) : null,
+        !B.now && !B.test ? h('div', { class: 'hint', text: live ? 'Nothing is playing and the screen is black. Tap a pad' + (M.shaders.on ? ', or start Vibes.' : '.') : 'Nothing is playing and the screen is black.' }) : null),
+      M.shaders.on ? ([live ? h('button', { class: 'btn big' + (amb ? ' on' : ''), id: 'vibes', text: amb ? 'Stop Vibes' : 'Start Vibes', onclick: function () { vibes(!amb); } }) : null,
+          h('button', { class: 'back', id: 'shaderslink', text: 'Shaders and controls \u203a', onclick: function () { openMod('shaders', 'live'); } })])
+        : (full ? [h('div', { class: 'hint', text: 'Vibes is switched off.' }), h('button', { class: 'btn', text: 'Set up Vibes', onclick: function () { openMod('shaders', 'live'); } })] : null),
+      UI.editing ? h('div', { class: 'banner' }, h('span', { text: 'Editing pads. Tap a pad to change it.' }), h('button', { class: 'btn on', text: 'Done', onclick: function () { UI.editing = false; render(); } })) : null,
       h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn' + (i === UI.bank ? ' on' : ''), text: b.name, 'aria-pressed': i === UI.bank ? 'true' : 'false', onclick: function () { UI.bank = i; render(); } }); })),
-      pads.children.length ? pads : h('div', { class: 'k', text: 'No clips on this bank yet.' }),
-      full && !UI.editing ? h('button', { class: 'btn small', text: 'Edit pads', onclick: function () { UI.editing = true; render(); } }) : null,
-      live ? h('details', { class: 'fold', open: UI.more, ontoggle: function (e) { UI.more = e.target.open; } }, h('summary', { text: 'More controls: jump, volume, test pattern, snapshot' }), h('div', {},
+      pads.children.length ? pads : h('div', { class: 'hint', text: 'No clips on this bank yet. The owner puts clips on pads.' }),
+      full && !UI.editing ? h('button', { class: 'btn', text: 'Edit pads', onclick: function () { UI.editing = true; render(); } }) : null,
+      live ? h('details', { class: 'fold', open: UI.more, ontoggle: function (e) { UI.more = e.target.open; } }, h('summary', { text: 'More controls' }), h('div', {},
+        h('div', { class: 'hint', text: 'Jump in the clip, volume, test pattern and a snapshot of the screen.' }),
         h('div', { class: 'row' },
           h('button', { class: 'btn grow', text: 'Back 10 s', disabled: !dur, onclick: function () { B.now.pos = Math.max(0, B.now.pos - 10); patch(); } }),
           h('button', { class: 'btn grow', text: 'Forward 10 s', disabled: !dur, onclick: function () { B.now.pos += 10; patch(); } }),
           h('button', { class: 'btn grow', text: 'From the start', disabled: !dur, onclick: function () { B.now.pos = 0; patch(); } })),
         newSlider('lvol', 'Volume', 'volume', 0, 130, 100, pct),
-        h('button', { class: 'btn' + (B.test ? ' on' : ''), text: B.test ? 'Test pattern is on. Turn off' : 'Show test pattern (colour bars)', onclick: function () { B.test = !B.test; render(); } }),
-        h('button', { class: 'btn', text: 'Take a snapshot of the screen', onclick: function () { UI.snap = B.blackout || B.faded ? 'Black' : title(); UI.more = true; render(); } }),
-        UI.snap ? h('div', { id: 'preview', text: 'Snapshot (example): ' + UI.snap }) : h('div', { class: 'k', text: 'A snapshot pauses the picture for a moment.' }))) : null);
+        h('div', { class: 'mrow' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: 'Test pattern' }), h('span', { class: 'st', text: 'Colour bars, for lining up a projector' })), sw(B.test, 'Test pattern', function (v) { B.test = v; render(); })),
+        h('button', { class: 'btn', id: 'previewbtn', text: 'Take a snapshot', onclick: function () { UI.snap = B.blackout || B.faded ? 'Black' : title(); UI.more = true; render(); } }),
+        UI.snap ? h('div', { id: 'preview', text: 'Snapshot (example): ' + UI.snap }) : h('div', { class: 'hint', text: 'One picture of what the box is showing. It pauses the picture for a moment.' }))) : null);
   }
   function dock() {
     var dark = B.blackout || B.faded;
@@ -696,13 +747,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     var label = h('input', { class: 'text-input', id: 'padlabel', maxlength: 40, value: s.label || '', placeholder: 'Name on the pad', oninput: function (e) { s.label = e.target.value; s.typed = true; } });
     var ending = h('select', { class: 'text-input', id: 'padending', onchange: function (e) { s.ending = e.target.value; } }, [['loop', 'Loop until something else plays'], ['stop', 'Play once, then black'], ['hold', 'Play once, hold the last picture']].map(function (e) { return h('option', { value: e[0], text: e[1], selected: e[0] === s.ending }); }));
     return sheet('Pad ' + (i + 1) + ' on ' + B.banks[UI.bank].name, [
-      h('div', { class: 'k', text: '1. Choose the clip' }),
+      h('div', { class: 'k', text: 'Clip' }),
       h('div', { class: 'list', style: 'max-height:210px;overflow:auto;border:1px solid var(--ln);border-radius:6px;padding:0 8px' }, B.media.map(function (m) {
         return h('button', { class: 'clip', style: 'background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer;min-height:44px;width:100%' + (s.file === m.n ? ';font-weight:700;color:var(--ac)' : ''),
           'aria-pressed': s.file === m.n ? 'true' : 'false', onclick: function () { s.file = m.n; if (!s.typed) s.label = stem(m.n); render(); } }, h('span', { class: 'nm', text: (s.file === m.n ? '✓ ' : '') + m.n }));
       })),
-      h('label', { class: 'k', for: 'padlabel', text: '2. Name on the pad' }), label,
-      h('label', { class: 'k', for: 'padending', text: '3. When the clip ends' }), ending,
+      h('label', { class: 'k', for: 'padlabel', text: 'Name' }), label, h('div', { class: 'hint', text: 'What the pad says. Staff see this, not the file name.' }),
+      h('label', { class: 'k', for: 'padending', text: 'At the end' }), ending,
       h('button', { class: 'btn on big', text: 'Save pad', disabled: !s.file, onclick: function () {
         B.banks[UI.bank].pads[i] = { file: s.file, label: s.label || stem(s.file), ending: s.ending }; UI.sheet = null; toast('Pad ' + (i + 1) + ' now plays ' + (s.label || stem(s.file)) + '.'); render();
       } }),
@@ -712,79 +763,128 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       } }) : null, h('button', { class: 'btn grow', text: 'Cancel', onclick: function () { UI.sheet = null; render(); } }))]);
   }
   function newSlider(id, label, key, min, max, def, fmt) {
-    var out = h('button', { class: 'chip', text: fmt(B.mix[key]), 'aria-label': 'Reset ' + label, onclick: function () { B.mix[key] = def; render(); } });
-    return h('div', { class: 'slider' }, h('label', { for: id }, label, out),
-      h('input', { id: id, type: 'range', min: min, max: max, value: B.mix[key], oninput: function (e) { B.mix[key] = +e.target.value; out.textContent = fmt(B.mix[key]) + (B.mix[key] !== def ? ' · reset' : ''); } }));
+    var out = h('button', { class: 'chip', text: fmt(B.mix[key]) + (B.mix[key] !== def ? ' · reset' : ''), 'aria-label': 'Reset ' + label, onclick: function () { B.mix[key] = def; mark(id); render(); } });
+    return h('div', { class: 'slider' }, h('label', { for: id }, h('span', {}, label + ' ', savedTag(id)), out),
+      h('input', { id: id, type: 'range', min: min, max: max, value: B.mix[key], oninput: function (e) { B.mix[key] = +e.target.value; out.textContent = fmt(B.mix[key]) + (B.mix[key] !== def ? ' · reset' : ''); },
+        onchange: function () { mark(id); render(); } }));
   }
+  function listRow(o) {
+    var open = UI.moreKey === o.key;
+    return h('div', { class: 'lrow' },
+      h('div', { class: 'clip' }, h('span', { class: 'nm' }, o.name,
+          h('small', { class: 'state', id: o.stateId || null }, o.chip ? h('span', { class: 'chip ' + o.chip[0], text: o.chip[1] }) : null, o.chip ? ' ' : null, o.state || ''),
+          o.problem ? h('small', { class: 'prob', text: o.problem }) : null),
+        o.primary ? h('button', { class: 'btn' + (o.primary.on ? ' on' : ''), text: o.primary.text, 'aria-label': o.primary.text + ' ' + o.label, disabled: o.primary.disabled, onclick: o.primary.fn }) : null,
+        o.more ? h('button', { class: 'btn', text: 'More', 'aria-expanded': open ? 'true' : 'false', 'aria-label': 'More for ' + o.label, onclick: function () { UI.moreKey = open ? null : o.key; UI.form = null; UI.ask = null; render(); } }) : null),
+      o.extra || null,
+      open ? h('div', { class: 'more' }, o.more()) : null);
+  }
+  // A form that opens in place. fields: [id, label, hint, example]. fn returns an error text, or nothing when it worked.
+  function form(fields, values, label, fn) {
+    var inputs = fields.map(function (f) { return h('input', { class: 'text-input', id: f[0], placeholder: f[3] || false, value: values[f[0]] || '' }); });
+    var err = h('div', { class: 'msg err', role: 'status' });
+    var goBtn = h('button', { class: 'btn on grow', text: label, disabled: label === 'Save changes' });
+    inputs.forEach(function (i) { i.addEventListener('input', function () { goBtn.disabled = false; }); });
+    goBtn.addEventListener('click', function () { var v = {}; fields.forEach(function (f, i) { v[f[0]] = inputs[i].value.trim(); }); var e = fn(v); if (e) err.textContent = e; });
+    return h('div', { class: 'card' }, fields.map(function (f, i) { return [h('label', { class: 'k', for: f[0], text: f[1] }), inputs[i], f[2] ? h('div', { class: 'hint', text: f[2] }) : null]; }),
+      h('div', { class: 'row' }, goBtn, h('button', { class: 'btn', text: 'Cancel', onclick: function () { UI.form = null; render(); } })), err);
+  }
+  function kvRows(rows) { return h('div', {}, rows.map(function (r) { return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', { text: r[1] })); })); }
   function layerRow(name, state, text, on, toggle, open) {
     return h('div', { class: 'mrow' }, h('button', { class: 'go', onclick: open }, h('span', { class: 'nm', text: name }), h('span', { class: 'st' }, h('span', { class: 'chip ' + state[0], text: state[1] }), text)),
       toggle ? sw(on, name, toggle) : null, h('span', { class: 'chev', text: '›', 'aria-hidden': 'true' }));
   }
   function newMix() {
-    var m = B.mix, moved = m.size !== 100 || m.x || m.y || m.rotate || m.fh || m.fv;
+    var m = B.mix, moved = m.size !== 100 || m.x || m.y || m.rotate || m.fh || m.fv, full = can('full');
     var setup = [m.size + '% size', m.x || m.y ? 'moved' : 'centred', m.rotate ? 'turned ' + m.rotate + '°' : 'not turned', m.fh || m.fv ? 'mirrored' : 'not mirrored'].join(' · ');
-    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Mix' })),
+    var swRow = function (key, name, state, on, fn) { return h('div', { class: 'mrow' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm' }, name + ' ', savedTag(key)), h('span', { class: 'st', text: state })), sw(on, name, function (v) { fn(v); mark(key); render(); })); };
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Mix' })), msgNew(),
       h('div', { class: 'k', text: 'While playing' }),
-      h('div', { class: 'card' }, newSlider('mo', 'Brightness (opacity)', 'opacity', 0, 100, 100, pct), newSlider('mv', 'Speed', 'speed', 25, 200, 100, spd), newSlider('mvol', 'Volume', 'volume', 0, 130, 100, pct),
-        h('div', { class: 'mrow' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: 'Sound' }), h('span', { class: 'st', text: m.muted ? 'Muted' : 'On' })), sw(!m.muted, 'Sound', function (v) { m.muted = !v; render(); }))),
-      h('div', { class: 'card' }, h('div', { class: 'k', text: 'From one clip to the next' }),
-        choice([['Cut', 'cut'], ['Dip to black', 'dip']], m.transition, function (v) { m.transition = v; }),
-        m.transition === 'dip' ? [h('div', { class: 'k', text: 'How long the dip takes' }), choice([['0.5 s', 0.5], ['1 s', 1], ['2 s', 2], ['5 s', 5]], m.duration, function (v) { m.duration = v; })] : null),
+      h('div', { class: 'card' }, newSlider('mo', 'Brightness', 'opacity', 0, 100, 100, pct), newSlider('mv', 'Speed', 'speed', 25, 200, 100, spd), newSlider('mvol', 'Volume', 'volume', 0, 130, 100, pct),
+        swRow('snd', 'Sound', m.muted ? 'Muted' : 'On', !m.muted, function (v) { m.muted = !v; })),
+      h('div', { class: 'card' }, h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Clip change' }), savedTag('tr')),
+        choice([['Cut', 'cut'], ['Dip to black', 'dip']], m.transition, function (v) { m.transition = v; mark('tr'); }),
+        m.transition === 'dip' ? [h('div', { class: 'hint', text: 'How long the dip to black takes' }), choice([['0.5 s', 0.5], ['1 s', 1], ['2 s', 2], ['5 s', 5]], m.duration, function (v) { m.duration = v; mark('tr'); })]
+          : h('div', { class: 'hint', text: 'The next clip appears at once.' })),
+      h('div', { class: 'k', text: 'Shaders' }),
+      h('div', { class: 'card', style: 'padding:0 12px;gap:0' }, h('div', { class: 'mrow', style: 'border-top:0' },
+        h('button', { class: 'go', id: 'mixshaders', onclick: function () { openMod('shaders', 'mix'); } }, h('span', { class: 'nm', text: 'Shaders and Vibes' }),
+          h('span', { class: 'st' }, h('span', { class: 'chip ' + mstate(mod('shaders'))[0], text: mstate(mod('shaders'))[1] }), mstate(mod('shaders'))[2] || 'The list, the sliders and Vibes')),
+        h('span', { class: 'chev', text: '\u203a', 'aria-hidden': 'true' }))),
       h('div', { class: 'k', text: 'Layers' }),
-      h('div', { class: 'card' },
-        layerRow('Logo or mask on top', m.overlay ? ['active', 'On'] : ['off', 'Off'], 'logo.png', m.overlay, function (v) { m.overlay = v; toast(v ? 'logo.png is on top of the picture.' : 'The overlay is off.'); render(); }, function () { toast('The overlay page (choose the picture) is not part of this prototype.'); }),
-        layerRow('Projection mapping', M.mapper.on ? ['ready', 'Ready'] : ['off', 'Off'], M.mapper.on ? 'No surfaces yet' : '', M.mapper.on, function (v) { setMod(mod('mapper'), v); }, function () { openMod('mapper', 'mix'); }),
-        layerRow('Shaders', mstate(mod('shaders')).slice(0, 2), mstate(mod('shaders'))[2], M.shaders.on, function (v) { setMod(mod('shaders'), v); }, function () { openMod('shaders', 'mix'); })),
-      h('div', { class: 'k', text: 'Picture setup (set once for the room)' }),
+      h('div', { class: 'card', style: 'padding:0 12px;gap:0' },
+        h('div', { class: 'mrow', style: 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm' }, 'Overlay picture ', savedTag('ov')), h('span', { class: 'st' }, h('span', { class: 'chip ' + (m.overlay ? 'active' : 'off'), text: m.overlay ? 'Active' : 'Off' }), 'logo.png, on top of the video')),
+          sw(m.overlay, 'Overlay picture', function (v) { m.overlay = v; mark('ov'); render(); })),
+        layerRow('Projection mapping', mstate(mod('mapper')).slice(0, 2), mstate(mod('mapper'))[2], M.mapper.on, function (v) { setMod(mod('mapper'), v); }, function () { openMod('mapper', 'mix'); })),
+      h('div', { class: 'k', text: 'Picture setup' }),
       h('details', { class: 'fold' }, h('summary', { text: setup }), h('div', {},
+        h('div', { class: 'hint', text: 'Set once for the room. It stays for every clip.' }),
         newSlider('ms', 'Size', 'size', 1, 200, 100, pct), newSlider('mp', 'Left or right', 'x', -100, 100, 0, num), newSlider('mpy', 'Up or down', 'y', -100, 100, 0, num),
-        h('div', { class: 'k', text: 'Turn the picture' }), choice([['0°', 0], ['90°', 90], ['180°', 180], ['270°', 270]], m.rotate, function (v) { m.rotate = v; }),
-        h('div', { class: 'k', text: 'Mirror (rear projection or a mirror rig)' }),
-        h('div', { class: 'row' }, h('button', { class: 'btn grow' + (m.fh ? ' on' : ''), 'aria-pressed': m.fh ? 'true' : 'false', text: 'Left to right', onclick: function () { m.fh = !m.fh; render(); } }),
-          h('button', { class: 'btn grow' + (m.fv ? ' on' : ''), 'aria-pressed': m.fv ? 'true' : 'false', text: 'Upside down', onclick: function () { m.fv = !m.fv; render(); } })),
-        h('button', { class: 'btn', text: 'Put the picture back to normal', disabled: !moved, onclick: function () {
+        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Turn' }), savedTag('rot')), choice([['0°', 0], ['90°', 90], ['180°', 180], ['270°', 270]], m.rotate, function (v) { m.rotate = v; mark('rot'); }),
+        swRow('fh', 'Mirror left to right', 'For rear projection', m.fh, function (v) { m.fh = v; }),
+        swRow('fv', 'Mirror upside down', 'For a ceiling mount or a mirror rig', m.fv, function (v) { m.fv = v; }),
+        h('button', { class: 'btn', text: 'Reset picture setup', disabled: !moved, onclick: function () {
           var was = JSON.stringify(m); resetMix(); toast('Picture setup is back to normal.', 'Undo', function () { B.mix = JSON.parse(was); render(); });
         } }))));
   }
   function newMedia() {
     var full = can('full'), live = can('live'), q = UI.find.toLowerCase();
     var rows = B.media.filter(function (d) { return !q || d.n.toLowerCase().indexOf(q) >= 0; }).map(function (d) {
-      var on = B.now && B.now.file === d.n, pad = padOf(d.n);
-      return h('div', { class: 'clip' }, h('span', { class: 'nm' }, d.n, h('small', { text: [on ? 'On the screen now' : '', d.dur ? short(d.dur) : 'Picture', size(d.mb), pad, d.adv ? 'May stutter' : ''].filter(Boolean).join(' · ') })),
-        live ? h('button', { class: 'btn' + (on ? ' on' : ''), text: on ? 'Playing' : 'Play', 'aria-label': 'Play ' + d.n, onclick: function () { play(d.n); } }) : null,
-        h('button', { class: 'btn', text: '⋯', 'aria-label': 'More for ' + d.n + ': details' + (full ? ', put on a pad, rename, delete' : ''), onclick: function () { UI.sheet = { kind: 'clip', clip: d, view: 'menu' }; render(); } }));
+      var on = !!B.now && B.now.file === d.n, pad = padOf(d.n);
+      return listRow({ key: 'clip:' + d.n, label: d.n, name: d.n, chip: on ? ['active', 'Active'] : null, state: [d.dur ? short(d.dur) : 'Picture', size(d.mb), pad].filter(Boolean).join(' · '),
+        problem: d.adv ? 'May stutter on this box' : '', primary: live ? { text: 'Play', on: on, fn: function () { play(d.n); } } : null,
+        more: function () {
+          return [kvRows([['Format', d.fmt], ['Sound', d.snd], ['On a pad', pad || 'No']]),
+            d.adv ? h('div', { class: 'hint', text: d.adv }) : h('div', { class: 'hint', text: 'Should play smoothly on this box.' }),
+            full ? h('button', { class: 'btn', text: 'Put on a pad', onclick: function () { UI.sheet = { kind: 'clip', clip: d }; render(); } }) : null,
+            full ? (UI.form === 'rename' ? form([['rename', 'New name', pad ? 'It stays on ' + pad + '.' : 'Keep the ending (.mp4, .mkv) the same.']], { rename: d.n }, 'Save changes', function (v) {
+              if (!v.rename) return 'Type a name.';
+              if (B.media.some(function (x) { return x !== d && x.n === v.rename; })) return 'Another clip is already called ' + v.rename + '.';
+              var old = d.n; B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === old) p.file = v.rename; }); }); if (B.now && B.now.file === old) B.now.file = v.rename;
+              d.n = v.rename; UI.form = null; UI.moreKey = 'clip:' + d.n; toast('Renamed to ' + d.n + '.'); render();
+            }) : h('button', { class: 'btn', text: 'Rename', onclick: function () { UI.form = 'rename'; render(); } })) : null,
+            full ? (UI.ask === 'del' ? confirmRow('Remove ' + d.n + '? The file is deleted from the box.' + (pad ? ' ' + pad + ' will be empty.' : '') + (on ? ' It is on screen right now.' : ''), 'Remove', function () {
+              B.media.splice(B.media.indexOf(d), 1); B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === d.n) { p.file = ''; p.label = ''; } }); });
+              UI.moreKey = null; toast(d.n + ' was removed.'); render();
+            }) : h('button', { class: 'btn danger', text: 'Remove', onclick: function () { ask('del'); } })) : null];
+        } });
     });
     return h('div', { class: 'screen' },
       h('div', { class: 'top' }, h('h1', { text: 'Media' }), full ? h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { UI.sheet = { kind: 'files' }; render(); } }) : null),
-      watchBanner(),
+      msgNew(), watchBanner(),
       B.uploads.map(function (u, i) {
         if (u.state === 'gone') return null;
         return h('div', { class: 'card' },
-          h('div', { id: 'upt' + i, style: 'font-weight:600', text: u.state === 'up' ? 'Uploading ' + u.n + ': ' + u.pct + '%' : u.state === 'done' ? u.n + ' is on the box.' : u.n + ' did not upload: the connection dropped at ' + u.pct + '%. Nothing was saved, so it is safe to try again.' }),
-          u.state === 'up' ? [h('div', { class: 'progress' }, h('div', { id: 'up' + i, style: 'width:' + u.pct + '%' })), h('div', { class: 'row between' }, h('span', { class: 'k', text: size(u.mb) + ' · keep this page open' }),
-            h('button', { class: 'btn small', text: 'Cancel', onclick: function () { u.state = 'gone'; toast('Upload cancelled. Nothing was saved.'); render(); } }))] : null,
-          u.state === 'done' ? h('div', { class: 'row' }, h('button', { class: 'btn grow on', text: 'Put on a pad', onclick: function () { u.state = 'gone'; UI.sheet = { kind: 'clip', clip: B.media.filter(function (m) { return m.n === u.n; })[0], view: 'pad' }; render(); } }),
-            h('button', { class: 'btn grow', text: 'Play now', onclick: function () { u.state = 'gone'; play(u.n); } }), h('button', { class: 'btn', text: 'Done', onclick: function () { u.state = 'gone'; render(); } })) : null,
+          h('div', { class: 'state', id: 'upt' + i, style: 'font-weight:600', text: u.state === 'up' ? 'Uploading ' + u.n + ': ' + u.pct + '%' : u.state === 'done' ? u.n + ' is on the box.' : u.n + ' did not upload: the connection dropped at ' + u.pct + '%. Nothing was saved, so it is safe to try again.' }),
+          u.state === 'up' ? [h('div', { class: 'progress' }, h('div', { id: 'up' + i, style: 'width:' + u.pct + '%' })), h('div', { class: 'row between' }, h('span', { class: 'hint', text: size(u.mb) + '. Keep this page open.' }),
+            h('button', { class: 'btn', text: 'Cancel', onclick: function () { u.state = 'gone'; toast('Upload cancelled. Nothing was saved.'); render(); } }))] : null,
+          u.state === 'done' ? h('div', { class: 'row' }, h('button', { class: 'btn grow on', text: 'Put on a pad', onclick: function () { u.state = 'gone'; UI.sheet = { kind: 'clip', clip: B.media.filter(function (m) { return m.n === u.n; })[0] }; render(); } }),
+            h('button', { class: 'btn grow', text: 'Play', onclick: function () { u.state = 'gone'; play(u.n); } }), h('button', { class: 'btn', text: 'Done', onclick: function () { u.state = 'gone'; render(); } })) : null,
           u.state === 'fail' ? h('div', { class: 'row' }, h('button', { class: 'btn grow on', text: 'Try again', onclick: function () { u.state = 'up'; u.pct = 0; u.fail = false; render(); } }), h('button', { class: 'btn', text: 'Dismiss', onclick: function () { u.state = 'gone'; render(); } })) : null);
       }),
-      h('input', { class: 'text-input', id: 'clipfind', type: 'search', placeholder: 'Find a clip', 'aria-label': 'Find a clip', value: UI.find, oninput: function (e) { UI.find = e.target.value; render(); var f = $('clipfind'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }),
-      h('div', { class: 'card' }, rows.length ? rows : h('div', { class: 'k', text: q ? 'No clip has "' + UI.find + '" in its name.' : 'No clips yet. Upload some, or play them straight from a USB drive.' })),
-      full ? h('div', { class: 'k', text: B.free + ' GB free on the box · one file can be up to 8 GB' }) : null,
-      h('div', { class: 'k', text: 'USB drive ' + B.usb.drive + ' (plays straight from the drive)' }),
-      h('div', { class: 'card' }, B.usb.files.map(function (f) {
+      h('label', { class: 'k', for: 'clipfind', text: 'Find a clip' }),
+      h('input', { class: 'text-input', id: 'clipfind', type: 'search', placeholder: 'for example loop', value: UI.find, oninput: function (e) { UI.find = e.target.value; render(); var f = $('clipfind'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }),
+      h('div', { class: 'card', style: 'gap:0' }, rows.length ? rows : (q ? h('div', { class: 'state', text: 'No clip has "' + UI.find + '" in its name.' })
+        : [h('div', { class: 'state', text: 'No clips yet.' }), h('div', { class: 'hint', text: full ? 'Clips are the videos and pictures the box plays. Tap Upload clips, or plug in a USB drive.' : 'The owner adds clips.' })])),
+      full ? h('div', { class: 'hint', text: B.free + ' GB free on the box. One file can be up to 8 GB.' }) : null,
+      h('div', { class: 'k', text: 'USB drive ' + B.usb.drive }),
+      h('div', { class: 'card', style: 'gap:0' }, h('div', { class: 'hint', text: 'Plays straight from the drive. Copy a clip to keep it after the drive is gone.' }), B.usb.files.map(function (f) {
         var have = B.media.some(function (m) { return m.n === f.n; }), copying = B.copy && B.copy.n === f.n && B.copy.pct < 100;
-        return h('div', { class: 'clip' }, h('span', { class: 'nm' }, f.n, h('small', { id: copying ? 'importline' : null, text: copying ? 'Copying ' + f.n + ': ' + B.copy.pct + '%' : [short(f.dur), size(f.mb), have ? 'Already on the box' : ''].filter(Boolean).join(' · ') })),
-          live ? h('button', { class: 'btn', text: 'Play', 'aria-label': 'Play ' + f.n + ' from the USB drive', onclick: function () { play(f.n); } }) : null,
-          full && !have ? h('button', { class: 'btn', text: copying ? 'Copying' : 'Keep', disabled: copying, 'aria-label': 'Copy ' + f.n + ' to the box', onclick: function () { B.copy = { n: f.n, pct: 0 }; toast('Copying ' + f.n + ' to the box. You can keep working.'); render(); } }) : null);
+        return listRow({ key: 'usb:' + f.n, label: f.n + ' from the USB drive', name: f.n, stateId: copying ? 'importline' : null, state: copying ? 'Copying ' + f.n + ': ' + B.copy.pct + '%' : [short(f.dur), size(f.mb), have ? 'Also on the box' : ''].filter(Boolean).join(' · '),
+          primary: live ? { text: 'Play', fn: function () { play(f.n); } } : null,
+          more: full && !have ? function () { return h('button', { class: 'btn', text: copying ? 'Copying...' : 'Copy to the box', disabled: copying, onclick: function () { B.copy = { n: f.n, pct: 0 }; toast('Copying ' + f.n + ' to the box. You can keep working.'); render(); } }); } : null });
       })),
-      live ? h('div', { class: 'k', text: 'Other ways to play' }) : null,
-      live ? h('details', { class: 'fold' }, h('summary', { text: 'Play everything in the folder' }), h('div', {},
-        h('div', { class: 'row' }, [['In order, forever', 'Playing all 8 clips in order, again and again.'], ['In order, once', 'Playing all 8 clips once.'], ['Shuffled', 'Playing all 8 clips in a random order.']].map(function (o) {
+      live ? h('div', { class: 'k', text: 'More ways to play' }) : null,
+      live ? h('details', { class: 'fold' }, h('summary', { text: 'Play all clips' }), h('div', {},
+        h('div', { class: 'hint', text: 'Every video in the folder, one after another.' }),
+        h('div', { class: 'row' }, [['Again and again', 'Playing all 8 clips in order, again and again.'], ['Once', 'Playing all 8 clips once.'], ['Shuffled', 'Playing all 8 clips in a random order.']].map(function (o) {
           return h('button', { class: 'btn grow', text: o[0], onclick: function () { B.now = { kind: 'clip', file: 'intro.mkv', label: 'All clips (1 of 8)', dur: 42, pos: 0, loop: true }; toast(o[1]); render(); } });
-        })), h('div', { class: 'k', text: 'Clips named 01_, 02_ and so on can also be started by number from OSC and the schedule.' }))) : null,
-      live ? h('details', { class: 'fold' }, h('summary', { text: 'Slideshow of the pictures (3)' }), h('div', {},
-        h('select', { class: 'text-input', id: 'slidesecs', 'aria-label': 'Each picture for' }, ['5 seconds each', '10 seconds each', '30 seconds each', '1 minute each'].map(function (t) { return h('option', { text: t }); })),
-        h('select', { class: 'text-input', id: 'slideend', 'aria-label': 'After the last picture' }, ['Then start again', 'Then keep the last picture', 'Then black'].map(function (t) { return h('option', { text: t }); })),
+        })), h('div', { class: 'hint', text: 'Clips named 01_, 02_ and so on can also be started by number from OSC and the schedule.' }))) : null,
+      live ? h('details', { class: 'fold' }, h('summary', { text: 'Slideshow (3 pictures)' }), h('div', {},
+        h('label', { class: 'k', for: 'slidesecs', text: 'Each picture' }),
+        h('select', { class: 'text-input', id: 'slidesecs' }, ['5 seconds', '10 seconds', '30 seconds', '1 minute'].map(function (t) { return h('option', { text: t }); })),
+        h('label', { class: 'k', for: 'slideend', text: 'After the last' }),
+        h('select', { class: 'text-input', id: 'slideend' }, ['Start again', 'Keep the last picture', 'Go black'].map(function (t) { return h('option', { text: t }); })),
         h('button', { class: 'btn on', text: 'Start slideshow', onclick: function () { B.now = { kind: 'clip', file: '01_welcome.jpg', label: 'Slideshow (1 of 3)', dur: 5, pos: 0, loop: true }; toast('Slideshow started: 3 pictures.'); render(); } }))) : null);
   }
   function fileSheet() {
@@ -795,48 +895,138 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       h('button', { class: 'btn', text: 'big_show.mp4 (1.4 GB): the connection drops', onclick: function () { add('big_show.mp4', 1434, true); } }), closeBtn()]);
   }
   function clipSheet() {
-    var s = UI.sheet, d = s.clip, pad = padOf(d.n);
-    function back() { s.view = 'menu'; render(); }
-    if (s.view === 'pad') {
-      return sheet('Put ' + d.n + ' on a pad', [h('div', { class: 'k', text: B.banks[UI.bank].name + '. Tap a pad. A pad that is taken is replaced.' }),
-        h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn small' + (i === UI.bank ? ' on' : ''), text: b.name, onclick: function () { UI.bank = i; render(); } }); })),
-        h('div', { class: 'pads' }, B.banks[UI.bank].pads.map(function (p, i) {
-          return h('button', { class: 'pad' + (p.file ? '' : ' empty'), style: 'min-height:56px', onclick: function () {
-            var was = B.banks[UI.bank].pads[i]; B.banks[UI.bank].pads[i] = { file: d.n, label: stem(d.n), ending: 'loop' }; UI.sheet = null;
-            toast(stem(d.n) + ' is on pad ' + (i + 1) + ' of ' + B.banks[UI.bank].name + '.', 'Undo', function () { B.banks[UI.bank].pads[i] = was; render(); }); render();
-          } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) }), h('span', { class: 't', text: p.label || 'Free' }));
-        })), h('button', { class: 'btn', text: 'Back', onclick: back })]);
-    }
-    if (s.view === 'rename') {
-      var input = h('input', { class: 'text-input', id: 'rename', value: d.n, 'aria-label': 'New name' });
-      return sheet('Rename ' + d.n, [input, pad ? h('div', { class: 'k', text: 'It stays on ' + pad + '.' }) : null,
-        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Back', onclick: back }), h('button', { class: 'btn grow on', text: 'Save name', onclick: function () {
-          var to = input.value.trim(), old = d.n; if (!to) return;
-          B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === old) p.file = to; }); }); if (B.now && B.now.file === old) B.now.file = to;
-          d.n = to; UI.sheet = null; toast('Renamed to ' + to + '.'); render();
-        } }))]);
-    }
-    if (s.view === 'delete') {
-      return sheet('Delete ' + d.n + '?', [h('div', { text: 'The file is removed from the box for good.' + (pad ? ' It is on ' + pad + ', which will be empty.' : '') + (B.now && B.now.file === d.n ? ' It is on the screen right now.' : '') }),
-        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Keep it', onclick: back }), h('button', { class: 'btn grow danger', text: 'Delete', onclick: function () {
-          B.media.splice(B.media.indexOf(d), 1); B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === d.n) { p.file = ''; p.label = ''; } }); });
-          UI.sheet = null; toast(d.n + ' was deleted.'); render();
-        } }))]);
-    }
-    return sheet(d.n, [
-      h('div', {}, [['Format', d.fmt], ['Length', d.dur ? short(d.dur) : 'A picture'], ['Sound', d.snd], ['Size', size(d.mb)], ['On a pad', pad || 'No']].map(function (r) { return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', { text: r[1] })); })),
-      d.adv ? h('div', { class: 'banner', text: d.adv }) : h('div', { class: 'k', text: 'Should play smoothly on this box.' }),
-      can('live') ? h('button', { class: 'btn on', text: 'Play now', onclick: function () { UI.sheet = null; play(d.n); } }) : null,
-      can('full') ? [h('button', { class: 'btn', text: 'Put on a pad', onclick: function () { s.view = 'pad'; render(); } }),
-        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Rename', onclick: function () { s.view = 'rename'; render(); } }), h('button', { class: 'btn grow danger', text: 'Delete', onclick: function () { s.view = 'delete'; render(); } }))] : null,
-      closeBtn('Close')]);
+    var d = UI.sheet.clip;
+    return sheet('Put ' + d.n + ' on a pad', [h('div', { class: 'hint', text: 'Tap a pad. A pad that is taken is replaced, and you can undo it.' }),
+      h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn' + (i === UI.bank ? ' on' : ''), text: b.name, onclick: function () { UI.bank = i; render(); } }); })),
+      h('div', { class: 'pads' }, B.banks[UI.bank].pads.map(function (p, i) {
+        return h('button', { class: 'pad' + (p.file ? '' : ' empty'), style: 'min-height:56px', onclick: function () {
+          var was = B.banks[UI.bank].pads[i]; B.banks[UI.bank].pads[i] = { file: d.n, label: stem(d.n), ending: 'loop' }; UI.sheet = null;
+          toast(stem(d.n) + ' is on pad ' + (i + 1) + ' of ' + B.banks[UI.bank].name + '.', 'Undo', function () { B.banks[UI.bank].pads[i] = was; render(); }); render();
+        } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) }), h('span', { class: 't', text: p.label || 'Free' }));
+      })), closeBtn()]);
   }
   // ---- System: a short index, and one page per module --------------------
   function setMod(m, on) {
     var s = M[m.id]; s.on = on; if ('armed' in s) s.armed = on;
-    if (!on) { if (m.id === 'shaders' && B.now && B.now.kind === 'vibes') B.now = null; toast(m.name + ' is off. Its settings are kept.', 'Undo', function () { s.on = true; render(); }); return render(); }
+    if (!on) { if (m.id === 'shaders' && B.now && B.now.kind === "vibes") B.now = null; toast(m.name + ' is off. Its settings are kept.', 'Undo', function () { s.on = true; render(); }); return render(); }
     if (m.steps && !s.setup) { toast(m.name + ' is on. One thing to set up first.'); return openMod(m.id, UI.page ? UI.from : UI.tab); }
     toast(m.name + ' is on.'); render();
+  }
+  // ---- Shaders: one page for everything about shaders and Vibes -----------
+  function shOn() { return B.now && B.now.kind === 'vibes' ? B.sh[B.now.idx] : null; }
+  function usable() { var out = []; B.sh.forEach(function (s, i) { if (s.vibes && !s.err) out.push(i); }); return out; }
+  function nextVibe() { var u = usable(); if (!u.length) { B.now = null; return; } B.now.idx = u[(u.indexOf(B.now.idx) + 1) % u.length]; B.now.pos = 0; }
+  function playShader(i) {
+    if (!can('live')) return deny();
+    B.now = { kind: 'vibes', single: true, idx: i, dur: 0, pos: 0 }; B.faded = false; B.test = false; B.paused = false; B.scene = '';
+    tell('Showing ' + B.sh[i].id + ' until you play something else.', null); render();
+  }
+  function fmtVal(v) { return String(Math.round(v * 100) / 100); }
+  function shaderPage() {
+    var full = can('full'), live = can('live'), cur = shOn(), vib = vibesOn(), dark = B.blackout || B.faded, canStart = usable().length > 0;
+    var head = [h('button', { class: 'back', text: '‹ Back to ' + ({ system: 'System', mix: 'Mix', live: 'Live', room: 'Room' })[UI.shFrom], onclick: function () { UI.page = null; UI.tab = UI.shFrom; UI.moreKey = null; UI.form = null; scrollTop = 0; render(); } }),
+      h('div', { class: 'row between' }, h('h1', { text: 'Shaders' }), full ? sw(M.shaders.on, 'Shaders and Vibes', function (v) { setMod(mod('shaders'), v); }) : null),
+      h('p', { class: 'state', style: 'margin:0', text: 'Moving pictures the box draws by itself. Vibes plays them one after another, for as long as you like.' }), msgNew()];
+    if (!M.shaders.on) return h('div', { class: 'screen' }, head, h('div', { class: 'row' }, h('span', { class: 'chip off', text: 'Off' })),
+      full ? [h('div', { class: 'hint', text: 'While this is off nothing is drawn, and the Vibes button is not on Live. Your shaders and settings are kept.' }),
+        h('button', { class: 'btn big on', id: 'shaderson', text: 'Switch on', onclick: function () { setMod(mod('shaders'), true); } })]
+        : h('div', { class: 'state', text: 'Shaders are switched off. Only the owner can switch them on.' }));
+    var vals = cur ? (B.shv[cur.id] = B.shv[cur.id] || {}) : null;
+    var changed = cur ? cur.inputs.some(function (i) { return i[0] in vals && vals[i[0]] !== i[4]; }) : false;
+    var now = h('div', { class: 'card' },
+      h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (cur && !dark ? 'active' : 'off'), text: cur ? (dark ? 'Hidden' : 'Active') : 'Off' })),
+      h('div', { class: 'np-title', text: cur ? cur.id : 'No shader on screen' }),
+      h('div', { class: 'state', id: cur && vib ? 'shleft' : null, text: cur ? (vib ? 'Vibes · next one in ' + short(B.now.dur - B.now.pos) : 'One shader, until you play something else') : (B.now ? title() + ' is playing. Starting Vibes takes its place.' : 'Nothing is playing.') }),
+      dark && cur ? h('div', { class: 'hint', text: 'The screen is black (Blackout or Fade out). The shaders go on changing unseen until you bring the picture back.' }) : null,
+      live ? h('div', { class: 'row' },
+        h('button', { class: 'btn big grow' + (vib ? ' on' : ''), id: 'vibesbtn', text: vib ? 'Stop Vibes' : 'Start Vibes', disabled: !vib && !canStart, onclick: function () { vibes(!vib); } }),
+        vib ? h('button', { class: 'btn big', id: 'vibesnext', text: 'Next one', onclick: function () { nextVibe(); toast('Next one: ' + B.sh[B.now.idx].id + '.'); render(); } }) : null) : null,
+      !canStart ? h('div', { class: 'msg err', text: 'Nothing is in the Vibes rotation. Tick "In Vibes" on at least one shader below.' }) : null,
+      !live ? h('div', { class: 'hint', text: 'You are watching only.' }) : null);
+    var controls = cur ? h('div', { class: 'card' }, h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Controls' }), h('span', { class: 'state', text: cur.id })),
+      cur.inputs.map(function (i) {
+        var id = 'shin-' + i[0], v = i[0] in vals ? vals[i[0]] : i[4];
+        var out = h('button', { class: 'chip', disabled: !live, text: fmtVal(v) + (v !== i[4] ? ' · reset' : ''), 'aria-label': 'Reset ' + i[1], onclick: function () { vals[i[0]] = i[4]; mark(id); render(); } });
+        return h('div', { class: 'slider' }, h('label', { for: id }, h('span', {}, i[1] + ' ', savedTag(id) ? h('span', { class: 'saved', text: 'On screen' }) : null), out),
+          h('input', { type: 'range', id: id, min: i[2], max: i[3], step: (i[3] - i[2]) / 100, value: v, disabled: !live, oninput: function (e) { out.textContent = fmtVal(+e.target.value) + ' · reset'; },
+            onchange: function (e) { vals[i[0]] = +e.target.value; mark(id); render(); } }),
+          h('div', { class: 'hint', text: fmtVal(i[2]) + ' to ' + fmtVal(i[3]) + ', normally ' + fmtVal(i[4]) }));
+      }),
+      cur.other ? h('div', { class: 'hint', text: cur.other + ' keeps the shader\'s own value. Only number inputs have a slider.' }) : null,
+      live ? h('button', { class: 'btn', text: 'Reset all', disabled: !changed, onclick: function () { B.shv[cur.id] = {}; toast(cur.id + ' is back to its own values.'); render(); } }) : null,
+      h('div', { class: 'hint', text: 'The picture changes when you let go of a slider. These values are not saved: next time the shader starts from its own values' + (vib && B.vibes.vary ? ', and Vibes picks new ones each round.' : '.') }),
+      full ? h('div', { class: 'banner' }, h('span', { class: 'hint', text: 'Proposed, not built: keep these values as your own version of the shader. Needs an addition to the box software.' }), h('button', { class: 'btn', text: 'Save as my version', disabled: true })) : null) : null;
+    var library = h('div', { class: 'card', style: 'gap:0' }, B.sh.map(function (s, i) {
+      return listRow({ key: 'sh' + i, label: s.id, name: s.id, chip: cur === s ? ['active', 'Active'] : null,
+        state: s.cost + ' work' + (s.up ? ' · uploaded' : '') + (full || s.err ? '' : s.vibes ? ' · in Vibes' : ' · not in Vibes'),
+        problem: s.err ? 'The GPU refused it: ' + s.err : '',
+        primary: live && !s.err ? { text: 'Play', on: cur === s, fn: function () { playShader(i); } } : null,
+        extra: full && !s.err ? h('label', { class: 'tick', for: 'inv' + i }, h('input', { type: 'checkbox', id: 'inv' + i, checked: s.vibes, onchange: function (e) { s.vibes = e.target.checked; mark('inv' + i); render(); } }), h('span', { text: 'In Vibes' }), savedTag('inv' + i)) : null,
+        more: function () {
+          return [h('div', { class: 'state', text: s.desc }),
+            h('div', { class: 'hint', text: s.err ? 'It is left out of Vibes. Fix the file and add it again.' : 'Sliders: ' + s.inputs.map(function (x) { return x[1]; }).join(', ') + '. Cost is a rough count of work per pixel, not a measurement.' }),
+            full && s.up ? (UI.ask === 'rmsh' ? confirmRow('Remove ' + s.id + '? The file is deleted from the box' + (cur === s ? ' and the screen goes black.' : '.'), 'Remove', function () {
+              if (cur === s) B.now = null; else if (B.now && B.now.kind === 'vibes' && B.now.idx > i) B.now.idx--;
+              B.sh.splice(i, 1); UI.moreKey = null; toast(s.id + ' was removed.'); render();
+            }) : h('button', { class: 'btn danger', text: 'Remove', onclick: function () { ask('rmsh'); } })) : null,
+            !s.up ? h('div', { class: 'hint', text: 'Comes with the box, so it cannot be removed.' }) : null];
+        } });
+    }));
+    var DWELL = ['30 seconds', '1 minute', '3 minutes', '5 minutes', '10 minutes', '30 minutes'];
+    var settings = full ? h('div', { class: 'card' },
+      h('div', { class: 'row between' }, h('label', { class: 'k', for: 'vibesdwell', text: 'Each one stays' }), savedTag('vibesdwell')),
+      h('select', { class: 'text-input', id: 'vibesdwell', onchange: function (e) { B.vibes.dwell = e.target.value; B.vibes.secs = [30, 60, 180, 300, 600, 1800][DWELL.indexOf(e.target.value)]; if (vib) B.now.dur = B.vibes.secs; mark('vibesdwell'); render(); } },
+        DWELL.map(function (o) { return h('option', { text: o, selected: o === B.vibes.dwell }); })),
+      h('div', { class: 'mrow' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm' }, 'Change a little each round ', savedTag('vvary')), h('span', { class: 'st', text: 'Speed, sizes and colours shift slightly' })),
+        sw(B.vibes.vary, 'Change a little each round', function (v) { B.vibes.vary = v; mark('vvary'); render(); })),
+      h('details', { class: 'fold', open: UI.adv, ontoggle: function (e) { UI.adv = e.target.open; } }, h('summary', { text: 'Advanced' }), h('div', {},
+        h('div', { class: 'row between' }, h('label', { class: 'k', for: 'shaderheight', text: 'Picture detail' }), savedTag('shaderheight')),
+        h('select', { class: 'text-input', id: 'shaderheight', onchange: function (e) { B.vibes.lines = e.target.value; mark('shaderheight'); render(); } }, ['360 lines', '540 lines', '720 lines', '1080 lines'].map(function (o) { return h('option', { text: o, selected: o === B.vibes.lines }); })),
+        h('div', { class: 'hint', text: 'Fewer lines is lighter work for the box. Choose fewer if the picture stutters. Speed on this board has not been measured yet.' }),
+        h('button', { class: 'btn add', id: 'shaderupload', text: '+ Add a shader', onclick: function () { UI.sheet = { kind: 'fs' }; render(); } }),
+        B.fsErr ? h('div', { class: 'msg err', role: 'status', text: B.fsErr }) : null,
+        h('div', { class: 'hint', text: 'An ISF file (.fs) that draws from nothing (a generator). Shaders that need a picture or sound are refused, with the reason.' }))))
+      : h('div', { class: 'card', style: 'gap:0' }, kvRows([['Each one stays', B.vibes.dwell], ['Change a little each round', B.vibes.vary ? 'Yes' : 'No']]), h('div', { class: 'hint', text: 'Only the owner changes these.' }));
+    var links = full ? [h('div', { class: 'k', text: 'Other ways to start' }),
+      h('div', { class: 'card', style: 'padding:0 12px;gap:0' }, [['midi', 'A knob or pad: Vibes on and off, next one, how long each stays'], ['dmx', 'A lighting desk: channel 9 stops, starts and skips'], ['autostart', 'Start Vibes when the box gets power'], ['scheduler', 'Start Vibes at set times']].map(function (r, n) {
+        var m = mod(r[0]), st = mstate(m);
+        return h('div', { class: 'mrow', style: n ? '' : 'border-top:0' }, h('button', { class: 'go', onclick: function () { openMod(r[0], 'shaders'); } }, h('span', { class: 'nm', text: m.name }),
+          h('span', { class: 'st' }, st[1] ? h('span', { class: 'chip ' + st[0], text: st[1] }) : null, r[1])), h('span', { class: 'chev', text: '›', 'aria-hidden': 'true' }));
+      }))] : null;
+    return h('div', { class: 'screen' }, head, now, controls, h('div', { class: 'k', text: 'Shaders' }), library, h('div', { class: 'k', text: 'Vibes settings' }), settings, links);
+  }
+  function fsSheet() {
+    function done(err, add) { if (!isNew()) say(err || '', !!err); UI.sheet = null; UI.adv = true; B.fsErr = err || ''; if (add) { B.sh.push(add); toast(add.id + ' was added. Tick "In Vibes" to put it in the rotation.'); } render(); }
+    return sheet('Choose a file (stand-in for the phone\'s file chooser)', [h('div', { class: 'hint', text: 'In the real panel your phone\'s own file chooser opens here. Pick an example:' }),
+      h('button', { class: 'btn', text: 'sunrise.fs: is accepted', onclick: function () { done('', { id: 'sunrise', desc: 'A slow warm gradient that rises and sets.', cost: 'Light', long: 'low', up: true, vibes: false, inputs: [['speed', 'Speed', 0.2, 2, 1]] }); } }),
+      h('button', { class: 'btn', text: 'blur-filter.fs: needs a picture, so it is refused', onclick: function () { done('blur-filter.fs was not added: input inputImage is a picture: only generator shaders are supported, not filters that need an image.'); } }),
+      h('button', { class: 'btn', text: 'broken.fs: has a mistake in the code', onclick: function () { done('broken.fs was not added: a /* comment in the code is never closed.'); } }), closeBtn()]);
+  }
+  // Today's card on Mix (pvj/web/shaders.js), same order and words.
+  function oldShaderCard() {
+    var live = can('live'), full = can('full'), cur = shOn(), vib = vibesOn(), kids = [];
+    if (!M.shaders.on) return h('div', { class: 'card' }, h('div', { class: 'k', text: 'Shaders and Vibes (beta)' }), h('div', { class: 'k', text: 'Off. Switch on "Shaders and Vibes" under System > Modules (beta).' }));
+    kids.push(h('div', { class: 'k', text: (cur ? 'On screen: ' + cur.id + ', 3.1 ms a frame' : 'No shader on screen.') + (vib ? ' · Vibes is on, next in ' + Math.round(B.now.dur - B.now.pos) + ' s' : '') }));
+    kids.push(h('div', { class: 'row' }, h('button', { class: 'btn grow' + (vib ? ' on' : ''), disabled: !live, text: vib ? 'Vibes is on. Stop' : 'Start Vibes', onclick: function () { vibes(!vib); } }),
+      vib ? h('button', { class: 'btn', text: 'Next shader', disabled: !live, onclick: function () { nextVibe(); render(); } }) : null));
+    B.sh.forEach(function (s, i) {
+      var on = cur === s;
+      kids.push(h('div', { class: 'item' }, h('span', {}, s.id, h('br'), h('span', { class: 'k', text: s.err ? 'Cannot be shown: ' + s.err : [s.desc, 'Cost: ' + s.long, s.up ? 'uploaded' : ''].filter(Boolean).join(' · ') })),
+        h('div', { class: 'row' }, h('button', { class: 'btn small' + (on ? ' on' : ''), text: on ? 'On screen' : 'Play', disabled: !live || !!s.err, onclick: function () { playShader(i); } }),
+          full ? h('button', { class: 'btn small' + (s.vibes ? ' on' : ''), text: s.vibes ? 'In Vibes' : 'Not in Vibes', disabled: !!s.err, onclick: function () { s.vibes = !s.vibes; render(); } }) : null,
+          full && s.up ? h('button', { class: 'btn small', text: 'Delete', onclick: function () { UI.sheet = { kind: 'dlg', text: 'Delete ' + s.id + '?', ok: function () { if (cur === s) B.now = null; B.sh.splice(i, 1); } }; render(); } }) : null)));
+      if (on && live) kids.push(h('div', { class: 'list' }, s.inputs.map(function (x) {
+        var vals = B.shv[s.id] = B.shv[s.id] || {}, v = x[0] in vals ? vals[x[0]] : x[4], out = h('span', { class: 'k', text: fmtVal(v) });
+        return h('div', { class: 'slider' }, h('label', { for: 'oshin-' + x[0] }, x[1] + ' ', out), h('input', { type: 'range', id: 'oshin-' + x[0], min: x[2], max: x[3], step: (x[3] - x[2]) / 100, value: v,
+          oninput: function (e) { out.textContent = fmtVal(+e.target.value); }, onchange: function (e) { vals[x[0]] = +e.target.value; } }));
+      })));
+    });
+    if (full) kids.push(h('label', { class: 'k', for: 'ovibesdwell', text: 'Vibes: seconds each shader stays (10 to 3600)' }), h('input', { class: 'text-input mono', id: 'ovibesdwell', type: 'number', value: B.vibes.secs }),
+      h('select', { class: 'text-input', id: 'ovibesvary', 'aria-label': 'Variation' }, h('option', { text: 'Vary values and colours each round' }), h('option', { text: 'Always the shader\'s own values' })),
+      h('select', { class: 'text-input', id: 'oshaderheight', 'aria-label': 'Drawing size' }, ['360', '540', '720', '1080'].map(function (v) { return h('option', { text: 'Draw ' + v + ' lines high', selected: v === '720' }); })),
+      h('div', { class: 'row' }, h('button', { class: 'btn on small', text: 'Save', onclick: function () { say(''); } }), h('button', { class: 'btn small', text: 'Upload an ISF shader (.fs)', onclick: function () { UI.sheet = { kind: 'fs' }; render(); } })));
+    kids.push(h('div', { class: 'k', text: 'Drawn at 1280 x 720, 30 pictures a second. Speed on this board is not measured yet: watch the screen, and choose fewer lines if it stutters.' }));
+    return h('div', { class: 'card' }, h('div', { class: 'k', text: 'Shaders and Vibes (beta)' }), h('div', { class: 'list' }, kids));
   }
   function mrow(m) {
     var st = mstate(m), full = can('full');
@@ -854,76 +1044,103 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       var rows = MODS.filter(function (m) { return m.group === g[0] && hit(m); });
       return rows.length ? h('div', { class: 'group' }, h('div', { class: 'k', text: g[1] }), h('div', { class: 'card', style: 'padding:0 12px;gap:0' }, rows.map(mrow))) : null;
     }).filter(Boolean);
-    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'System' }), h('span', { class: 'k', text: 'Pi 4 · 0.1.0' })),
-      h('input', { class: 'text-input', id: 'sysfind', type: 'search', placeholder: 'Find a setting (try "pin", "clock" or "art-net")', 'aria-label': 'Find a setting', value: UI.find,
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'System' }), h('span', { class: 'k', text: 'Pi 4 · 0.1.0' })), msgNew(),
+      h('label', { class: 'k', for: 'sysfind', text: 'Find a setting' }),
+      h('input', { class: 'text-input', id: 'sysfind', type: 'search', placeholder: 'for example pin, clock or art-net', value: UI.find,
         oninput: function (e) { UI.find = e.target.value; render(); var f = $('sysfind'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }),
-      !q && attention.length ? h('div', { class: 'card' }, h('div', { class: 'k', text: attention.length + (attention.length === 1 ? ' thing needs' : ' things need') + ' a look' }),
+      !q && attention.length ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Needs a look' }),
         attention.map(function (m) { var st = mstate(m); return h('button', { class: 'btn', style: 'text-align:left;padding:8px 12px;font-weight:400;display:flex;gap:8px;align-items:center;flex-wrap:wrap', onclick: function () { openMod(m.id, 'system'); } },
           h('span', { class: 'chip ' + st[0], text: st[1] }), h('span', { text: m.name + ': ' + st[2] })); }))
-        : (!q ? h('div', { class: 'card' }, h('div', { text: 'The box is well. Nothing needs a look.' })) : null),
-      groups.length ? groups : h('div', { class: 'k', text: 'Nothing matches "' + UI.find + '". Try another word, or clear the box to see everything.' }),
-      !q ? h('details', { class: 'fold' }, h('summary', { text: 'Not built yet (' + PLANNED.length + ')' }), h('div', {}, PLANNED.map(function (n) { return h('div', { class: 'k', text: n }); }))) : null,
-      !full ? h('div', { class: 'k', text: 'Only the owner can change these.' }) : null);
+        : (!q ? h('div', { class: 'card' }, h('div', { class: 'state', text: 'The box is well. Nothing needs a look.' })) : null),
+      groups.length ? groups : h('div', { class: 'state', text: 'Nothing matches "' + UI.find + '". Try another word, or clear the box to see everything.' }),
+      !q ? h('details', { class: 'fold' }, h('summary', { text: 'Not built yet (' + PLANNED.length + ')' }), h('div', {}, PLANNED.map(function (n) { return h('div', { class: 'state', text: n }); }))) : null,
+      !full ? h('div', { class: 'hint', text: 'Only the owner can change these.' }) : null);
   }
   function fakeField(label, i) { return [h('label', { class: 'k', for: 'f' + i, text: label }), h('input', { class: 'text-input', id: 'f' + i, 'aria-label': label })]; }
   function modPage(m) {
     var s = M[m.id], st = mstate(m), full = can('full'), body = [];
-    var notHere = function () { toast('This prototype stops here. The settings inside each module are covered by the module audit.'); };
-    if (m.sw && !s.on) body.push(h('div', { class: 'k', text: 'Switch it on to set it up. Nothing here runs while it is off' + (m.id === 'network' ? '; the box keeps its current address.' : '.') }));
+    var notHere = function () { toast('This prototype stops here. The inside of this page is covered by the System audit.'); };
+    var selRow = function (key, label, hint, opts, cur, fn) {
+      return [h('div', { class: 'row between' }, h('label', { class: 'k', for: key, text: label }), savedTag(key)),
+        h('select', { class: 'text-input', id: key, disabled: !full, onchange: function (e) { fn(e.target.value); mark(key); render(); } }, opts.map(function (o) { return h('option', { text: o, selected: o === cur }); })),
+        hint ? h('div', { class: 'hint', text: hint }) : null];
+    };
+    if (m.sw && !s.on) body.push(h('div', { class: 'hint', text: 'Switch it on to set it up. Nothing here runs while it is off' + (m.id === 'network' ? '; the box keeps its current address.' : '; its settings are kept.') }));
     else if (m.steps && !s.setup) {
       var step = m.steps[Math.min(UI.step, m.steps.length - 1)];
-      body.push(h('div', { class: 'card', id: 'firstrun' }, h('div', { class: 'k', text: 'Set up · step ' + (UI.step + 1) + ' of ' + m.steps.length }), h('h2', { text: step.t }), h('div', { text: step.hint }),
+      body.push(h('div', { class: 'card', id: 'firstrun' }, h('div', { class: 'k', text: 'Step ' + (UI.step + 1) + ' of ' + m.steps.length }), h('h2', { text: step.t }), h('div', { class: 'hint', text: step.hint }),
         step.fields.map(fakeField),
         h('div', { class: 'row' }, UI.step ? h('button', { class: 'btn', text: 'Back', onclick: function () { UI.step--; render(); } }) : null,
           h('button', { class: 'btn on grow', text: step.go, onclick: function () {
             if (UI.step + 1 < m.steps.length) { UI.step++; return render(); }
             s.setup = true; UI.step = 0; toast(m.name + ' is set up and ready.'); render();
-          } })),
-        h('button', { class: 'back', text: 'Not now (switch it off again)', onclick: function () { s.on = false; if ('armed' in s) s.armed = false; render(); } })));
+          } }))));
     } else if (m.id === 'projector') {
-      body.push(h('div', { class: 'card' }, B.proj.map(function (p, i) {
-        return h('div', { class: 'mrow', style: i ? '' : 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: p.n }),
-          h('span', { class: 'st', text: 'Epson · 192.168.1.' + (50 + i) + ' · ' + (p.on ? 'On, ' + p.input : 'Off') + ' · lamp ' + p.lamp + ' h' })), sw(p.on, p.n + ' power', function (v) { p.on = v; render(); }, !can('live')));
-      })), h('button', { class: 'btn', text: 'Add a projector', onclick: notHere }));
-    } else if (m.id === 'shaders') {
-      body.push(h('button', { class: 'btn big' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), text: B.now && B.now.kind === 'vibes' ? 'Ambience is on. Tap to stop' : 'Start ambience (Vibes)', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } }),
-        h('div', { class: 'card' }, SHADERS.map(function (n, i) {
-          var on = B.now && B.now.kind === 'vibes' && B.now.idx === i;
-          return h('div', { class: 'clip' }, h('span', { class: 'nm' }, 'nxlx-' + n, h('small', { text: (i < 8 ? 'In Vibes' : 'Not in Vibes') + ' · ' + (i % 3 === 2 ? 'heavier' : 'light') + ' work for the box' })),
-            h('button', { class: 'btn' + (on ? ' on' : ''), text: on ? 'On screen' : 'Play', onclick: function () { B.now = { kind: 'vibes', idx: i, dur: 180, pos: 0 }; render(); } }));
-        })),
-        h('div', { class: 'card', style: 'gap:0' }, [['Each shader stays', '3 minutes'], ['Change values each round', 'Yes'], ['Drawing size', '720 lines']].map(function (r) { return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', { text: r[1] })); })),
-        h('button', { class: 'btn', text: 'Upload an ISF shader (.fs)', onclick: notHere }));
+      body.push(h('div', { class: 'card', style: 'gap:0' }, B.proj.length ? B.proj.map(function (p, i) {
+        return listRow({ key: 'proj' + i, label: p.n, name: p.n, chip: p.on ? ['active', 'Active'] : ['off', 'Off'], state: (p.on ? 'On, ' + p.input : 'Switched off') + ' · lamp ' + p.lamp + ' h', problem: p.lamp > 1200 ? 'The projector warns: lamp' : '',
+          primary: { text: p.on ? 'Switch off' : 'Switch on', disabled: !can('live'), fn: function () { p.on = !p.on; toast(p.n + (p.on ? ' is switching on. It needs about 30 seconds to warm up.' : ' is switching off.')); render(); } },
+          more: function () {
+            return [h('div', { class: 'row between' }, h('label', { class: 'k', for: 'pin' + i, text: 'Input' }), savedTag('pin' + i)),
+              h('select', { class: 'text-input', id: 'pin' + i, disabled: !p.on, onchange: function (e) { p.input = e.target.value; mark('pin' + i); render(); } }, ['HDMI 1', 'HDMI 2', 'Computer'].map(function (o) { return h('option', { text: o, selected: o === p.input }); })),
+              p.on ? null : h('div', { class: 'hint', text: 'Switch the projector on to choose its input.' }),
+              full ? (UI.form === 'edit' ? form([['pname', 'Name'], ['paddr', 'Address', 'The projector\'s own menu shows it, under Network.', '192.168.1.50'], ['ppw', 'Password', 'Leave empty to keep the one that is saved.']], { pname: p.n, paddr: p.addr }, 'Save changes', function (v) {
+                if (!v.pname) return 'Give the projector a name.';
+                if (!/^\d+\.\d+\.\d+\.\d+$/.test(v.paddr)) return 'That address does not look right. It has four numbers, for example 192.168.1.50.';
+                p.n = v.pname; p.addr = v.paddr; UI.form = null; toast('Saved ' + p.n + '.'); render();
+              }) : h('button', { class: 'btn', text: 'Edit', onclick: function () { UI.form = 'edit'; render(); } })) : null,
+              full ? (UI.ask === 'rmproj' ? confirmRow('Remove ' + p.n + '? The box forgets its address and password. The projector itself is not changed.', 'Remove', function () { B.proj.splice(i, 1); UI.moreKey = null; toast(p.n + ' was removed.'); render(); })
+                : h('button', { class: 'btn danger', text: 'Remove', onclick: function () { ask('rmproj'); } })) : null];
+          } });
+      }) : [h('div', { class: 'state', text: 'No projectors yet.' }), h('div', { class: 'hint', text: 'First switch PJLink on in the projector\'s own network menu, then add it here.' })]));
+      if (full) body.push(UI.form === 'addproj' || !B.proj.length ? form([['pname', 'Name', '', 'Main wall'], ['paddr', 'Address', 'The projector\'s own menu shows it, under Network.', '192.168.1.50'], ['ppw', 'Password', 'Only if the projector asks for one.']], {}, 'Add', function (v) {
+        if (!v.pname) return 'Give the projector a name, for example Main wall.';
+        if (!/^\d+\.\d+\.\d+\.\d+$/.test(v.paddr)) return 'Type the projector\'s address. It has four numbers, for example 192.168.1.50.';
+        B.proj.push({ n: v.pname, addr: v.paddr, on: false, input: 'HDMI 1', lamp: 0 }); UI.form = null; toast(v.pname + ' was added.'); render();
+      }) : h('button', { class: 'btn add', text: '+ Add a projector', onclick: function () { UI.form = 'addproj'; UI.moreKey = null; render(); } }));
+    } else if (m.id === 'mapper') {
+      body.push(h('div', { class: 'card' }, h('div', { class: 'state', text: 'No surfaces yet.' }), h('div', { class: 'hint', text: 'A surface is a part of the picture that you pull onto a wall, a screen or an object. Add one, then drag its corners.' }),
+        h('button', { class: 'btn add', text: '+ Add a surface', onclick: notHere })),
+        h('div', { class: 'hint', text: 'The mapping editor itself (canvas, corners, saved mappings) is not rebuilt in this prototype. Its words and rows are in the written proposal.' }));
+    } else if (m.id === 'access') {
+      body.push(guestCodeCard(), h('div', { class: 'card' }, h('div', { class: 'state', text: st[2] }), h('button', { class: 'btn', text: 'Open', disabled: !full, onclick: notHere })));
     } else if (m.id === 'health') {
       body.push(h('div', { class: 'card', style: 'gap:0' }, [['Power', 'problem', 'Dipped since the last start. Use the official 5 V 3 A supply.'], ['Temperature', 'ready', '52°C, fine'], ['Player', 'ready', 'Running, no dropped frames'], ['Helpers', 'ready', 'All running']].map(function (r) {
         return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', {}, r[1] === 'problem' ? h('span', { class: 'chip problem', text: 'Problem' }) : null, ' ' + r[2]));
       })));
     } else if (m.id === 'reset') {
-      var word = h('input', { class: 'text-input', id: 'resetword', placeholder: 'Type RESET', 'aria-label': 'Type RESET to confirm' });
-      body.push(h('div', { class: 'card' }, h('div', { text: 'This cannot be undone. Export the settings file first if you may want them back.' }), word,
-        h('button', { class: 'btn danger', text: 'Erase every setting', onclick: function () { if (word.value !== 'RESET') return toast('Type RESET in the box first.', null, null, true); toast('In the real panel the box would now reset. Nothing happened here.'); } })));
+      body.push(h('div', { class: 'card' }, h('div', { class: 'state', text: 'This cannot be undone. Export the settings file first if you may want them back.' }),
+        UI.ask === 'reset' ? confirmRow('Reset this box? Every setting is erased and every phone is unpaired. Clips stay.', 'Reset the box', function () { toast('In the real panel the box would now reset. Nothing happened here.'); render(); })
+          : h('button', { class: 'btn danger', text: 'Reset to factory settings', onclick: function () { ask('reset'); } })));
     } else if (m.id === 'appearance') {
-      body.push(choice([['Dark stage', 'dark-stage'], ['Night red', 'night-red']], UI.theme, setTheme, !full), choice([['Light', 'light'], ['High contrast', 'high-contrast']], UI.theme, setTheme, !full));
+      body.push(h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Theme' }), savedTag('theme')),
+        choice([['Dark stage', 'dark-stage'], ['Night red', 'night-red']], UI.theme, function (v) { setTheme(v); mark('theme'); }, !full), choice([['Light', 'light'], ['High contrast', 'high-contrast']], UI.theme, function (v) { setTheme(v); mark('theme'); }, !full));
     } else {
-      body.push(h('div', { class: 'card' }, h('div', { text: st[2] }), h('button', { class: 'btn', text: 'Change', disabled: !full, onclick: notHere })));
+      body.push(h('div', { class: 'card' }, h('div', { class: 'state', text: st[2] }), h('button', { class: 'btn', text: 'Open', disabled: !full, onclick: notHere })));
     }
     return h('div', { class: 'screen' },
-      h('button', { class: 'back', text: '‹ Back to ' + ({ system: 'System', mix: 'Mix', live: 'Live' })[UI.from], onclick: function () { UI.page = null; UI.tab = UI.from; scrollTop = 0; render(); } }),
+      h('button', { class: 'back', text: '‹ Back to ' + ({ system: 'System', mix: 'Mix', live: 'Live', room: 'Room', shaders: 'Shaders' })[UI.from], onclick: function () { if (UI.from === 'shaders') UI.page = 'shaders'; else { UI.page = null; UI.tab = UI.from; } UI.moreKey = null; UI.form = null; scrollTop = 0; render(); } }),
       h('div', { class: 'row between' }, h('h1', { text: m.name }), m.sw ? sw(s.on, m.name, function (v) { setMod(m, v); }, !full) : null),
-      h('div', { class: 'row wrap' }, st[1] ? h('span', { class: 'chip ' + st[0], text: st[1] }) : null, h('span', { class: 'k', text: m.sw ? (s.on ? 'Switched on' : 'Switched off') : 'Always available' })),
-      h('p', { style: 'margin:0', text: m.about }), body,
-      m.sw ? h('div', { class: 'k', text: 'Beta. Was called "' + m.old + '".' }) : null);
+      h('p', { class: 'state', style: 'margin:0', text: m.about }), msgNew(),
+      h('div', { class: 'row wrap' }, st[1] ? h('span', { class: 'chip ' + st[0], text: st[1] }) : null, h('span', { class: 'state', text: m.sw && !s.on ? '' : st[2] })),
+      body);
+  }
+  // Owner decision: a presenter may make a guest (watch only) code. The owner can make one here too.
+  function guestCodeCard() {
+    return h('div', { class: 'card' }, h('div', { class: 'k', text: 'Guest code' }),
+      B.guestCode ? [h('div', { class: 'mono', style: 'font-size:28px;letter-spacing:.15em;text-align:center', text: B.guestCode }),
+        h('div', { class: 'hint', text: 'Watch only. Works for 60 minutes. Read it out, or show it on the big screen from System, People and codes.' }),
+        UI.ask === 'gcode' ? confirmRow('Cancel code ' + B.guestCode + '? Nobody new can join with it. People who already joined stay.', 'Cancel the code', function () { B.guestCode = ''; toast('The guest code was cancelled.'); render(); })
+          : h('button', { class: 'btn', text: 'Cancel this code', onclick: function () { ask('gcode'); } })]
+        : [h('div', { class: 'hint', text: 'Lets someone watch what is playing on their own phone. They cannot change anything.' }),
+          h('button', { class: 'btn', id: 'newguest', text: 'Make a guest code', onclick: function () { B.guestCode = '654321'; toast('Guest code 654321 is ready. It works for 60 minutes.'); render(); } })]);
   }
   function roleSheet() {
-    return sheet('You are a ' + ROLE[UI.role].toLowerCase(), [h('div', { text: ROLE_CAN[UI.role] }),
-      h('div', { class: 'k', text: 'This phone: My phone · the box is ' + (mstate(mod('health'))[0] === 'problem' ? 'running, with one warning' : 'well') }),
-      UI.role !== 'full' ? h('button', { class: 'btn', text: 'Forget this phone (leave the room)', onclick: function () { UI.sheet = null; UI.joined = false; render(); } }) : null, closeBtn('Close')]);
+    return sheet('You are ' + (UI.role === 'full' ? 'the owner' : 'a ' + ROLE[UI.role].toLowerCase()), [h('div', { class: 'state', text: ROLE_CAN[UI.role] }),
+      h('div', { class: 'hint', text: 'This phone is called "My phone". The box is ' + (mstate(mod('health'))[0] === 'problem' ? 'running, with one warning.' : 'well.') }),
+      can('live') ? guestCodeCard() : null,
+      UI.role !== 'full' ? (UI.ask === 'forget' ? confirmRow('Forget this phone? You need a new code to come back.', 'Forget this phone', function () { UI.sheet = null; UI.joined = false; drawBar(); render(); })
+        : h('button', { class: 'btn danger', text: 'Forget this phone', onclick: function () { ask('forget'); } })) : null, closeBtn('Close')]);
   }
-  function closeSheet() {
-    return sheet('Close the room?', [h('div', { text: 'This stops what is playing and switches off ' + B.proj.filter(function (p) { return p.on; }).length + ' projector(s). The box itself stays on, ready for tomorrow.' }),
-      h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Not yet', onclick: function () { UI.sheet = null; render(); } }), h('button', { class: 'btn grow on', text: 'Close the room', onclick: function () { UI.sheet = null; closeRoom(); } }))]);
-  }
-
   // ---- drawing -----------------------------------------------------------
   var phone = $('phone'), scrollTop = 0, lastKey = '';
   function setTheme(t) { UI.theme = t; phone.setAttribute('data-theme', t); drawBar(); }
@@ -932,10 +1149,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     return UI.role === 'full' ? [['room', 'Room'], ['live', 'Live'], ['mix', 'Mix'], ['media', 'Media'], ['system', 'System']] : UI.role === 'live' ? [['room', 'Room'], ['live', 'Live'], ['media', 'Media']] : [['room', 'Room'], ['live', 'Live']];
   }
   function drawToast() {
-    var old = phone.querySelector('.toast'); if (old) old.remove();
-    var t = UI.toast; if (!t || !isNew()) return;
-    phone.appendChild(h('div', { class: 'toast' + (t.err ? ' err' : ''), role: 'status' }, h('span', { text: t.text }),
-      t.label ? h('button', { text: t.label, onclick: function () { UI.toast = null; t.fn(); drawToast(); } }) : null));
+    var m = $('msg'), t = UI.toast; if (!m || !isNew() || !UI.joined) return;
+    m.textContent = ''; m.className = 'msg stick' + (t ? ' full' : '') + (t && t.err ? ' err' : '');
+    if (!t) return;
+    m.appendChild(h('span', { text: t.text }));
+    if (t.label) m.appendChild(h('button', { text: t.label, onclick: function () { UI.toast = null; t.fn(); drawToast(); } }));
   }
   function render() {
     var sc = phone.querySelector('.scroll'), key = UI.mode + UI.tab + UI.page + UI.joined;
@@ -946,7 +1164,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     var tabs = tabsFor();
     if (!tabs.some(function (t) { return t[0] === UI.tab; })) { UI.tab = tabs[0][0]; UI.page = null; }
     var screens = isNew() ? { room: newRoom, live: newLive, mix: newMix, media: newMedia, system: newSystem } : { live: oldLive, mix: oldMix, media: oldMedia, system: oldSystem };
-    var body = isNew() && UI.page ? modPage(mod(UI.page)) : screens[UI.tab]();
+    var body = isNew() && UI.page ? (UI.page === 'shaders' ? shaderPage() : modPage(mod(UI.page))) : screens[UI.tab]();
     var scroll = h('div', { class: 'scroll' }, body);
     if (isNew()) phone.appendChild(strip());
     phone.appendChild(scroll);
@@ -956,14 +1174,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     })));
     var s = UI.sheet;
     if (UI.welcome) { UI.welcome = false; if (isNew()) s = UI.sheet = { kind: 'role' }; }
-    if (s) phone.appendChild(s.kind === 'pad' ? padSheet() : s.kind === 'oldpad' ? oldPadSheet() : s.kind === 'dlg' ? oldDialog() : s.kind === 'files' ? fileSheet() : s.kind === 'clip' ? clipSheet() : s.kind === 'close' ? closeSheet() : roleSheet());
+    if (s) phone.appendChild(s.kind === 'pad' ? padSheet() : s.kind === 'oldpad' ? oldPadSheet() : s.kind === 'dlg' ? oldDialog() : s.kind === 'files' ? fileSheet() : s.kind === 'clip' ? clipSheet() : s.kind === 'fs' ? fsSheet() : roleSheet());
     scroll.scrollTop = scrollTop;
     drawToast(); patch(true); drawSide();
   }
   function drawBar() {
     var bar = $('bar'); bar.textContent = '';
     var seg = function (opts, cur, pick, label) { return h('div', { class: 'seg', role: 'group', 'aria-label': label }, opts.map(function (o) { return h('button', { class: o[0] === cur ? 'on' : '', text: o[1], 'aria-pressed': o[0] === cur ? 'true' : 'false', onclick: function () { pick(o[0]); } }); })); };
-    bar.appendChild(seg([['old', 'Current'], ['new', 'Proposed']], UI.mode, function (v) { UI.mode = v; UI.sheet = null; UI.page = null; UI.toast = null; UI.msg = ''; UI.editing = false; UI.find = ''; drawBar(); render(); }, 'Which panel'));
+    bar.appendChild(seg([['old', 'Current'], ['new', 'Proposed']], UI.mode, function (v) { if (v === 'old' && UI.page === 'shaders') UI.tab = 'mix'; UI.mode = v; UI.sheet = null; UI.page = null; UI.toast = null; UI.msg = ''; UI.editing = false; UI.find = ''; drawBar(); render(); }, 'Which panel'));
     bar.appendChild(h('select', { id: 'rolepick', 'aria-label': 'Who is holding the phone', onchange: function (e) {
       if (e.target.value === 'connect') { UI.joined = false; } else { UI.role = e.target.value; UI.joined = true; }
       UI.sheet = null; UI.page = null; UI.editing = false; drawBar(); render();
@@ -977,33 +1195,45 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     ['system', 'System and switching modules on and off', [
       ['Today the switch and the thing it switches are far apart. Modules is the fourth card; the DMX card is fifteen cards further down and says "Switch on under Modules above".', 'One row per module: name, state, switch. Tap the row for that module\'s own page, where the same switch sits at the top.'],
       ['DMX, MIDI, the schedule and OSC need two switches (the module, then "Turn DMX on" inside its card). The manual has a troubleshooting line for this.', 'One switch. Turning it on does both. Turning it off keeps the settings and offers Undo.'],
-      ['Switching a module on shows nothing new on screen; you have to know to scroll to its card and what to fill in.', 'Switching on opens a short first-run step ("Add your first projector"). Until it is done the row says Needs setup, and what is missing.'],
-      ['Every row reads "0.1.0 · beta". Media library says "Not built yet" and is On. Five rows cannot be switched at all.', 'Each row says what it is doing in plain words: Off, Needs setup, Ready, Active or Problem. Modules that are not built yet sit in one folded line.'],
-      ['23 cards in one scroll, with Factory reset between Diagnostics and Schedule, and off modules still taking a card each.', 'Five short groups: everyday, picture, controllers, set once, this box. Factory reset is last and asks you to type RESET.'],
+      ['Switching a module on shows nothing new on screen; you have to know to scroll to its card and what to fill in.', 'Switching on opens a short first-run step ("Add your first projector"). Until it is done the row says Set up, and what is missing.'],
+      ['Every row reads "0.1.0 · beta". Media library says "Not built yet" and is On. Five rows cannot be switched at all.', 'Each row says what it is doing in plain words: Off, Set up, Ready, Active or Problem. Modules that are not built yet sit in one folded line.'],
+      ['23 cards in one scroll, with Factory reset between Diagnostics and Schedule, and off modules still taking a card each.', 'Three groups: Everyday, Show tools, This box. Factory reset is last and asks before it does anything.'],
+      ['A projector cannot be edited; you remove it and add it again.', 'Each projector row has one main button (Switch on or Switch off) and More: input, Edit, Remove.'],
       ['No way to find a setting except scrolling.', 'A find box on top (it knows other words too: "pin" finds People and codes). A "needs a look" summary lists problems first.']]],
+    ['shaders', 'Shaders (a page of its own)', [
+      ['Everything about shaders is one long card in the middle of Mix: the status, a second Vibes button, twelve rows with up to three small buttons each, the sliders, the Vibes settings and the upload.', 'One page, Shaders. It opens from "Shaders and controls" under the Vibes button on Live, from the Shaders and Vibes row in System, and from Mix. All three land on the same page.'],
+      ['Not a sixth tab.', 'Five tabs already fill a phone, staff need only the one Vibes button, and the page disappears when the module is off (and on a Pi 3). A page keeps the tab bar steady.'],
+      ['What is on screen is one grey line ("On screen: nxlx-aurora, 3.1 ms a frame").', 'The top says which shader is on screen and when the next one comes, with Start Vibes, Stop Vibes and Next one.'],
+      ['Sliders appear inside the list under the playing row, with no minimum, maximum or way back.', 'A Controls card for the shader on screen: one slider per number input with its range and normal value, a reset on each and Reset all. It says plainly that values are not saved yet; "Save as my version" is shown as a proposed addition.'],
+      ['"In Vibes" and "Not in Vibes" are buttons whose words are their state; a refused shader says "Cannot be shown".', 'A tick "In Vibes" per shader, one Play button, the cost as Light, Medium or Heavy work, and a problem line with the GPU\'s message and line.'],
+      ['The time each shader stays is a number of seconds with a Save button; drawing size and upload sit beside it.', 'A select ("3 minutes") and a switch that save on tap; picture detail and adding a shader are under Advanced, with the refusal shown under the button.'],
+      ['Nothing says a controller or a lighting desk can start Vibes.', 'Links to MIDI, DMX, At power-up and the schedule, each with its state.'],
+      ['A guest sees the whole card with every button greyed.', 'A guest sees what is playing and the list; a presenter can start, stop, skip, play one and move sliders; the owner also changes settings, adds and removes.']]],
     ['nav', 'Navigation, roles and status everywhere', [
       ['Four tabs for everyone. Staff get the same Mix and System as the owner, with buttons greyed out and no reason given.', 'Owner: Room, Live, Mix, Media, System. Staff: Room, Live, Media. Guest: Room, Live. Each role sees only what it can use.'],
       ['Three sets of words for roles: view, live, full in the panel; guest and presenter on the codes; "watch only" in remote support.', 'Guest, Presenter, Owner everywhere. The chip in the top bar says which you are and what that allows.'],
       ['What is playing, blackout and Vibes show only on Live. On Media you can play a clip into a blacked-out screen and not know.', 'A status bar on every screen: what is on the screen, time left, and a white bar with "Bring back" while the screen is black.'],
-      ['Answers appear in one message line whose place changes: under the pads on Live, at the very bottom of Media and Mix, at the top of System.', 'One toast in the same place on every screen, with Undo where an action can be undone.'],
+      ['Answers appear in one message line whose place changes: under the pads on Live, at the very bottom of Media and Mix, at the top of System.', 'The message line sits directly under each screen\'s header and stays in view while you scroll, with Undo where an action can be undone.'],
+      ['Buttons whose words are their state ("Loop: on", "Vibes is on. Stop", "Overlay is on. Turn off"), window.confirm and window.prompt for delete and rename.', 'The same parts as the new System pages: a real switch with a noun, "Saved" beside a control for two seconds, rows with one main action and More, Remove last with a question in place, forms that open in place.'],
+      ['Only the owner can let anyone in.', 'A presenter can make a guest (watch only) code: tap the role chip in the top bar.'],
       ['The pill on Live says "PI4 · 52°C · OK": board jargon in the most valuable corner.', 'Health moves to System, and surfaces as "needs a look" only when something is wrong.']]],
     ['live', 'Live', [
       ['Fade out, Freeze, Stop and Blackout come after the twelve pads and Edit pads, so on a phone Blackout is a scroll away.', 'Blackout and Fade out are docked above the tabs, always under the thumb.'],
       ['Four ways to make the screen dark with three different ways back: Blackout becomes "Show", Fade out is undone by a small Fade in in another card.', 'Each button turns into its own way back in the same place: Blackout becomes "Bring picture back", Fade out becomes Fade in.'],
       ['Time shows as 00:01 / 03:20, and the name is the file name, not the pad name.', 'The pad name in large type, and time left ("2:06 left, then again").'],
-      ['Transport, test pattern and snapshot take the first screenful; pads, the main job, are below.', 'Now playing, ambience, pads. The rest folds under "More controls".'],
+      ['Transport, test pattern and snapshot take the first screenful; pads, the main job, are below.', 'Now playing, the big Vibes button (Start Vibes, Stop Vibes), pads. The rest folds under "More controls".'],
       ['Edit pads looks the same as playing. The ending must be chosen before the clip, because tapping a clip saves at once. The pad name cannot be typed.', 'A clear "Editing pads" banner; the sheet goes clip, name, ending, Save. An empty pad opens the sheet directly.']]],
     ['media', 'Media', [
       ['The clip list is the fourth card, under Quick play, Slideshow and Upload.', 'The clips come first, with a find box. Play everything and Slideshow fold under "Other ways to play".'],
-      ['Four equal buttons per clip (Play, Info, Rename, Delete), 34 px high, Delete beside Play.', 'One Play button per row, and a "more" button for details, pad, rename and delete.'],
-      ['Info writes one long sentence into the message line at the bottom of the page, off screen.', 'Details open in a sheet as rows, with advice in plain words ("May stutter").'],
+      ['Four equal buttons per clip (Play, Info, Rename, Delete), 34 px high, Delete beside Play.', 'One Play button per row, and More, which opens under the row: details, Put on a pad, Rename, Remove.'],
+      ['Info writes one long sentence into the message line at the bottom of the page, off screen.', 'Details show under the row as lines, with advice in plain words ("May stutter on this box").'],
       ['Upload then put it on a pad: about nine taps across two tabs, and you must remember the file name.', 'When an upload finishes the card offers "Put on a pad" and "Play now": four taps, same screen.'],
       ['A failed upload leaves "name: connection lost" in small grey text. Rename and Delete use browser dialogs.', 'A failed upload says what happened, that nothing was saved, and offers Try again. Delete says which pad it empties.']]],
     ['mix', 'Mix', [
-      ['Performance controls (opacity, speed) are mixed with room setup (size, position, rotate, mirror). A presenter can rotate the room\'s picture by accident.', 'Three groups: While playing, Layers, Picture setup. Setup is folded, owner only, with a one-line summary.'],
+      ['Performance controls (opacity, speed) are mixed with room setup (size, position, rotate, mirror). A presenter can rotate the room\'s picture by accident.', 'Four short groups: While playing, Shaders, Layers, Picture setup. Setup is folded, owner only, with a one-line summary.'],
       ['Rotate sits four cards away from Mirror. "Position X" has no unit. One Reset mix resets everything.', 'Plain names ("Left or right"), each value is its own reset button, and "back to normal" has Undo.'],
       ['Loop and Audio show their state only in the label ("Audio: mute"), unlike every other toggle.', 'Switches, like everywhere else.'],
-      ['Mapping and Shaders cards say "Switch on under System > Modules".', 'Each layer is a row with its switch right there, and opens the same module page as System does.']]],
+      ['Mapping and Shaders cards say "Switch on under System > Modules".', 'The overlay and the mapping are rows with their switch right there; mapping opens the same page as System does. Shaders show their list, or one button to set Vibes up.']]],
     ['connect', 'First visit and pairing', [
       ['Two forms on one screen, and the highlighted button is the owner\'s PIN, although most people who arrive are staff with a code.', 'The code comes first with one big Join button. "I am the owner" opens the PIN.'],
       ['"Name for this device" sits between the code and its button.', 'No name needed to join. After joining, a short sheet says what your role can do.'],
@@ -1012,7 +1242,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       ['Closing takes Stop on Live, then System, a long scroll to Projectors, then All off.', 'Room is the first tab and the screen staff land on. "Close the room" is one button with a confirmation and Undo. The real screen is being built separately; this only reserves its place.']]]
   ];
   var notes = { db: null, state: 'Loading notes...', text: {}, drawn: '' };
-  function screenKey() { return !UI.joined ? 'connect' : UI.page ? 'system' : UI.tab; }
+  function screenKey() { return !UI.joined ? 'connect' : UI.page === 'shaders' ? 'shaders' : UI.page ? 'system' : UI.tab; }
   function drawSide() {
     var key = screenKey(), side = $('side');
     if (notes.drawn === key + UI.mode && side.firstChild) return;
