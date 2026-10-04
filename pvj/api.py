@@ -1231,11 +1231,23 @@ class Api:
     def devices(self, body, device, client):
         return {"devices": self.auth.list_devices()}
 
+    def _still_paired(self, device):
+        """False when the device this request came from is gone: a factory reset (or a revoke) ran while the request
+        was on its way, after its token was checked. What it made in the meantime is taken back."""
+        if not device:
+            return False
+        if device.get("remote"):
+            return self.support.session is not None
+        return any(d["id"] == device.get("id") for d in self.settings.data["devices"])
+
     def invite(self, body, device, client):
         try:
             token, dev = self.auth.invite(str(body.get("name", "guest"))[:40], body.get("role"))
         except AuthError as e:
             raise bad(str(e))
+        if not self._still_paired(device):
+            self.auth.revoke(dev["id"])
+            raise ApiError(401, "this device is no longer paired")
         out = {"device": dev, "token": token, "note": "Share this token once; it is not shown again."}
         origin = body.get("origin")
         if isinstance(origin, str) and re.fullmatch(r"https?://[A-Za-z0-9.\-:\[\]]{1,100}", origin):
@@ -1678,9 +1690,12 @@ class Api:
 
     def make_join_code(self, body, device, client):
         try:
-            self.auth.create_join(body.get("role"), body.get("minutes", auth_mod.JOIN_DEFAULT_MINUTES), body.get("uses", auth_mod.JOIN_DEFAULT_USES))
+            code = self.auth.create_join(body.get("role"), body.get("minutes", auth_mod.JOIN_DEFAULT_MINUTES), body.get("uses", auth_mod.JOIN_DEFAULT_USES))
         except AuthError as e:
             raise bad(str(e))
+        if not self._still_paired(device):
+            self.auth.cancel_join(code)
+            raise ApiError(401, "this device is no longer paired")
         return self._access_state()
 
     def cancel_join_code(self, body, device, client):

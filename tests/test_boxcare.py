@@ -823,9 +823,21 @@ class FactoryResetTest(Base):
         return self.h("POST", "/api/system/factory-reset", body, device or self.full_dev, client)
 
     def test_every_refusal_changes_nothing(self):
+        self.h("POST", "/api/access/code", {"role": "view"}, self.full_dev)
+        dev, _ = self.remote_login()
         before = self.on_disk()
         media = sorted(os.listdir(self.media))
+        state = lambda: (copy.deepcopy(self.settings.data), self.auth.current_pin, [j["code"] for j in self.auth.list_joins()],
+                         copy.deepcopy(self.api.support.session), sorted(os.listdir(self.tmp)), list(self.player.calls), self.api._care_busy)
+        was = state()
+        self.assertEqual(len(was[2]), 1)
         ok = {"confirm": "factory-reset", "media": "delete"}
+        self.assertEqual(self.reset(dev, TUNNEL, **ok)[0], 403)
+        self.assertEqual(self.reset(confirm="factory-reset ", media="delete")[0], 400)
+        self.assertEqual(self.reset(confirm="FACTORY-RESET", media="delete")[0], 400)
+        self.assertEqual(self.reset(confirm=["factory-reset"], media="delete")[0], 400)
+        self.assertEqual(self.reset(confirm="factory-reset", media="Delete")[0], 400)
+        self.assertEqual(self.reset(confirm="factory-reset", media=None)[0], 400)
         self.assertEqual(self.reset()[0], 400)
         self.assertEqual(self.reset(media="delete")[0], 400)
         self.assertEqual(self.reset(confirm="yes", media="delete")[0], 400)
@@ -844,6 +856,8 @@ class FactoryResetTest(Base):
                                    headers={"Content-Type": "application/x-www-form-urlencoded"})[0], 415)
         self.assertEqual(self.on_disk(), before)
         self.assertEqual(sorted(os.listdir(self.media)), media)
+        self.assertEqual(state(), was)             # devices, PIN, join code, support session, files, playback: all as they were
+        self.assertEqual(self.call("GET", "/api/status", token=self.full)[0], 200)
 
     def test_refused_through_the_support_tunnel(self):
         dev, _ = self.remote_login()
@@ -970,6 +984,49 @@ class FactoryResetTest(Base):
                 self.assertNotIn(h, text, name)
         self.assertEqual(os.listdir(inbox), [])
         self.assertEqual(sorted(os.listdir(self.media)), media)                       # the clips stay
+
+    def test_no_way_in_made_while_the_reset_runs_survives_it(self):
+        """Another full device asks for a join code and invites a guest in the moment between the reset cancelling
+        the codes and wiping the devices; a third request arrives when the reset is over."""
+        real, made = self.auth.cancel_join, []
+
+        def and_then(code=None):
+            done = real(code)
+            if code is None and not made:
+                made.append(self.auth.create_join("view", 10, 5))
+                made.append(self.auth.invite("late guest", "view")[0])
+                self.assertEqual(self.h("POST", "/api/support/config", dict(CFG, allowed=True), self.full_dev)[0], 200)
+                self.assertEqual(self.h("POST", "/api/support/start", {"confirm": "start"}, self.full_dev)[0], 200)
+            return done
+        self.auth.cancel_join = and_then
+        old_pin = self.auth.current_pin
+        self.assertEqual(self.reset(confirm="factory-reset", media="keep")[0], 200)
+        self.assertEqual(len(made), 2)                                    # the race did happen
+        self.assertEqual((self.auth.list_joins(), self.settings.data["devices"], self.api.support.session), ([], [], None))
+        self.assertEqual(self.call("POST", "/api/pair", {"pin": made[0], "name": "x"})[0], 403)
+        self.assertEqual(self.call("GET", "/api/status", token=made[1])[0], 401)
+        # a request whose token was checked just before the reset, and which runs just after it
+        st, out = self.h("POST", "/api/access/code", {"role": "live"}, self.full_dev)
+        self.assertEqual((st, self.auth.list_joins()), (401, []))
+        st, out = self.h("POST", "/api/devices/invite", {"name": "late", "role": "live"}, self.full_dev)
+        self.assertEqual((st, self.settings.data["devices"]), (401, []))
+        self.assertNotIn("token", out)
+        with open(self.settings.path) as f:
+            self.assertEqual(json.load(f)["devices"], [])
+        if self.auth.current_pin != old_pin:
+            self.assertEqual(self.call("POST", "/api/pair", {"pin": old_pin, "name": "x"})[0], 403)
+
+    def test_a_reset_that_cannot_be_saved_does_not_half_happen(self):
+        before, memory = self.on_disk(), copy.deepcopy(self.settings.data)
+        with mock.patch.object(self.settings, "save", side_effect=OSError(28, "No space left on device")):
+            st, out = self.reset(confirm="factory-reset", media="delete")
+        self.assertEqual(st, 500, out)
+        self.assertIn("was not reset", out["error"])
+        self.assertEqual((self.settings.data, self.on_disk()), (memory, before))
+        self.assertEqual(self.call("GET", "/api/devices", token=self.full)[0], 200)       # still paired
+        self.assertIn("a.mp4", os.listdir(self.media))
+        self.assertIsNone(self.api._care_busy)
+        self.assertEqual(self.reset(confirm="factory-reset", media="keep")[0], 200)
 
     def test_deleting_the_clips_touches_only_the_box_s_own_media_folder(self):
         os.mkdir(os.path.join(self.media, "folder"))

@@ -785,6 +785,32 @@ class BoxCare:
                     problems.append("could not delete %s" % _printable(entry.name))
         return removed
 
+    def _wipe_access(self):
+        """Settings back to defaults, no device, no join code, a new PIN: one step, under the two locks every way
+        in needs (pairing holds the first, adding a device the second; both in the order pair() takes them). A full
+        device's request that was already past its token check cannot leave a join code or an invited device
+        behind: it runs before all of this, and what it made is wiped here, or after all of it, and then the API
+        takes back what it made (api._still_paired). Returns the new PIN."""
+        auth = self.api.auth
+        with auth._pair_lock, self.settings.lock:
+            previous = copy.deepcopy(self.settings.data)
+            new = default_settings()
+            new["schema"] = self.settings._current
+            new["auth"] = dict(previous["auth"])           # replaced below: the box is never without a PIN
+            self._replace(new)
+            auth._joins.clear()
+            auth._fails.clear()
+            auth._global_fails = []
+            auth._locked_until.clear()
+            try:
+                pin = auth._new_pin()                      # saves the emptied settings with the new PIN
+            except OSError as e:
+                self._replace(previous)
+                raise ApiError(500, "the settings could not be saved, so the box was not reset: %s" % (e.strerror or e))
+            auth.last_seen.clear()
+            auth._joins.clear()
+        return pin
+
     def factory_reset(self, body, device, client):
         """{"confirm": "factory-reset", "media": "keep" | "delete"}: playback stopped, settings back to defaults, every
         paired device, join code and support session gone, a new PIN (so the PIN screen returns), and the clips kept
@@ -822,14 +848,10 @@ class BoxCare:
                     api.pinscreen.hide()
                 except Exception:
                     pass
-            with self.settings.lock:
-                new = default_settings()
-                new["schema"] = self.settings._current
-                new["auth"] = dict(self.settings.data["auth"])     # replaced two lines down: the box is never without a PIN
-                self._replace(new)
-                self.settings.save()
-            api.auth.last_seen.clear()
-            pin = api.auth.rotate_pin()                   # saves; also lifts any lockout
+            pin = self._wipe_access()
+            with api.support.lock:                        # one started between the first look and the wipe; none can be now
+                if api.support.session:
+                    api.support._end("factory reset", tell_helper=True)
             if api.on_pin:
                 api.on_pin(pin)
             with self.settings.lock:                      # the automatic backup would still hold the old devices
