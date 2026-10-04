@@ -651,6 +651,29 @@ class DiagnosticsTest(Base):
         self.assertTrue(all(len(line) <= boxcare.LOG_LINE_MAX for line in lines))
         self.assertTrue(lines[-1].startswith("line 999 "))
 
+    def test_a_secret_is_removed_before_a_long_line_is_cut(self):
+        """Cut first, the login at the cut would lose its "@" and its beginning would stay. None of these is a secret
+        the box knows, so only the patterns can catch them."""
+        long_line = "x" * 380 + " rtsp://strad-user:Straddle-Pw-999@10.0.0.9/live " + "y" * 1600
+        self.assertGreater(len(long_line), 2000)
+        self.assertLess(long_line.index("strad-user"), boxcare.LOG_LINE_MAX)
+        self.assertGreater(long_line.index("@10.0.0.9"), boxcare.LOG_LINE_MAX)
+        self.care._run = FakeJournal(stdout="\n".join([
+            long_line, "z" * 390 + " passphrase=Cut-Phrase-77 " + "y" * 600,
+            "upstream said Authorization: Bearer Bear-Sent-1 and stopped", "header authorization=Basic QmFzaWMtU2VudC0y",
+            "wg: psk=Psk-Sent-3 peer up", "login failed, password: Pw-Sent-4", "srt://10.0.0.9:9000?pass%70hrase=Enc-Sent-5&mode=caller",
+            '{"api_key": "Key-Sent-6", "wsSecret":"Ws-Sent-7"}', "x-auth-token: Tok-Sent-8; sign=Sign-Sent-9", "plain line: nothing to hide = true"]))
+        lines = self.get()["log"]["lines"]
+        text = json.dumps(lines)
+        for secret in ("strad-user", "Stra", "Cut-", "Bear-Sent-1", "QmFzaWMtU2VudC0y", "Psk-Sent-3", "Pw-Sent-4", "Enc-Sent-5", "Key-Sent-6",
+                       "Ws-Sent-7", "Tok-Sent-8", "Sign-Sent-9"):
+            self.assertNotIn(secret, text)
+        self.assertTrue(all(len(line) <= boxcare.LOG_LINE_MAX for line in lines))
+        self.assertTrue(lines[0].startswith("x" * 380 + " rtsp://(removed)@10"), lines[0][370:])
+        self.assertEqual(lines[2], "upstream said Authorization: (removed) and stopped")
+        self.assertEqual(lines[6], "srt://10.0.0.9:9000?pass%70hrase=(removed)&mode=caller")
+        self.assertEqual(lines[-1], "plain line: nothing to hide = true")
+
     def test_a_missing_piece_does_not_cost_the_rest(self):
         self.care._run = FakeJournal()
 

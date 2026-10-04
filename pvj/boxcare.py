@@ -40,6 +40,7 @@ import socket
 import subprocess
 import threading
 import time
+from urllib.parse import unquote
 
 from . import dmx as dmx_mod, midi as midi_mod, osc as osc_mod, projector as projector_mod, streams as streams_mod
 from . import mapper as mapper_mod, scheduler as scheduler_mod, sync as sync_mod, themes as themes_mod
@@ -59,12 +60,15 @@ KEEP_IMPORT_BACKUPS = 3
 LOG_UNITS = ("pvj-web.service", "pvj-player.service", "pvj-sysd.service", "pvj-netd.service", "pvj-supportd.service")
 LOG_LINES, LOG_LINE_MAX = 300, 400
 CONFIRM_IMPORT, CONFIRM_RESET = "import", "factory-reset"
-SECRET_QUERY = ("passphrase", "password", "pass", "token", "key", "secret")
+SECRET_WORDS = "pass|pwd|psk|secret|token|key|auth|sign"       # a name holding one of these is followed by a secret
 _ID = re.compile(r"[0-9a-f]{8}")
 _SECRET_KEY = re.compile(r"pass|secret|token|salt|hash|credential|(^|_)(pin|key|code|login)(_|$)", re.I)
 _LOG_PIN = re.compile(r"(?i)\b(pin|code)\b([ :=]+)(?=[A-Za-z-]*[0-9])[A-Za-z0-9-]{4,}")
 _LOG_URL_LOGIN = re.compile(r"([a-z][a-z0-9+.-]*://)[^/@\s]+@", re.I)
-_LOG_QUERY = re.compile(r"(?i)\b(%s)=[^&\s\"']+" % "|".join(SECRET_QUERY))
+_LOG_BEARER = re.compile(r"(?i)\b(authorization[\"']?\s*[:=]\s*[\"']?)(?:[a-z]+\s+)?[^\s\"',;]+|\b(bearer\s+)[^\s\"',;]+")
+_LOG_PAIR = re.compile(r"(?i)\b([a-z0-9_.-]*(?:%s)[a-z0-9_.-]*[\"']?\s*[:=]\s*[\"']?)[^&\s\"',;]+" % SECRET_WORDS)
+_LOG_ENCODED = re.compile(r"([A-Za-z0-9_.-]*%[0-9A-Fa-f]{2}[A-Za-z0-9_.%-]*=)([^&\s\"',;]+)")      # pass%70hrase=...
+_SECRET_WORD = re.compile(SECRET_WORDS, re.I)
 
 
 def bad(message, status=400):
@@ -391,13 +395,17 @@ def public_settings(data, support_configured=None):
 
 
 def scrub(value, secrets):
-    """Every piece of text in `value` without the given secrets, without a login in an address, and without what
-    follows "PIN" or "code" (the panel writes its pairing PIN to the log at every start)."""
+    """Every piece of text in `value` without the given secrets, without a login in an address, without what follows
+    a name that sounds like a secret ("passphrase=", "psk=", "password:", "Authorization: Bearer", also when the name
+    is percent-encoded), and without what follows "PIN" or "code" (the panel writes its pairing PIN to the log at
+    every start)."""
     if isinstance(value, str):
         for s in secrets:
             value = value.replace(s, "(removed)")
         value = _LOG_URL_LOGIN.sub(r"\1(removed)@", value)
-        value = _LOG_QUERY.sub(r"\1=(removed)", value)
+        value = _LOG_BEARER.sub(lambda m: (m.group(1) or m.group(2)) + "(removed)", value)
+        value = _LOG_PAIR.sub(r"\1(removed)", value)
+        value = _LOG_ENCODED.sub(lambda m: m.group(1) + "(removed)" if _SECRET_WORD.search(unquote(m.group(1))) else m.group(0), value)
         return _LOG_PIN.sub(r"\1\2(removed)", value)
     if isinstance(value, dict):
         return {scrub(k, secrets) if isinstance(k, str) else k: scrub(v, secrets) for k, v in value.items()}
@@ -655,10 +663,11 @@ class BoxCare:
             found.update(session.get("tokens", {}))
         return sorted((s for s in found if isinstance(s, str) and len(s) >= 3), key=len, reverse=True)
 
-    def read_log(self):
+    def read_log(self, secrets=()):
         """The services' recent log lines, if this unprivileged service may read them. It is told apart: lines came
         back, none came back (the usual case: the panel's user is not in the systemd-journal group, on purpose),
-        or the command could not run."""
+        or the command could not run. Each line is scrubbed whole and only then cut to length: cut first, a secret
+        that straddles the cut would lose the end that makes it recognisable and keep its beginning."""
         argv = ["journalctl", "--no-pager", "-q", "-b", "-n", str(LOG_LINES), "-o", "short-iso"]
         for unit in LOG_UNITS:
             argv += ["-u", unit]
@@ -666,7 +675,7 @@ class BoxCare:
             r = self._run(argv, capture_output=True, text=True, timeout=10, errors="replace")
         except (OSError, subprocess.SubprocessError) as e:
             return {"readable": False, "lines": [], "note": "the system log could not be read: %s" % (getattr(e, "strerror", None) or type(e).__name__)}
-        lines = [line[:LOG_LINE_MAX] for line in (r.stdout or "").splitlines() if line.strip()][-LOG_LINES:]
+        lines = [scrub(line, secrets)[:LOG_LINE_MAX] for line in [x for x in (r.stdout or "").splitlines() if x.strip()][-LOG_LINES:]]
         if r.returncode != 0:
             return {"readable": False, "lines": [], "note": "the system log could not be read: %s" % (r.stderr or "").strip()[-200:]}
         if not lines:
@@ -705,7 +714,7 @@ class BoxCare:
                                         for m in api.registry.list()]),
                "health": part(api.health.report),
                "update": part(lambda: {k: v for k, v in api.update_status({}, device, client).items() if k != "version"}),
-               "log": part(self.read_log),
+               "log": part(lambda: self.read_log(secrets)),
                "settings": public_settings(data, part(api.support.configured)),
                "left_out": "The PIN, device tokens, join and support codes, remote-support keys and addresses, projector "
                            "passwords and stream logins are never in this file."}
