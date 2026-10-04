@@ -25,6 +25,7 @@ import re
 import socket
 import threading
 import time
+import unicodedata
 import uuid
 
 PORT = 4352
@@ -42,15 +43,16 @@ ERRORS = {"ERR1": "the projector does not know that command", "ERR2": "the proje
           "ERRA": "wrong projector password"}
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
                                              "fc00::/7", "fe80::/10")]
-REFUSED = {ipaddress.ip_address("169.254.169.254")}      # the cloud metadata service on an x86 install in a VM
+REFUSED = {ipaddress.ip_address("169.254.169.254"), ipaddress.ip_address("fd00:ec2::254")}     # the cloud metadata service (x86 in a VM), IPv4 and IPv6
 _HOST = re.compile(r"[A-Za-z0-9.-]{1,253}|[0-9A-Fa-f:.]{2,45}")
 _INPUT = re.compile(r"[1-5][1-9]")
-SOFT = ("ERR1", "ERR3", "ERR4")  # an answer, but no value: a detail that is simply not known (yet)
+SOFT = ("ERR1", "ERR2", "ERR3", "ERR4", "odd")     # an answer, but no usable value: a detail that is simply not known (yet)
 
 
 class ProjectorError(Exception):
     """`code` says why, for code that must decide: ERR1 to ERR4 and ERRA from the projector, "busy" (another
-    command of ours is still running), "unreachable" (no connection or no answer), or None."""
+    command of ours is still running), "unreachable" (no connection or no answer), "odd" (an answer that is not
+    what the standard says), "stopped" (the background check was told to stop), or None."""
 
     def __init__(self, message, code=None):
         super().__init__(message)
@@ -62,17 +64,23 @@ def input_name(code):
     return "%s %s" % (INPUT_KINDS.get(code[:1], "Input"), code[1:])
 
 
+def _unprintable(ch):
+    """Control and format characters (Unicode Cc, Cf and the other C categories: C0, C1, the bidi overrides, zero
+    width marks), the line and paragraph separators, and the "could not decode" mark."""
+    return unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") or ch == "\ufffd"
+
+
 def clean_text(value, limit):
-    """Text from a projector, safe to store and show: no control characters, cut to `limit`."""
-    return re.sub("[\x00-\x1f\x7f-\x9f\ufffd]", "", value).strip()[:limit]
+    """Text from a projector, safe to store and show: no control or format characters, cut to `limit` characters."""
+    return "".join(ch for ch in value if not _unprintable(ch)).strip()[:limit]
 
 
 def validate_label(inputs, code, label):
     """A friendly label ("Matrix", "Box") for one of the projector's own inputs; "" takes the label away."""
     if not isinstance(code, str) or not _INPUT.fullmatch(code) or code not in inputs:
         raise ProjectorError("that is not one of this projector's inputs")
-    if not isinstance(label, str) or len(label.strip()) > 24 or re.search(r"[\x00-\x1f\x7f]", label):
-        raise ProjectorError("a label may have up to 24 characters")
+    if not isinstance(label, str) or len(label.strip()) > 24 or any(_unprintable(ch) for ch in label):
+        raise ProjectorError("a label may have up to 24 plain characters")
     return label.strip()
 
 
@@ -101,7 +109,7 @@ def validate(entry):
     if not isinstance(entry, dict):
         raise ProjectorError("a projector must be an object")
     name = entry.get("name", "Projector")
-    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40 or re.search(r"[\x00-\x1f]", name):
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40 or any(_unprintable(ch) for ch in name):
         raise ProjectorError("give the projector a name of up to 40 characters")
     host = entry.get("host")
     if not isinstance(host, str) or not _HOST.fullmatch(host):
@@ -117,55 +125,84 @@ def validate(entry):
 
 def _read_line(sock, limit, deadline):
     """One PJLink line: it ends with a carriage return alone (not a line feed), so readline() would wait forever.
-    `deadline` (time.monotonic) bounds the whole line, so a device that sends a byte now and then cannot hold us."""
+    `deadline` (time.monotonic) bounds the whole line, so a device that sends a byte now and then cannot hold us.
+    A line that never ends (longer than `limit` bytes) or is cut off (the device closes first) is refused."""
     buf = b""
-    while len(buf) < limit:
+    while True:
         left = deadline - time.monotonic()
         if left <= 0:
             raise socket.timeout("timed out")
         sock.settimeout(left)
         c = sock.recv(1)
         if not c:
-            break
+            if buf:
+                raise ProjectorError("unexpected answer from the projector", "odd")
+            raise ProjectorError("the projector did not answer: it closed the connection", "unreachable")
         if c in (b"\r", b"\n"):
             if buf:
                 break
             continue
         buf += c
+        if len(buf) > limit:
+            raise ProjectorError("unexpected answer from the projector", "odd")
     return buf.decode("utf-8", "replace").strip()      # ASCII, except the projector's name, which is UTF-8
 
 
-_busy = {}                       # (host, port) -> Lock: one command at a time per projector (many take one connection)
+_busy = {}                       # (address, port) -> [Lock, users]: one command at a time per projector (many take one connection)
 _busy_guard = threading.Lock()
 
 
-def _lock_for(host, port):
+def _take(key, deadline):
+    """The lock of the projector at `key` (its resolved address and port, so two spellings of one device share
+    it), or None if it is not free by `deadline`. Entries are counted and go when nobody uses them."""
     with _busy_guard:
-        return _busy.setdefault((host, port), threading.Lock())
+        slot = _busy.setdefault(key, [threading.Lock(), 0])
+        slot[1] += 1
+    if slot[0].acquire(timeout=max(0.0, deadline - time.monotonic())):
+        return slot
+    _drop(key, slot)
+    return None
+
+
+def _drop(key, slot):
+    with _busy_guard:
+        slot[1] -= 1
+        if slot[1] <= 0 and _busy.get(key) is slot:
+            del _busy[key]
 
 
 class PJLink:
-    """One command per connection, as projectors expect. The connect and both reads share one deadline of
-    2 x timeout; a name lookup is not bounded by us (use an IP address to avoid it)."""
+    """One command per connection, as projectors expect. One deadline of 2 x timeout covers the wait for an
+    earlier command of ours to the same projector, the connect and both reads; a name lookup is not bounded
+    by us (use an IP address to avoid it). `cancel` (a threading.Event), once set, means nothing more is sent."""
 
     def __init__(self, host, port=PORT, password="", timeout=5.0, connect=socket.create_connection, resolve=socket.getaddrinfo):
         self.host, self.port, self.password, self.timeout = host, port, password, timeout
         self._connect, self._resolve = connect, resolve
+        self.cancel = None
+
+    def _stopped(self):
+        if self.cancel is not None and self.cancel.is_set():
+            raise ProjectorError("stopped", "stopped")
 
     def command(self, body):
         """Send "%1" + body (e.g. "POWR 1") and return the answer after "=". Raises ProjectorError."""
-        lock = _lock_for(self.host, self.port)
-        if not lock.acquire(timeout=2 * self.timeout):
-            raise ProjectorError("the projector is busy with another command", "busy")
-        try:
-            return self._command(body)
-        finally:
-            lock.release()
-
-    def _command(self, body):
+        self._stopped()
         addr = private_address(self.host, self._resolve)       # checked again at every use: a name may change
         deadline = time.monotonic() + 2 * self.timeout
+        key = (addr, self.port)
+        slot = _take(key, deadline)
+        if slot is None:
+            raise ProjectorError("the projector is busy with another command", "busy")
         try:
+            return self._command(addr, body, deadline)
+        finally:
+            slot[0].release()
+            _drop(key, slot)
+
+    def _command(self, addr, body, deadline):
+        try:
+            self._stopped()
             s = self._connect((addr, self.port), timeout=min(self.timeout, max(0.1, deadline - time.monotonic())))
         except OSError as e:
             raise ProjectorError("cannot reach the projector at %s: %s" % (self.host, getattr(e, "strerror", None) or e), "unreachable")
@@ -181,6 +218,7 @@ class PJLink:
                 prefix = hashlib.md5((greeting.split()[2] + self.password).encode()).hexdigest()
             else:
                 raise ProjectorError("that does not answer like a PJLink projector")
+            self._stopped()
             s.sendall((prefix + "%1" + body + "\r").encode("ascii"))
             answer = _read_line(s, 300, deadline)
         except (OSError, socket.timeout) as e:
@@ -191,14 +229,20 @@ class PJLink:
             raise ProjectorError(ERRORS["ERRA"], "ERRA")
         m = re.fullmatch(r"%1([A-Za-z0-9]{4})=(.*)", answer)       # INF1 and INF2 have a digit; the case is free
         if not m or m.group(1).upper() != body.split()[0]:
-            raise ProjectorError("unexpected answer from the projector")
+            raise ProjectorError("unexpected answer from the projector", "odd")
         value = m.group(2)
         if value.upper() in ERRORS:
             raise ProjectorError(ERRORS[value.upper()], value.upper())
         return value
 
+    def _set(self, body):
+        """A set command: the only good answer is OK (2.3 of the standard)."""
+        if self.command(body).upper() != "OK":
+            raise ProjectorError("unexpected answer from the projector", "odd")
+        return "OK"
+
     def power(self, on):
-        return self.command("POWR 1" if on else "POWR 0")
+        return self._set("POWR 1" if on else "POWR 0")
 
     def state(self):
         v = self.command("POWR ?")
@@ -207,42 +251,46 @@ class PJLink:
     def mute(self, on, what="both"):
         """Mute or unmute the "picture", the "sound" or "both". A projector without separate mutes refuses those."""
         try:
-            return self.command("AVMT %s%d" % (MUTE[what], 1 if on else 0))
+            return self._set("AVMT %s%d" % (MUTE[what], 1 if on else 0))
         except ProjectorError as e:
             if e.code == "ERR2" and what != "both":
                 raise ProjectorError("this projector cannot mute the picture and the sound separately", "ERR2")
             raise
 
     def mute_state(self):
-        """{"picture": bool, "sound": bool}. The standard has four answers: 11, 21, 31 (both) and 30 (neither)."""
+        """{"picture": bool, "sound": bool}. The standard names four answers: 11, 21, 31 (both) and 30 (neither);
+        its table of values also allows 10 and 20, which can only mean "not muted"."""
         v = self.command("AVMT ?")
-        if v not in ("11", "21", "31", "30"):
-            raise ProjectorError("unexpected answer from the projector")
+        if v not in ("11", "21", "31", "30", "10", "20"):
+            raise ProjectorError("unexpected answer from the projector", "odd")
         return {"picture": v in ("11", "31"), "sound": v in ("21", "31")}
 
     def input(self):
         """The input in use, such as "31"."""
         v = self.command("INPT ?")
         if not _INPUT.fullmatch(v):
-            raise ProjectorError("unexpected answer from the projector")
+            raise ProjectorError("unexpected answer from the projector", "odd")
         return v
 
     def set_input(self, code):
         if not isinstance(code, str) or not _INPUT.fullmatch(code):
             raise ProjectorError("the projector has no such input", "ERR2")
         try:
-            return self.command("INPT " + code)
+            return self._set("INPT " + code)
         except ProjectorError as e:
             if e.code == "ERR2":
                 raise ProjectorError("the projector has no such input", "ERR2")
             raise
 
     def inputs(self):
-        """The projector's own list of inputs, such as ["11", "31", "32"] (at most 50, says the standard)."""
+        """The projector's own list of inputs, such as ["11", "31", "32"] (at most 50, says the standard). An
+        answer with no class 1 input in it is "odd", not an empty list: a projector without inputs is no use."""
         out = []
         for c in self.command("INST ?").split()[:50]:
             if _INPUT.fullmatch(c) and c not in out:
                 out.append(c)
+        if not out:
+            raise ProjectorError("unexpected answer from the projector", "odd")
         return out
 
     def lamps(self):
@@ -250,20 +298,21 @@ class PJLink:
         parts = self.command("LAMP ?").split()
         if not parts or len(parts) % 2 or len(parts) > 16 or not all(re.fullmatch(r"[0-9]{1,5}", h) and o in ("0", "1")
                                                                      for h, o in zip(parts[::2], parts[1::2])):
-            raise ProjectorError("unexpected answer from the projector")
+            raise ProjectorError("unexpected answer from the projector", "odd")
         return [{"hours": int(h), "on": o == "1"} for h, o in zip(parts[::2], parts[1::2])]
 
     def warnings(self):
         """{"fan": "ok" | "warning" | "error", "lamp": ..., "temperature", "cover", "filter", "other"}."""
         v = self.command("ERST ?")
         if not re.fullmatch(r"[0-2]{6}", v):
-            raise ProjectorError("unexpected answer from the projector")
+            raise ProjectorError("unexpected answer from the projector", "odd")
         return {name: ("ok", "warning", "error")[int(d)] for name, d in zip(WARNINGS, v)}
 
     def identify(self):
         """Who the projector is: {"name", "maker", "model", "info", "class", "inputs"}. A value the projector
-        would not give right now (many refuse some of these in standby) is None; a projector that cannot be
-        reached at all raises at the first question, so an unplugged one costs one timeout, not six."""
+        would not give right now (many refuse some of these in standby), or gave in a form that is not the
+        standard's, is None; a projector that cannot be reached at all raises at the first question, so an
+        unplugged one costs one timeout, not six."""
         def ask(fn):
             try:
                 return fn()
@@ -283,7 +332,7 @@ class PJLink:
 class _Worker:
     def __init__(self, pid):
         self.pid = pid
-        self.stop = threading.Event()         # this thread's own: a newer worker never revives an old one
+        self.stop = threading.Event()         # this worker's own: a newer worker never revives an old one
         self.wake = threading.Event()
         self.thread = None
         self.due = 0.0                        # time.monotonic() of the next status check
@@ -295,10 +344,12 @@ class _Worker:
 class Monitor:
     """The background status of every projector, and the retry of a refused input change.
 
-    One thread per projector (so at most MAX_PROJECTORS), each with its own stop signal; apply() starts and stops
-    them to match the settings and the module switch, and never starts a second thread for a projector whose old
-    one is still finishing a command. The status lives in memory only. Nothing here holds a lock while it talks
-    to a projector, and nothing joins a thread."""
+    One worker per projector, each with its own stop signal, on at most MAX_PROJECTORS threads in all, counting
+    those of stopped workers that are still finishing a command: a projector whose turn has not come is
+    "waiting", and a thread that ends takes the next waiting projector over instead of a new thread being
+    started. apply() matches the workers to the settings and the module switch. A stopped worker sends nothing
+    more and saves nothing. The status lives in memory only. Nothing here holds a lock while it talks to a
+    projector."""
 
     def __init__(self, api, interval=POLL_EVERY, changing=POLL_CHANGING, stagger=STAGGER, retry_for=RETRY_FOR,
                  retry_every=RETRY_EVERY, log=print):
@@ -306,9 +357,11 @@ class Monitor:
         self.interval, self.changing, self.stagger, self.retry_for, self.retry_every = interval, changing, stagger, retry_for, retry_every
         self.lock = threading.Lock()
         self._workers = {}       # projector id -> _Worker
-        self._leaving = []       # stopped workers whose thread has not ended yet
+        self._leaving = []       # stopped workers whose thread is still busy with them
+        self._dying = []         # threads that have let go of everything and are about to end
         self._status = {}        # projector id -> the last answer
         self._notice = {}        # projector id -> {"ok", "text"}: how the last input change ended
+        self._input_locks = {}   # projector id -> Lock: one input change at a time, the user's or the retry's
         self._closed = False
 
     def _entries(self):
@@ -319,22 +372,45 @@ class Monitor:
     def _entry(self, pid):
         return next((p for p in self._entries() if p["id"] == pid), None)
 
+    def _link(self, entry, w=None):
+        link = self.api._pjlink(entry)
+        if w is not None:
+            link.cancel = w.stop                  # switched off or removed: not one more command
+        return link
+
+    def _new_worker(self, pid, index, entry):
+        """With self.lock held."""
+        w = self._workers[pid] = _Worker(pid)
+        w.identify = not entry.get("details")
+        w.due = time.monotonic() + index * self.stagger
+        return w
+
+    def _waiting(self):
+        """With self.lock held: (index, entry) of projectors that have no worker and no old one still ending."""
+        busy = set(self._workers) | {w.pid for w in self._leaving}
+        return [(i, p) for i, p in enumerate(self._entries()) if p["id"] not in busy]
+
     def apply(self):
-        """Match the threads to the projectors in the settings; none at all while the module is off."""
-        want = {p["id"]: (i, p) for i, p in enumerate(self._entries())}
-        with self.lock:
-            for pid in [k for k in self._workers if k not in want]:
-                self._retire(self._workers.pop(pid))
-            self._leaving = [w for w in self._leaving if w.thread.is_alive()]
-            waiting = {w.pid for w in self._leaving}
-            for pid, (i, p) in want.items():
-                if pid in self._workers or pid in waiting:      # the old thread calls apply() again when it ends
-                    continue
-                w = self._workers[pid] = _Worker(pid)
-                w.identify = not p.get("details")
-                w.due = time.monotonic() + i * self.stagger
-                w.thread = threading.Thread(target=self._loop, args=(w,), name="projector-poll", daemon=True)
-                w.thread.start()
+        """Match the workers to the projectors in the settings; none at all while the module is off."""
+        for _ in range(2):
+            with self.lock:
+                want = {p["id"] for p in self._entries()}
+                for pid in [k for k in self._workers if k not in want]:
+                    self._retire(self._workers.pop(pid))
+                for pid in [k for k in self._input_locks if k not in want]:
+                    del self._input_locks[pid]
+                self._dying = [t for t in self._dying if t.is_alive()]
+                for i, p in self._waiting():
+                    if len(self._workers) + len(self._leaving) + len(self._dying) >= MAX_PROJECTORS:
+                        break                     # it waits; a thread that ends takes it over (see _after)
+                    w = self._new_worker(p["id"], i, p)
+                    w.thread = threading.Thread(target=self._run, args=(w,), name="projector-poll", daemon=True)
+                    w.thread.start()
+                dying = list(self._dying) if self._waiting() else []
+            if not dying:
+                return
+            for t in dying:                       # they hold nothing and take no lock any more: gone in a moment
+                t.join(0.5)
 
     def _retire(self, w):
         """With self.lock held."""
@@ -345,7 +421,7 @@ class Monitor:
         self._leaving.append(w)
 
     def stop(self, final=False):
-        """Stop every thread. `final`: the panel is closing, start none again."""
+        """Stop every worker. `final`: the panel is closing, start none again."""
         with self.lock:
             self._closed = self._closed or final
             for pid in list(self._workers):
@@ -353,19 +429,23 @@ class Monitor:
 
     def threads(self):
         with self.lock:
-            return [w.thread for w in list(self._workers.values()) + self._leaving if w.thread.is_alive()]
+            seen = [w.thread for w in list(self._workers.values()) + self._leaving] + self._dying
+            return [t for i, t in enumerate(seen) if t.is_alive() and t not in seen[:i]]
 
     # -- what the panel reads --
     def status(self, pid):
+        """The last answer, plus "pending_input", "notice" and "waiting" (no thread is free for it yet)."""
         with self.lock:
             st = dict(self._status.get(pid) or {})
             w = self._workers.get(pid)
             st["pending_input"] = w.pending["input"] if w and w.pending else None
             st["notice"] = self._notice.get(pid)
+            st["waiting"] = w is None and (any(x.pid == pid for x in self._leaving) or
+                                           len(self._workers) + len(self._leaving) + len(self._dying) >= MAX_PROJECTORS)
         return st
 
     def poke(self, pid):
-        """Check this projector (or "all") again now: something was just changed."""
+        """Check this projector (or "all") again now: something was just changed, or tried."""
         with self.lock:
             for w in self._workers.values():
                 if pid in ("all", w.pid):
@@ -380,7 +460,7 @@ class Monitor:
             row = {"id": p["id"], "name": p["name"], "state": "unknown"}
             out.append(row)
             if "ok" not in st:
-                row["text"] = "Not checked yet."
+                row["text"] = "Waiting for an earlier check to end." if st["waiting"] else "Not checked yet."
                 continue
             if not st["ok"]:
                 row["text"] = "No answer: %s." % st["error"]
@@ -403,76 +483,95 @@ class Monitor:
         return out
 
     # -- details --
-    def identify(self, entry):
-        """Ask the projector who it is and keep the answer in the settings. What it would not say this time
-        keeps its older value. Raises ProjectorError if it cannot be reached."""
-        got = self.api._pjlink(entry).identify()          # no lock held: this is the slow part
+    def identify(self, entry, w=None):
+        """Ask the projector who it is and keep the answer in the settings. What it would not say this time, or
+        said in a form that is not the standard's, keeps its older value (the input list too). Labels are left
+        alone. Nothing is saved for a projector that was removed, or once the module is off. Raises
+        ProjectorError if the projector cannot be reached."""
+        got = self._link(entry, w).identify()             # no lock held: this is the slow part
         settings = self.api.settings
         with settings.lock:
+            if (w is not None and w.stop.is_set()) or self._entry(entry["id"]) is None:
+                return None
             items = list(settings.data.get("projectors") or [])
             for i, p in enumerate(items):
-                if p["id"] == entry["id"]:                # still there; a removed projector is not brought back
+                if p["id"] == entry["id"]:
                     details = dict(p.get("details") or {})
                     details.update({k: v for k, v in got.items() if v is not None or k not in details})
                     details["read"] = int(time.time())
-                    labels = {c: l for c, l in (p.get("labels") or {}).items() if c in (details.get("inputs") or [])}
-                    items[i] = dict(p, details=details, labels=labels)
+                    items[i] = dict(p, details=details)
                     settings.data["projectors"] = items
                     settings.save()
                     return details
         return None
 
     # -- input, with the retry --
+    def _input_lock(self, pid):
+        with self.lock:
+            return self._input_locks.setdefault(pid, threading.Lock())
+
     def set_input(self, entry, code):
         """Switch the input now. If the projector says "unavailable" (warming up, mostly), keep trying in the
-        background for retry_for seconds; {"pending": True} then. Other refusals raise ProjectorError."""
+        background for retry_for seconds; {"pending": True} then. Other refusals raise ProjectorError.
+        One input change at a time per projector: a retry that is being sent is over before this one goes
+        out, and it is not sent again afterwards, so the last choice made is the one that stands."""
         pid = entry["id"]
-        with self.lock:
-            w = self._workers.get(pid)
-            if w:
-                w.pending = None                       # a newer choice replaces one still being retried
-            self._notice.pop(pid, None)
-        try:
-            self.api._pjlink(entry).set_input(code)
-        except ProjectorError as e:
-            if e.code != "ERR3":
-                raise
-            now = time.monotonic()
+        with self._input_lock(pid):
             with self.lock:
                 w = self._workers.get(pid)
-                if w is None or w.stop.is_set():
+                if w:
+                    w.pending = None                   # a newer choice replaces one still being retried
+                self._notice.pop(pid, None)
+            try:
+                self._link(entry).set_input(code)
+            except ProjectorError as e:
+                if e.code != "ERR3":
                     raise
-                w.pending = {"input": code, "until": now + self.retry_for, "next": now + self.retry_every}
-                w.wake.set()
-            return {"pending": True}
+                now = time.monotonic()
+                with self.lock:
+                    w = self._workers.get(pid)
+                    if w is None or w.stop.is_set():
+                        raise
+                    w.pending = {"input": code, "until": now + self.retry_for, "next": now + self.retry_every}
+                    w.wake.set()
+                return {"pending": True}
         self.poke(pid)
         return {"pending": False}
 
     def _retry(self, w, entry, pending):
         label = (entry.get("labels") or {}).get(pending["input"]) or input_name(pending["input"])
-        try:
-            self.api._pjlink(entry).set_input(pending["input"])
-            notice = {"ok": True, "text": "Input switched to %s." % label}
-        except ProjectorError as e:
-            if e.code in ("ERR3", "busy", "unreachable") and time.monotonic() + self.retry_every <= pending["until"]:
-                pending["next"] = time.monotonic() + self.retry_every
-                return
-            why = "it was still not ready after %d seconds (is it switched on?)" % self.retry_for if e.code == "ERR3" else str(e)
-            notice = {"ok": False, "text": "Could not switch to %s: %s." % (label, why)}
-        except Exception as e:
-            notice = {"ok": False, "text": "Could not switch to %s: error: %s." % (label, e)}
-        with self.lock:
-            if w.pending is not pending or w.stop.is_set():      # replaced by a newer choice, or switched off
-                return
-            w.pending = None
-            w.due = 0.0
-            self._notice[w.pid] = notice
+        with self._input_lock(w.pid):
+            with self.lock:
+                if w.pending is not pending or w.stop.is_set():      # replaced by a newer choice, or switched off
+                    return
+            try:
+                self._link(entry, w).set_input(pending["input"])
+                notice = {"ok": True, "text": "Input switched to %s." % label}
+            except ProjectorError as e:
+                if e.code == "stopped":
+                    return
+                if e.code in ("ERR3", "busy", "unreachable") and time.monotonic() + self.retry_every <= pending["until"]:
+                    pending["next"] = time.monotonic() + self.retry_every
+                    return
+                why = "it was still not ready after %d seconds (is it switched on?)" % self.retry_for if e.code == "ERR3" else str(e)
+                notice = {"ok": False, "text": "Could not switch to %s: %s." % (label, why)}
+            except Exception as e:
+                notice = {"ok": False, "text": "Could not switch to %s: error: %s." % (label, e)}
+            with self.lock:
+                if w.pending is not pending or w.stop.is_set():
+                    return
+                w.pending = None
+                w.due = 0.0
+                self._notice[w.pid] = notice
         if not notice["ok"]:
             self.log("pvj-web: projector %s: %s" % (entry["name"], notice["text"]))
 
     # -- the status --
     def _poll(self, w, entry):
-        link = self.api._pjlink(entry)
+        """One status check; None if it could not be made (our own command was in the way, or we were stopped).
+        Only the power state decides whether the projector "answers": lamp hours, warnings, input or mutes it
+        would not give, or gave in a form that is not the standard's, are just not known."""
+        link = self._link(entry, w)
 
         def ask(fn):
             try:
@@ -490,7 +589,7 @@ class Monitor:
                 st["input"] = ask(link.input)
                 st["mute"] = ask(link.mute_state)
         except ProjectorError as e:
-            if e.code == "busy":                    # our own command is in the way; the last answer stands
+            if e.code in ("busy", "stopped"):       # the last answer stands
                 return None
             st = {"ok": False, "checked": int(time.time()), "error": str(e)}
         except Exception as e:
@@ -501,51 +600,65 @@ class Monitor:
             self._status[w.pid] = st
         return st
 
-    def _loop(self, w):
-        try:
-            while not w.stop.is_set():
-                entry = self._entry(w.pid)
-                if entry is None:
-                    break
-                with self.lock:
-                    identify, w.identify = w.identify, False
-                    pending = w.pending
-                if identify:
-                    try:
-                        self.identify(entry)
-                    except Exception:               # the status check below says what is wrong
-                        pass
-                    entry = self._entry(w.pid) or entry
-                if pending and time.monotonic() >= pending["next"] and not w.stop.is_set():
-                    self._retry(w, entry, pending)
-                if time.monotonic() >= w.due and not w.stop.is_set():
-                    with self.lock:
-                        w.due = float("inf")
-                    st = self._poll(w, entry)
-                    power = (st or {}).get("power")
-                    with self.lock:
-                        if w.due == float("inf"):       # else poke() asked for another check meanwhile: keep that
-                            w.due = time.monotonic() + (self.changing if power in ("warming up", "cooling down") else self.interval)
-                        if power != "on":
-                            w.asked_inputs = False
-                        elif not (entry.get("details") or {}).get("inputs") and not w.asked_inputs:
-                            w.asked_inputs = w.identify = True      # it would not list its inputs in standby
-                with self.lock:
-                    nxt = min(w.due, w.pending["next"]) if w.pending else w.due
-                    if w.identify:
-                        nxt = 0.0
-                w.wake.wait(max(0.0, nxt - time.monotonic()))
-                w.wake.clear()
-        finally:
-            with self.lock:
-                if self._workers.get(w.pid) is w:
-                    del self._workers[w.pid]
-                    self._status.pop(w.pid, None)
-                    self._notice.pop(w.pid, None)
-                self._leaving = [x for x in self._leaving if x is not w]
-                again = w.stop.is_set() and not self._closed
-            if again:
+    def _run(self, w):
+        while w is not None:
+            try:
+                self._loop(w)
+            except Exception as e:                  # never lose the thread's place in the count
                 try:
-                    self.apply()                    # a projector that came back while this thread was ending
+                    self.log("pvj-web: projector check: %s" % e)
                 except Exception:
                     pass
+            w = self._after(w)
+
+    def _after(self, w):
+        """This thread is done with `w`. It takes over a waiting projector if there is one (so the number of
+        threads never grows past the limit while old ones are still ending), else it ends."""
+        with self.lock:
+            if self._workers.get(w.pid) is w:
+                del self._workers[w.pid]
+                self._status.pop(w.pid, None)
+                self._notice.pop(w.pid, None)
+            self._leaving = [x for x in self._leaving if x is not w]
+            for i, p in self._waiting():
+                nxt = self._new_worker(p["id"], i, p)
+                nxt.thread = threading.current_thread()
+                return nxt
+            self._dying.append(threading.current_thread())
+        return None
+
+    def _loop(self, w):
+        while not w.stop.is_set():
+            entry = self._entry(w.pid)
+            if entry is None:
+                break
+            with self.lock:
+                identify, w.identify = w.identify, False
+                pending = w.pending
+            if identify:
+                try:
+                    self.identify(entry, w)
+                except Exception:               # the status check below says what is wrong
+                    pass
+                entry = self._entry(w.pid) or entry
+            if pending and time.monotonic() >= pending["next"] and not w.stop.is_set():
+                self._retry(w, entry, pending)
+            if time.monotonic() >= w.due and not w.stop.is_set():
+                with self.lock:
+                    w.due = float("inf")
+                st = self._poll(w, entry)
+                with self.lock:
+                    if w.due == float("inf"):       # else poke() asked for another check meanwhile: keep that
+                        w.due = time.monotonic() + (self.changing if (st or {}).get("power") in ("warming up", "cooling down") else self.interval)
+                    if st is None or not st["ok"]:
+                        pass                        # nothing learnt this time: ask for the input list neither again nor anew
+                    elif st["power"] != "on":
+                        w.asked_inputs = False
+                    elif not (entry.get("details") or {}).get("inputs") and not w.asked_inputs:
+                        w.asked_inputs = w.identify = True      # it would not list its inputs in standby
+            with self.lock:
+                nxt = min(w.due, w.pending["next"]) if w.pending else w.due
+                if w.identify:
+                    nxt = 0.0
+            w.wake.wait(max(0.0, nxt - time.monotonic()))
+            w.wake.clear()

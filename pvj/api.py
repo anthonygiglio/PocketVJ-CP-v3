@@ -1459,9 +1459,18 @@ class Api:
         if "add" in body:
             try:
                 entry = projector_mod.validate(body["add"])
-                projector_mod.private_address(entry["host"])      # refuse a public address now; a name lookup is slow, so outside the lock
+                addr = projector_mod.private_address(entry["host"])      # refuse a public address now; a name lookup is slow, so outside the lock
             except projector_mod.ProjectorError as e:
                 raise bad(str(e))
+            for p in list(self.settings.data["projectors"]):      # the same device under another spelling is one projector, not two
+                if p["port"] != entry["port"]:
+                    continue
+                try:
+                    same = projector_mod.private_address(p["host"]) == addr
+                except projector_mod.ProjectorError:
+                    same = False
+                if same or p["host"].lower() == entry["host"].lower():
+                    raise ApiError(409, "that projector is already in the list as %s" % p["name"])
         with self.settings.lock:
             items = list(self.settings.data["projectors"])
             try:
@@ -1474,7 +1483,9 @@ class Api:
                         raise ApiError(404, "no such projector")
                     items = [p for p in items if p["id"] != body["remove"]]
                 elif "label" in body:
-                    want = body["label"] if isinstance(body["label"], dict) else {}
+                    want = body["label"]
+                    if not isinstance(want, dict) or not isinstance(want.get("id"), str):
+                        raise bad("label must be {id, input, label}")
                     at = [i for i, p in enumerate(items) if p["id"] == want.get("id")]
                     if not at:
                         raise ApiError(404, "no such projector")
@@ -1556,11 +1567,12 @@ class Api:
                     results[p["id"]] = {"ok": True}
                 else:
                     results[p["id"]] = {"ok": True, "power": link.state()}
-                self.projectors.poke(p["id"])                   # the panel's status follows at once
             except projector_mod.ProjectorError as e:
                 results[p["id"]] = {"ok": False, "error": str(e)}
             except Exception as e:      # never leave a projector without an answer
                 results[p["id"]] = {"ok": False, "error": "error: %s" % e}
+            finally:
+                self.projectors.poke(p["id"])                   # the panel's status follows at once, after a failure too
         # All at once: eight projectors that are off the network cost one timeout, not eight.
         workers = [threading.Thread(target=one, args=(p,), daemon=True) for p in targets]
         for w in workers:
