@@ -62,3 +62,7 @@ Append new lessons at the bottom. Format: what happened, what we do now.
 - **Two rules for one thing drift.** `redact` (panel) and `strip_login` (export) each decided what is secret in an address, and disagreed about the passphrase. One function, two renderings.
 - **Clearing access in steps leaves a gap for a request already past its token check.** Cancel codes, then wipe devices, then rotate the PIN let another device's request land in between. Do it under the locks those requests take, and have the late request check that its device still exists after it acts. The two auth locks were also taken in opposite orders by `pair()` and `rotate_pin()`; one order everywhere.
 - **Merging a feature with background threads changes what a test's fixture data does.** After PJLink phase 1 merged, box care had to match the background projector checks to the settings after an import; the test settings hold 192.168 addresses, so as a precaution (it was not seen to connect) the box care tests replace the monitor's `apply` and assert it was called.
+
+## A card that asks the server while it is being built (2026-10-04)
+
+The Updates card called `refresh()` while it was being built, and `refresh()` does nothing until the card is on the page. On the old single System screen a later redraw hid this; with one page per item there was no later redraw, so the card stayed at "Loading..." and the browser test timed out at `#updateversion`. A card that checks `isConnected` must start its first request after it is attached (`setTimeout(refresh, 0)`).
