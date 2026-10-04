@@ -51,6 +51,7 @@ class Vibes:
         self.order = []
         self.current = None
         self.due = 0.0
+        self.shown_at = 0.0         # when the shader now on screen came up
         self.rounds = 0
         self.refused = set()        # shaders the GPU refused in this run: not tried again
         self.last = None            # {"at", "message"}: why it ended, or what went wrong
@@ -111,8 +112,27 @@ class Vibes:
         self._kick()
         return self.status()
 
+    def set_dwell(self, seconds):
+        """How long each shader stays, from a presenter's control (a knob or fader). Saved only when it changes, so
+        a sweep does not write the settings file for every step; the shader now on screen follows the new time."""
+        from . import shaders as shaders_mod
+        if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds != seconds
+                or not shaders_mod.DWELL_MIN <= seconds <= shaders_mod.DWELL_MAX):
+            raise ApiError(400, "each shader stays %d to %d seconds" % (shaders_mod.DWELL_MIN, shaders_mod.DWELL_MAX))
+        if not self.engine.enabled():
+            raise ApiError(409, "turn on the Shaders and Vibes module in System first")
+        with self._lock:
+            cfg = self.engine.config()
+            if cfg["dwell"] != int(seconds):
+                cfg["dwell"] = int(seconds)
+                self.engine._save(cfg)
+            if self.running and self.started:
+                self.due = self.shown_at + cfg["dwell"]
+        self._kick()
+        return dict(self.status(), dwell=int(seconds))
+
     def _kick(self):
-        if not self._use_thread:
+        if not self._use_thread or not self.running:
             return
         with self._lock:
             if self._thread is None:
@@ -223,7 +243,8 @@ class Vibes:
             shown = True
             self.current = sid
         self.rounds += 1
-        self.due = self._clock() + cfg["dwell"]
+        self.shown_at = self._clock()
+        self.due = self.shown_at + cfg["dwell"]
         if not api.mix["blackout"]:
             if dip:
                 api._apply_opacity(0)
@@ -241,9 +262,12 @@ class Vibes:
 
     # -- requests --
     def api_vibes(self, body, device, client):
-        """{"on": true} starts the rotation, {"on": false} stops it, {"next": true} goes to the next shader."""
+        """{"on": true} starts the rotation, {"on": false} stops it, {"next": true} goes to the next shader,
+        {"dwell": seconds} sets how long each shader stays."""
         if body.get("next") is True:
             return self.skip()
+        if "dwell" in body:
+            return self.set_dwell(body["dwell"])
         on = body.get("on")
         if not isinstance(on, bool):
             raise ApiError(400, "on must be true or false")

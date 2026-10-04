@@ -1094,7 +1094,7 @@
       body.textContent = '';
       body.appendChild(h('div', { class: 'k', id: 'dmxline', text: d.error ? 'Problem: ' + d.error :
         (d.listening ? 'Listening on UDP ' + d.port + ' (' + d.received + ' frames for this universe)' : 'Off') }));
-      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + 7) + ': ' + d.channels.join(' ') }));
+      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + d.channels.length - 1) + ': ' + d.channels.join(' ') }));
       var proto = h('select', { class: 'text-input', id: 'dmxproto', 'aria-label': 'Protocol' },
         [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)']].map(function (p) { return h('option', { value: p[0], text: p[1], selected: p[0] === d.protocol }); }));
       var uni = h('input', { class: 'text-input mono', id: 'dmxuni', type: 'number', 'aria-label': 'Universe', value: dmxForm.universe === null ? d.universe : dmxForm.universe });
@@ -1114,7 +1114,7 @@
       body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'dmxtoggle', text: d.enabled ? 'DMX is on. Turn off' : 'Turn DMX on',
         onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
       body.appendChild(proto); body.appendChild(h('label', { class: 'k', for: 'dmxuni', text: 'Universe' })); body.appendChild(uni);
-      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels)' })); body.appendChild(start); body.appendChild(allow);
+      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels; a ninth, if sent, is Vibes)' })); body.appendChild(start); body.appendChild(allow);
       body.appendChild(h('button', { class: 'btn small', id: 'dmxsave', text: 'Save', onclick: function () { send(fields()); } }));
       body.appendChild(h('div', { class: 'k', text: 'Off until you turn it on. Only private networks may send. The first frame only sets a starting point, and the box holds its last state if the signal stops.' }));
     }
@@ -1127,7 +1127,8 @@
   }
   var MIDI_ACTIONS = [['pad', 'Play a pad'], ['stop', 'Stop'], ['pause', 'Pause / resume'], ['blackout', 'Blackout on / off'], ['fadeout', 'Fade out'],
     ['reset', 'Reset mix'], ['opacity', 'Opacity (fader)'], ['size', 'Size (fader)'], ['position', 'Position X (fader)'], ['speed', 'Speed (fader)'],
-    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)']];
+    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)'],
+    ['vibes', 'Vibes on / off'], ['vibes_next', 'Vibes: next shader'], ['vibes_dwell', 'Vibes: time each shader stays (fader)']];
   var midiForm = { action: 'opacity', bank: 0, index: 0 };  // survives redraws
   var midiTimer = null;
   function midiCard() {
