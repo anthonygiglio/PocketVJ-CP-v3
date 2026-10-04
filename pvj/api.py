@@ -1010,7 +1010,10 @@ class Api:
     def _update_running(self):
         """True while an update reports progress (a stale "running" older than the units' time limit is not)."""
         last = self._update_result()
-        return bool(last and last.get("state") == "running" and time.time() - (last.get("at") or 0) < 35 * 60)
+        at = last.get("at") if last else None
+        if type(at) not in (int, float):         # the file is written by another program: text, a list or true is "no time"
+            at = 0
+        return bool(last and last.get("state") == "running" and time.time() - at < 35 * 60)
 
     def update_status(self, body, device, client):
         """What is installed, what is waiting (on a USB drive or uploaded), and the last update's progress."""

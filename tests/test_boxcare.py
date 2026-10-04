@@ -518,6 +518,15 @@ class ImportTest(Base):
             json.dump({"state": "running", "message": "installing", "at": int(time.time())}, f)
         with mock.patch.dict(os.environ, {"PVJ_UPDATE_RESULT": result}):
             self.assertEqual(self.send(self.export())[0], 409)
+            for at in ("soon", [1], {"a": 1}, None, True, "1790000000"):          # a time that is not a number: not an error 500
+                with open(result, "w") as f:
+                    json.dump({"state": "running", "message": "installing", "at": at}, f)
+                self.assertFalse(self.api._update_running(), at)
+                self.assertEqual(self.call("GET", "/api/system/update", token=self.full)[0], 200)
+                self.assertEqual(self.send(self.export())[0], 200, at)
+            with open(result, "w") as f:
+                json.dump({"state": "running", "at": time.time()}, f)
+            self.assertTrue(self.api._update_running())
 
     def test_only_the_last_few_backups_are_kept(self):
         file = self.export()
