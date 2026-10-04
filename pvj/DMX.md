@@ -8,7 +8,7 @@ Tell the console the box's address and universe; the box does not announce itsel
 
 ## Channels
 
-Eight channels starting at the start address you choose (1 to 505):
+Eight channels starting at the start address you choose (1 to 505), and an optional ninth for Vibes:
 
 | Ch | Does | Values |
 | --- | --- | --- |
@@ -20,11 +20,14 @@ Eight channels starting at the start address you choose (1 to 505):
 | 6 | Blackout | 128 and up is on |
 | 7 | Pad | 0 to 5 idle; each pad owns six values: 6 to 11 is pad 1, 12 to 17 is pad 2, up to pad 36 (216 to 221). Bank A is pads 1 to 12, B 13 to 24, C 25 to 36. A pad plays when the channel moves onto a different pad |
 | 8 | Function | 50 to 99 stop, 100 to 149 pause, 150 to 199 resume, 200 to 255 fade out (2 s). 0 to 49 does nothing. Each action fires once when the channel moves into its range, not on every value inside it |
+| 9 (optional) | Vibes | 50 to 99 stop Vibes, 100 to 149 start Vibes, 150 to 199 next shader. 0 to 49 and 200 to 255 do nothing. Each fires once when the channel moves into its range. Needs the Shaders and Vibes module (see [SHADERS.md](SHADERS.md)); while that is off the channel does nothing and the log says so once |
+
+The first eight channels are where they always were. The fixed map had no free place (channel 8's ranges are all taken), so Vibes got a ninth channel instead of moving anything. It is read only if the console sends it: a universe that ends at the eighth channel works as before, and with start address 505 there is no ninth channel. To go to the next shader twice, move the channel out of the 150 to 199 range and back.
 
 ## Safety and behaviour
 
 - Only private networks may send (loopback, 10/8, 172.16/12, 192.168/16, link-local and their IPv6 equivalents); add your show network under "Extra networks". Ranges wider than a /8 are refused. UDP sources can be forged, so this keeps the internet out, not a hostile device on your own network.
-- **The first frame after turning it on only sets a baseline.** Nothing fires from it, so a console sitting at zero cannot black out the screen. The same happens after changing the settings.
+- **The first frame after turning it on only sets a baseline.** Nothing fires from it, so a console sitting at zero cannot black out the screen, and one sitting at 120 on the ninth channel cannot start Vibes. The same happens after changing the settings, and for the ninth channel when it first appears.
 - If the signal stops, the box holds its last state. If no valid frame arrives for 3 seconds, the next frame (from the same console or another) is a new baseline, so a restarted console cannot fire anything by coming back at zero.
 - Each level channel is applied at most 20 times a second; the next frame carries the change on, and a change that could not be applied is tried again.
 - Limits that do not depend on the sender's address (which can be forged): 500 packets a second in total, and 50 commands a second to the player. The port is not shared: if another program holds UDP 6454 or 5568, the box reports it.
@@ -34,4 +37,4 @@ Eight channels starting at the start address you choose (1 to 505):
 
 ## Not verified
 
-Tested with hand-built packets and a loopback UDP socket, never with a real console or on a real network. The sACN multicast join has not been tried on a real network. Merged or multiple sources (sACN priorities, merging two consoles) are not handled: the newest frame wins. sACN sequence numbers are not checked, so a duplicated or reordered packet is treated as a new frame.
+Tested with hand-built packets and a loopback UDP socket, never with a real console or on a real network. The Vibes channel was tested the same way, with a fake player and a fake clock. The sACN multicast join has not been tried on a real network. Merged or multiple sources (sACN priorities, merging two consoles) are not handled: the newest frame wins. sACN sequence numbers are not checked, so a duplicated or reordered packet is treated as a new frame.
