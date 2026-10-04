@@ -1499,7 +1499,7 @@
 
   // ---- projectors (PJLink) ---------------------------------------------
   var projForm = { name: '', host: '', port: '4352', password: '' };  // survives redraws
-  var projLabels = {};  // projector id -> an input label being typed; survives redraws
+  var projLabels = {};  // projector id -> { code, text }: the input being labelled and the label being typed; survives redraws
   var projTimer = null;
   function projectorsCard(full) {
     clearTimeout(projTimer);
@@ -1518,7 +1518,7 @@
     }
     function statusText(p) {
       var st = p.status || {};
-      if (st.ok === undefined) return 'Checking...';
+      if (st.ok === undefined) return st.waiting ? 'Waiting for an earlier check to end' : 'Checking...';
       if (!st.ok) return 'No answer: ' + st.error;
       var t = st.power.charAt(0).toUpperCase() + st.power.slice(1);
       if (st.input) t += ' · input ' + inputText(p, st.input);
@@ -1545,7 +1545,10 @@
         var el = document.getElementById(f[0]);
         if (el && body.contains(el)) projForm[f[1]] = el.value;
       });
-      Array.prototype.forEach.call(body.querySelectorAll('.proj-label'), function (el) { projLabels[el.getAttribute('data-id')] = el.value; });
+      Array.prototype.forEach.call(body.querySelectorAll('.proj-label'), function (el) {
+        var which = body.querySelector('.proj-labelfor[data-id="' + el.getAttribute('data-id') + '"]');
+        projLabels[el.getAttribute('data-id')] = { code: which ? which.value : '', text: el.value };
+      });
     }
     function load(force) {
       clearTimeout(projTimer);
@@ -1616,10 +1619,20 @@
         })));
         body.appendChild(sel);
         if (!full) return;
-        var label = h('input', { class: 'text-input proj-label', 'data-id': p.id, 'aria-label': 'Label for the chosen input of ' + p.name, placeholder: 'Label for the chosen input (Matrix, Box)', maxlength: 24, value: projLabels[p.id] || '' });
-        body.appendChild(h('div', { class: 'row' }, label, h('button', { class: 'btn small proj-setlabel', text: 'Set label', 'aria-label': 'Set the label of the chosen input of ' + p.name, onclick: function () {
-          if (!sel.value) return say('Choose an input first', true);
-          act('POST', '/api/projectors', { label: { id: p.id, input: sel.value, label: label.value } }, function (data) { projLabels[p.id] = ''; say('Label saved'); draw(data, true); });
+        // Labels: their own chooser, so naming an input never switches the projector to it
+        var draft = projLabels[p.id] || { code: '', text: '' };
+        var known = p.inputs.filter(function (i) { return i.code === draft.code; })[0];
+        var which = h('select', { class: 'text-input proj-labelfor', 'data-id': p.id, 'aria-label': 'Input of ' + p.name + ' to label', onchange: function () {
+          var i = p.inputs.filter(function (x) { return x.code === which.value; })[0];
+          label.value = i ? i.label : '';
+        } }, [h('option', { value: '', text: 'Label an input...', selected: !known })].concat(p.inputs.map(function (i) {
+          return h('option', { value: i.code, text: i.name + (i.label ? ' = ' + i.label : ''), selected: !!known && i.code === draft.code });
+        })));
+        var label = h('input', { class: 'text-input proj-label', 'data-id': p.id, 'aria-label': 'Label for that input of ' + p.name, placeholder: 'Label (Matrix, Box)', maxlength: 24, value: known ? draft.text : '' });
+        body.appendChild(which);
+        body.appendChild(h('div', { class: 'row' }, label, h('button', { class: 'btn small proj-setlabel', text: 'Set label', 'aria-label': 'Set the label of that input of ' + p.name, onclick: function () {
+          if (!which.value) return say('Choose the input to label first', true);
+          act('POST', '/api/projectors', { label: { id: p.id, input: which.value, label: label.value } }, function (data) { projLabels[p.id] = null; say('Label saved'); draw(data, true); });
         } })));
       });
       if (!full) return;

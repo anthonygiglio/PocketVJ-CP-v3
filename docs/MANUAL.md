@@ -151,7 +151,7 @@ Projectors and the schedule (here with projector power, a clip, a start script a
 
 ![Projectors](images/ui/projectors.png)
 
-The Projectors card shows what each projector says it is (maker, model), its state without asking (on, off, warming up, cooling down), its input, mutes and lamp hours, and lets a presenter choose the input and mute picture and sound separately; its lamp hours and warnings (fan, lamp, temperature, cover, filter) are also on System > Health. The picture above may be older than this. This is built from the published PJLink standard and tested against a fake projector only: **no real projector has been tested**. Details: [pvj/PROJECTORS.md](../pvj/PROJECTORS.md).
+The Projectors card shows what each projector says it is (maker, model), its state without asking (on, off, warming up, cooling down), its input, mutes and lamp hours, and lets a presenter choose the input and mute picture and sound separately (a full-access device can label each input; labelling does not switch the projector); its lamp hours and warnings (fan, lamp, temperature, cover, filter) are also on System > Health. The picture above may be older than this. This is built from the published PJLink standard and tested against a fake projector only: **no real projector has been tested**. Details: [pvj/PROJECTORS.md](../pvj/PROJECTORS.md).
 ![Schedule](images/ui/schedule.png)
 
 Check the box clock before relying on the schedule: a Pi has no battery clock, and until the network sets the time the clock is wrong.
