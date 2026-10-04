@@ -152,6 +152,7 @@ class Api:
         self.capture = None       # Capture or None (live input from a USB capture device)
         self._import = {}         # the USB copy running or last run
         self._import_lock = threading.Lock()
+        self._care_busy = None    # "an import" or "a factory reset" while boxcare runs one (set and read under _import_lock)
         from . import mapper as mapper_mod
         self.mapper = mapper_mod.Engine(self)
         from . import health as health_mod
@@ -492,6 +493,9 @@ class Api:
             f.close()
             raise bad("that file is empty")
         with self._import_lock:
+            if self._care_busy == "a factory reset":      # it may be deleting the clips right now
+                f.close()
+                raise ApiError(409, "a factory reset is running")
             if self._import.get("active"):
                 f.close()
                 raise ApiError(409, "a copy is already running")
@@ -1047,9 +1051,12 @@ class Api:
             raise bad("source must be usb or inbox")
         if not isinstance(version, str) or not re.fullmatch(r"[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}", version):
             raise bad("version must look like 1.2.3")
-        if self._update_running():
-            raise ApiError(409, "an update is already running")
-        self._sysd({"cmd": "update", "source": source, "version": version})
+        with self._import_lock:                  # checked and started in one step: an import or reset cannot begin between
+            if self._care_busy:
+                raise ApiError(409, "%s is running; update when it has finished" % self._care_busy)
+            if self._update_running():
+                raise ApiError(409, "an update is already running")
+            self._sysd({"cmd": "update", "source": source, "version": version})
         return {"started": source, "version": version}
 
     def update_upload(self, name, length, read, check=None):

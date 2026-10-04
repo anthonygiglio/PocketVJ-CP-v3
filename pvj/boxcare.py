@@ -31,6 +31,7 @@ Import and factory reset are refused through the remote-support tunnel: an impor
 (new ways to control the box) and a reset removes every paired device.
 """
 
+import contextlib
 import copy
 import ipaddress
 import json
@@ -38,7 +39,6 @@ import os
 import re
 import socket
 import subprocess
-import threading
 import time
 from urllib.parse import unquote
 
@@ -421,7 +421,6 @@ class BoxCare:
         self.api = api
         self._run, self._now, self._hostname = runner, now, hostname
         self._notes = []
-        self._lock = threading.Lock()         # one import or reset at a time
 
     def note(self, text):
         self._notes.append(text)
@@ -442,6 +441,26 @@ class BoxCare:
         """Refuse through the remote-support tunnel (the route table refuses it too; this holds even if that changes)."""
         if self.api.support.is_remote(client):
             raise ApiError(403, "%s cannot be done through remote support; ask someone at the studio" % what)
+
+    @contextlib.contextmanager
+    def _busy(self, what, usb_copy=False):
+        """One import or reset at a time, and none beside an update (or, for a reset, a copy from USB). The flag is
+        set under the lock a copy and an update start under, and the update is looked at only after it is set: so
+        neither can begin between the check and the work. Raises 409 instead of waiting."""
+        api = self.api
+        with api._import_lock:
+            if api._care_busy:
+                raise ApiError(409, "%s is running; try again when it has finished" % api._care_busy)
+            if usb_copy and api._import.get("active"):
+                raise ApiError(409, "a copy from USB is running; reset when it has finished")
+            api._care_busy = what
+        try:
+            if api._update_running():
+                raise ApiError(409, "an update is running; try again when it has finished")
+            yield
+        finally:
+            with api._import_lock:
+                api._care_busy = None
 
     def _name(self, kind):
         host = re.sub(r"[^A-Za-z0-9-]", "", self._hostname() or "")[:40] or "box"
@@ -615,9 +634,7 @@ class BoxCare:
         self._local(client, "an import")
         if confirm != CONFIRM_IMPORT:
             raise bad("send confirm=%s" % CONFIRM_IMPORT)
-        if self.api._update_running():
-            raise ApiError(409, "an update is running; import when it has finished")
-        with self._lock:
+        with self._busy("an import"):
             return self._import(raw, device)
 
     def _import(self, raw, device):
@@ -778,15 +795,11 @@ class BoxCare:
         media = body.get("media")
         if media not in ("keep", "delete"):
             raise bad('say what happens to the clips: "media": "keep" or "delete"')
-        with self._lock:
+        with self._busy("a factory reset", usb_copy=True):
             return self._reset(media, device, client)
 
     def _reset(self, media, device, client):
         api = self.api
-        if api._update_running():
-            raise ApiError(409, "an update is running; reset when it has finished")
-        if api._import.get("active"):
-            raise ApiError(409, "a copy from USB is running; reset when it has finished")
         if media == "delete" and self._media_on_usb():
             raise ApiError(409, "the clips of this box are on a USB drive, which a reset never empties; choose to keep the clips")
         if not api._upload_lock.acquire(blocking=False):

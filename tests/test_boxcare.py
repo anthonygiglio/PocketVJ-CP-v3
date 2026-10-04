@@ -576,6 +576,32 @@ class ImportTest(Base):
         self.assertEqual(self.call("GET", "/api/status", token=self.full)[0], 200)
         self.assertEqual(self.send(file)[0], 200)               # and it works once the disk does
 
+    def test_no_update_or_reset_starts_while_an_import_runs(self):
+        file = self.export()
+        started, seen = [], {}
+        self.api._sysd = lambda message: started.append(message)
+        real = self.care.check_file
+
+        def during(raw):
+            seen["flag"] = self.api._care_busy
+            seen["update"] = self.h("POST", "/api/system/update", {"source": "usb", "version": "9.9.9", "confirm": "update"}, self.full_dev)
+            seen["reset"] = self.h("POST", "/api/system/factory-reset", {"confirm": "factory-reset", "media": "keep"}, self.full_dev)
+            return real(raw)
+        self.care.check_file = during
+        st, out = self.send(file)
+        self.assertEqual(st, 200, out)
+        self.assertEqual(seen["flag"], "an import")
+        for what in ("update", "reset"):
+            self.assertEqual(seen[what][0], 409, seen[what])
+            self.assertIn("an import is running", seen[what][1]["error"])
+        self.assertEqual((started, self.api._care_busy), ([], None))
+        self.assertTrue(self.settings.data["devices"])
+        self.care.check_file = real
+        self.assertEqual(self.send(dict(file, format="no"))[0], 400)        # a refused file does not leave the flag set
+        self.assertIsNone(self.api._care_busy)
+        self.assertEqual(self.h("POST", "/api/system/update", {"source": "usb", "version": "9.9.9", "confirm": "update"}, self.full_dev)[0], 200)
+        self.assertEqual(len(started), 1)
+
     def test_only_the_last_few_backups_are_kept(self):
         file = self.export()
         t = [1790000000]
@@ -843,6 +869,7 @@ class FactoryResetTest(Base):
         self.api._import = {"active": True}
         st, out = self.reset(**ok)
         self.assertEqual((st, "USB" in out["error"]), (409, True))
+        self.assertIsNone(self.api._care_busy)
         self.api._import = {}
         self.assertTrue(self.api._upload_lock.acquire(blocking=False))
         try:
@@ -850,8 +877,51 @@ class FactoryResetTest(Base):
             self.assertEqual((st, "upload" in out["error"]), (409, True))
         finally:
             self.api._upload_lock.release()
+        self.api._care_busy = "an import"
+        st, out = self.reset(**ok)
+        self.assertEqual((st, out["error"]), (409, "an import is running; try again when it has finished"))
+        self.assertEqual(self.send(self.export())[0], 409)
+        self.assertEqual(self.api._care_busy, "an import")           # a refusal does not clear someone else's flag
+        self.api._care_busy = None
         self.assertEqual(self.on_disk(), before)
         self.assertIn("a.mp4", os.listdir(self.media))
+        self.assertEqual(self.call("GET", "/api/devices", token=self.full)[0], 200)       # still paired
+        self.assertEqual(self.player.calls, [])                                           # and playback was not stopped
+        # no refusal left a lock or the flag behind: now it goes through
+        self.assertEqual(self.reset(**ok)[0], 200)
+        self.assertIsNone(self.api._care_busy)
+        self.assertTrue(self.api._upload_lock.acquire(blocking=False))
+        self.api._upload_lock.release()
+
+    def test_no_copy_update_import_or_second_reset_starts_while_a_reset_runs(self):
+        """The checks and the work are one step: what is asked for while the reset runs is refused, not started
+        (a copy from USB would otherwise land in the folder that is being emptied)."""
+        with open(os.path.join(self.usb, "STICK", "show.mp4"), "w") as f:
+            f.write("clip")
+        raw = json.dumps(self.export()).encode()
+        started, seen = [], {}
+        self.api._sysd = lambda message: started.append(message)
+        real = self.api.blackout
+
+        def during(body, device, client):               # the first thing a reset does
+            seen["flag"] = self.api._care_busy
+            seen["copy"] = self.h("POST", "/api/media/import", {"usb": "STICK/show.mp4"}, self.full_dev)
+            seen["update"] = self.h("POST", "/api/system/update", {"source": "usb", "version": "9.9.9", "confirm": "update"}, self.full_dev)
+            seen["reset"] = self.reset(confirm="factory-reset", media="keep")
+            with self.assertRaises(ApiError) as c:
+                self.care.import_settings(raw, "import", self.full_dev, LAN)
+            seen["import"] = (c.exception.status, {"error": c.exception.message})
+            return real(body, device, client)
+        self.api.blackout = during
+        st, out = self.reset(confirm="factory-reset", media="delete")
+        self.assertEqual(st, 200, out)
+        self.assertEqual(seen["flag"], "a factory reset")
+        for what in ("copy", "update", "reset", "import"):
+            self.assertEqual(seen[what][0], 409, (what, seen[what]))
+            self.assertIn("a factory reset is running", seen[what][1]["error"])
+        self.assertEqual((started, self.api._import, self.api._care_busy), ([], {}, None))
+        self.assertNotIn("show.mp4", os.listdir(self.media))
+        self.assertEqual(self.settings.data["devices"], [])
 
     def test_keeping_the_clips(self):
         old = copy.deepcopy(self.settings.data)
