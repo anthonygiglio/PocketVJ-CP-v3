@@ -41,7 +41,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* ---- the panel, as in pvj/web/app.css ---- */
 .phone { position: relative; border: 1.5px solid var(--ln); border-radius: 16px; overflow: hidden; background: var(--bg); color: var(--fg);
   height: min(780px, calc(100dvh - 84px)); min-height: 480px; display: flex; flex-direction: column; }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .screen { padding: 16px 16px 28px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .top h1, .screen h1 { margin: 0; font-size: 18px; }
@@ -58,6 +58,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .btn.solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .btn.big { min-height: 56px; }
 .btn.small { min-height: 34px; padding: 0 10px; font-size: 14px; }
+.bar .btn.small { min-height: 40px; }
 .btn.danger { border-color: var(--bad); }
 .progress { height: 8px; border: 1.5px solid var(--ln); border-radius: 4px; background: var(--bg); overflow: hidden; }
 .progress div { height: 100%; width: 0; background: var(--ac); }
@@ -104,6 +105,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .chip.setup { background: var(--warn); border-color: var(--warn); color: var(--onbad); }
 .chip.problem { background: var(--bad); border-color: var(--bad); color: var(--onbad); }
 .chip.off { color: var(--mu); }
+/* a chip or switch that can be tapped gets a 44 px touch area without growing on screen */
+button.chip, .switch { position: relative; cursor: pointer; }
+button.chip { background: none; color: inherit; }
+button.chip::after { content: ""; position: absolute; inset: -13px -8px; }
+.switch::before { content: ""; position: absolute; inset: -6px -2px; }
+@media (min-width: 900px) { #tonotes { display: none; } }
 .dock { display: flex; gap: 8px; padding: 8px 12px 0; background: var(--bg); border-top: 1.5px solid var(--ln); }
 .dock .btn { flex: 1 1 0; }
 .dock + .tabs { border-top: 0; }
@@ -692,7 +699,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       })),
       live ? (UI.ask === 'close' ? confirmRow('Close the room? Playback stops and ' + onCount + (onCount === 1 ? ' projector switches' : ' projectors switch') + ' off. The box stays on.', 'Close the room', closeRoom)
         : h('button', { class: 'btn big', text: 'Close the room', onclick: function () { ask('close'); } })) : null,
-      live ? h('div', { class: 'hint', text: 'Stops playback and switches every projector off, for the end of the day.' }) : null);
+      live ? h('div', { class: 'hint', text: 'Stops playback and switches every projector off, for the end of the day.' }) : null,
+      live ? guestCodeCard() : null);
   }
   function newLive() {
     var live = can('live'), full = can('full'), amb = vibesOn(), dur = B.now && B.now.dur;
@@ -706,10 +714,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) + (p.file ? ' · ' + ({ loop: 'loops', stop: 'once', hold: 'once, holds' })[p.ending] : '') }),
         h('span', { class: 't', text: p.file ? (UI.editing ? 'Change: ' : '') + p.label : '+ Add a clip' })));
     });
-    return h('div', { class: 'screen' }, msgNew(), watchBanner(),
+    var showing = (B.now || B.test) && !B.blackout && !B.faded;
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Live' })), msgNew(), watchBanner(),
       h('div', { class: 'card' },
-        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (B.blackout || B.faded ? 'problem' : (B.now || B.test) && !B.paused ? 'active' : 'off'), text: stateWord() })),
+        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (showing ? 'active' : 'off'), text: showing ? 'Active' : 'Off' })),
         h('div', { class: 'np-title', id: 'np', text: title() }),
+        h('div', { class: 'state', text: B.blackout ? 'Blackout: the screen is black' : B.faded ? 'Faded out: the screen is black' : stateWord() }),
         B.now && B.now.kind === 'clip' && B.now.label !== stem(B.now.file) ? h('div', { class: 'hint', text: 'Clip ' + B.now.file }) : null,
         B.now ? h('div', { class: 'progress' }, h('div', { id: 'np-bar' })) : null,
         h('div', { class: 'row between' }, h('div', { class: 'np-left', id: 'np-left', text: timeLeft() }), dur && B.now.kind === 'clip' ? h('div', { class: 'hint', text: 'of ' + short(dur) }) : null),
@@ -934,7 +944,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     var vals = cur ? (B.shv[cur.id] = B.shv[cur.id] || {}) : null;
     var changed = cur ? cur.inputs.some(function (i) { return i[0] in vals && vals[i[0]] !== i[4]; }) : false;
     var now = h('div', { class: 'card' },
-      h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (cur && !dark ? 'active' : 'off'), text: cur ? (dark ? 'Hidden' : 'Active') : 'Off' })),
+      h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On screen now' }), h('span', { class: 'chip ' + (cur && !dark ? 'active' : 'off'), text: cur && !dark ? 'Active' : 'Off' })),
       h('div', { class: 'np-title', text: cur ? cur.id : 'No shader on screen' }),
       h('div', { class: 'state', id: cur && vib ? 'shleft' : null, text: cur ? (vib ? 'Vibes · next one in ' + short(B.now.dur - B.now.pos) : 'One shader, until you play something else') : (B.now ? title() + ' is playing. Starting Vibes takes its place.' : 'Nothing is playing.') }),
       dark && cur ? h('div', { class: 'hint', text: 'The screen is black (Blackout or Fade out). The shaders go on changing unseen until you bring the picture back.' }) : null,
@@ -1186,6 +1196,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
       if (e.target.value === 'connect') { UI.joined = false; } else { UI.role = e.target.value; UI.joined = true; }
       UI.sheet = null; UI.page = null; UI.editing = false; drawBar(); render();
     } }, [['full', 'As the owner'], ['live', 'As staff (presenter)'], ['view', 'As a guest'], ['connect', 'First visit (pairing)']].map(function (o) { return h('option', { value: o[0], text: o[1], selected: UI.joined ? o[0] === UI.role : o[0] === 'connect' }); })));
+    bar.appendChild(h('button', { class: 'btn small', id: 'tonotes', text: 'Reasons and notes', onclick: function () { $('side').scrollIntoView({ behavior: 'smooth' }); } }));
     bar.appendChild(h('select', { id: 'themepick', 'aria-label': 'Theme', onchange: function (e) { setTheme(e.target.value); render(); } },
       [['dark-stage', 'Dark stage'], ['night-red', 'Night red'], ['light', 'Light'], ['high-contrast', 'High contrast']].map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === UI.theme }); })));
   }
