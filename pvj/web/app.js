@@ -1551,6 +1551,20 @@
 
   // ---- multi-box sync and video wall -----------------------------------
   var syncTimer = null;
+  // What was chosen or typed in the card and is not saved yet (vals), and the saved value each field was drawn from
+  // (drawn). The card is rebuilt by every answer and, while the box is a server or a client, every 2 seconds: a
+  // rebuild between choosing a column and pressing Save put the saved column back, and Save then sent that.
+  var syncForm = { vals: {}, drawn: {} };
+  var SYNC_FIELDS = ['syncgroup', 'wallcols', 'wallrows', 'wallcol', 'wallrow', 'wallbezel'];
+  // Read the page just before anything is rebuilt (as the Network card does): a field that differs from what it was
+  // drawn from is kept.
+  function keepSyncForm() {
+    SYNC_FIELDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el || typeof el.value !== 'string') return;
+      if (el.value !== syncForm.drawn[id]) syncForm.vals[id] = el.value; else delete syncForm.vals[id];
+    });
+  }
   function syncCard() {
     var body = h('div', { class: 'list', id: 'syncbody' }, h('div', { class: 'k', text: 'Loading...' }));
     var card = h('div', { class: 'card', id: 'synccard' }, h('h2', { text: 'Sync and video wall' }), body);
@@ -1561,10 +1575,34 @@
       return card;
     }
     var full = can('full');
-    function post(b) { return act('POST', '/api/sync', b, function (data) { say(''); draw(data); }); }
-    function refresh() { api('GET', '/api/sync').then(function (r) { if (document.getElementById('synccard') && r.ok) draw(r.data); }); }
+    // Saves are counted: an answer that is older than a later save does not clear that save's message and is not
+    // drawn over it; the card asks again instead. `sent` is what the fields held at the click: once saved, a field
+    // that still holds it is no longer a change, and one that was changed again meanwhile is kept.
+    var posts = 0;
+    function post(b, sent) {
+      var n = ++posts;
+      return act('POST', '/api/sync', b, function (data) {
+        if (n !== posts) return refresh();
+        say('');
+        Object.keys(sent || {}).forEach(function (id) { syncForm.drawn[id] = sent[id]; });
+        draw(data);
+      });
+    }
+    function refresh() {
+      var n = posts;
+      api('GET', '/api/sync').then(function (r) {
+        if (!document.getElementById('synccard') || !r.ok) return;
+        if (n !== posts) return refresh();
+        draw(r.data);
+      });
+    }
+    function field(id, saved) {
+      syncForm.drawn[id] = String(saved);
+      return id in syncForm.vals ? syncForm.vals[id] : String(saved);
+    }
     function draw(d) {
       clearTimeout(syncTimer);
+      keepSyncForm();
       body.textContent = '';
       var c = d.config, f = d.follow || {};
       var line = c.role === 'off' ? 'Off: this box plays on its own.' :
@@ -1578,25 +1616,27 @@
         return h('button', { class: 'btn small' + (c.role === r[0] ? ' on' : ''), 'aria-pressed': c.role === r[0] ? 'true' : 'false', id: 'syncrole-' + r[0], text: r[1],
           onclick: function () { post({ role: r[0] }); } });
       })));
-      var group = h('input', { class: 'text-input mono', id: 'syncgroup', 'aria-label': 'Group name', value: c.group, maxlength: 24 });
+      var group = h('input', { class: 'text-input mono', id: 'syncgroup', 'aria-label': 'Group name', value: field('syncgroup', c.group), maxlength: 24 });
       body.appendChild(h('label', { class: 'k', for: 'syncgroup', text: 'Group name (the same on every box that plays together)' }));
-      body.appendChild(h('div', { class: 'row' }, group, h('button', { class: 'btn small', id: 'syncgroupsave', text: 'Save', onclick: function () { post({ group: group.value.trim() }); } })));
+      body.appendChild(h('div', { class: 'row' }, group, h('button', { class: 'btn small', id: 'syncgroupsave', text: 'Save', onclick: function () { post({ group: group.value.trim() }, { syncgroup: group.value }); } })));
       body.appendChild(h('div', { class: 'k', text: 'Every box needs the same clips with the same file names (media folder or the top of a USB drive). Clients follow the server\'s clip, position, pause and blackout.' }));
       var w = c.wall, nums = function (lo, hi) { var a = []; for (var i = lo; i <= hi; i++) a.push(i); return a; };
-      function pick(id, label, values, cur, fmt) {
-        return h('select', { class: 'text-input', id: id, 'aria-label': label }, values.map(function (v) { return h('option', { value: String(v), text: fmt(v), selected: v === cur }); }));
+      function pick(id, label, values, saved, fmt) {
+        var cur = field(id, saved);
+        return h('select', { class: 'text-input', id: id, 'aria-label': label }, values.map(function (v) { return h('option', { value: String(v), text: fmt(v), selected: String(v) === cur }); }));
       }
       var cols = pick('wallcols', 'Columns', nums(1, 8), w.cols, function (v) { return v + (v === 1 ? ' column' : ' columns'); });
       var rows = pick('wallrows', 'Rows', nums(1, 8), w.rows, function (v) { return v + (v === 1 ? ' row' : ' rows'); });
       var col = pick('wallcol', 'This screen\'s column', nums(0, 7), w.col, function (v) { return 'column ' + (v + 1); });
       var row = pick('wallrow', 'This screen\'s row', nums(0, 7), w.row, function (v) { return 'row ' + (v + 1); });
-      var bezel = h('input', { class: 'text-input mono', id: 'wallbezel', type: 'number', min: 0, max: 20, step: 0.5, value: w.bezel, 'aria-label': 'Bezel, percent of a screen' });
+      var bezel = h('input', { class: 'text-input mono', id: 'wallbezel', type: 'number', min: 0, max: 20, step: 0.5, value: field('wallbezel', w.bezel), 'aria-label': 'Bezel, percent of a screen' });
       body.appendChild(h('div', { class: 'k', text: 'Video wall: this screen shows one tile of the picture. 1 column and 1 row shows the whole picture.' }));
       body.appendChild(h('div', { class: 'row wrap' }, cols, rows));
       body.appendChild(h('div', { class: 'row wrap' }, col, row));
       body.appendChild(h('label', { class: 'k', for: 'wallbezel', text: 'Frame between screens (percent of a screen, hides that much picture)' }));
       body.appendChild(h('div', { class: 'row' }, bezel, h('button', { class: 'btn small', id: 'wallsave', text: 'Save wall', onclick: function () {
-        post({ wall: { cols: +cols.value, rows: +rows.value, col: +col.value, row: +row.value, bezel: +bezel.value } });
+        post({ wall: { cols: +cols.value, rows: +rows.value, col: +col.value, row: +row.value, bezel: +bezel.value } },
+          { wallcols: cols.value, wallrows: rows.value, wallcol: col.value, wallrow: row.value, wallbezel: bezel.value });
       } })));
     }
     refresh();
@@ -2260,6 +2300,7 @@
     clearTimeout(healthTimer);
     clearTimeout(syncTimer);
     keepNetForm();
+    keepSyncForm();
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
     var screens = { live: live, mix: mix, media: media, system: system };
