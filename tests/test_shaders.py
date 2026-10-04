@@ -238,7 +238,7 @@ class FakeIpc:
         if command[:2] == ("get_property", "current-vo"):
             return self.p.vo
         if command[:2] == ("get_property", "vo-passes"):
-            return {"fresh": [{"desc": "user shader: %s (rgb)" % d, "avg": 1500000} for d in self.p.drawn], "redraw": []}
+            return {"fresh": [{"desc": "user shader: %s (rgb)" % d, "avg": self.p.pass_ns, "last": self.p.pass_ns} for d in self.p.drawn], "redraw": []}
         return None
 
 
@@ -250,7 +250,7 @@ class SourcePlayer:
     def __init__(self, rundir):
         self.rundir, self.socket_path = rundir, os.path.join(rundir, "player.sock")
         self.source_epoch, self.source_shader, self.path, self.vo = 0, None, None, "null"
-        self.calls, self.drawn, self.down = [], [], False
+        self.calls, self.drawn, self.down, self.pass_ns = [], [], False, 1500000
         self.ipc = FakeIpc(self)
 
     def osd_size(self):
@@ -396,6 +396,13 @@ class EngineTest(Base):
         FakeTap.lines = []
         self.engine.api_play({"id": "nxlx-tide.fs"}, None, "t")                        # a later good try clears the error
         self.assertIsNone(self.engine.state()["error"])
+
+    def test_a_pass_that_is_listed_but_took_no_time_is_not_counted_as_drawn(self):
+        """mpv lists a refused shader's pass too, with a time of 0; its error lines may come late."""
+        self.player.vo, self.player.pass_ns = "gpu", 0
+        self.engine.show("nxlx-aurora.fs")
+        self.assertIsNone(self.engine.state()["playing"]["checked"])
+        self.assertEqual(self.engine._checked, set())                 # so it is watched again next time
 
     def test_a_shader_already_taken_by_the_gpu_is_not_waited_for_again(self):
         self.player.vo = "gpu"

@@ -12,8 +12,8 @@ How it sits in the player (all of it checked against a real mpv in CI, see tests
   and the projection mapping, which stays where it was at the OUTPUT stage;
 * the shader's own size is set with WIDTH and HEIGHT, so the carrier can stay tiny whatever the drawing size;
 * TIME is counted from mpv's `frame` number and the carrier's frame rate (see SHADERS.md for how exact that is). It is
-  put together in high precision from small whole numbers: on OpenGL ES mpv's `frame` is a medium-precision integer,
-  and with Mesa's software GPU in CI a medium-precision number above 65504 drew a black picture;
+  put together in high precision from small whole numbers: with Mesa's software GPU on OpenGL ES in CI, a shader
+  that computed mod(float(frame), 1048576.0) drew a black picture with no error (most likely medium precision);
 * input values are written into the shader as constants, like the mapper's numbers: nothing but checked numbers and
   the shader's own code reach the GPU. The code itself is untrusted text from a full-access device; it is bounded in
   size, may not carry mpv's own `//!` commands or preprocessor includes, and what the GPU refuses is taken off again.
@@ -593,13 +593,20 @@ class Engine:
     def _watch(self, tap, desc):
         """Wait until the player has drawn a frame with the shader called `desc` or has complained.
         ("ok" | "refused" | "unknown", message)."""
-        lines, drawn = [], False
+        lines, drawn, listed = [], False, None
         deadline = self._clock() + VERIFY_SECONDS
         while self._clock() < deadline and not drawn:
             lines += tap.drain(0.1)
             if shader_errors(lines):
                 break
-            drawn = any(desc in str(x.get("desc", "")) for x in self._passes())
+            mine = [x for x in self._passes() if desc in str(x.get("desc", ""))]
+            # A refused shader is listed too, with no time against it (seen in CI): only a pass that took time was
+            # drawn. A GPU that reports no times at all gives "unknown" after a second, never "ok".
+            drawn = any(isinstance(x.get(k), (int, float)) and x[k] > 0 for x in mine for k in ("avg", "last"))
+            if mine and not drawn:
+                listed = self._clock() if listed is None else listed
+                if self._clock() - listed >= 1.0:
+                    break
         lines += tap.drain(0.2)
         message = shader_errors(lines)
         if message:
@@ -633,7 +640,7 @@ class Engine:
             try:
                 parsed, digest = self._parsed(path)
                 size = render_size(self.screen(), self.config()["height"])
-                desc = "nxlx shader %d" % (self._serial + 1)
+                desc = "nxlx shader %d %d" % (os.getpid(), self._serial + 1)      # mpv outlives this service: no two alike
                 text = translate(parsed, size, values, hue, offset, desc)
                 clean = clean_values(parsed, values)
             except ShaderError as e:

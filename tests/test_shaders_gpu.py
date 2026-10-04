@@ -268,6 +268,11 @@ class GpuCase:
         self.assertIsNone(self.engine.state()["playing"])
         self.assertIsNone(self.engine.show("probe.fs", epoch=r["epoch"]))      # an old epoch can no longer take the screen
         self.assertEqual((self.shaders_in_player(), self.real.ipc.request("get_property", "path")), ([], CLIP))
+        for _ in range(4):                                           # the probe's picture is gone from the screen
+            rows = self.shot()
+            probe = all(abs(a - b) <= 8 for got, want in ((rows[2][W - 3], (253, 252, 64)), (rows[H - 3][2], (2, 3, 64))) for a, b in zip(got, want))
+            self.assertFalse(probe, "the shader is still drawn over the clip")
+            time.sleep(0.2)
         # The clip's own picture is not checked: on this rig a screenshot of the test clip was at times one flat
         # colour even before any shader had been on (cause not found), so it proves nothing either way. Printed only.
         print("clip colours after the shader: %s, time-pos %s" % (self.clip_colours(2), self.real.ipc.request("get_property", "time-pos")))
