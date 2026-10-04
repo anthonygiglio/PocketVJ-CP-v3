@@ -440,6 +440,18 @@ class ImportTest(Base):
         self.assertEqual(self.care._siblings(".before-import-"), [])
         self.assertEqual(self.send(good)[0], 200)
 
+    def test_autostart_from_a_pad_is_checked_against_the_box_s_pads_when_the_file_has_none(self):
+        file = self.export()
+        before = self.on_disk()
+        file["settings"] = {"schema": file["settings"]["schema"], "autostart": {"mode": "pad", "pad": [2, 5]}}
+        st, out = self.send(file)                                     # that pad of the box has no clip
+        self.assertEqual((st, out.get("error")), (400, "autostart: the pad it starts has no clip"))
+        self.assertEqual(self.on_disk(), before)
+        file["settings"]["autostart"]["pad"] = [0, 0]                 # this one has
+        st, out = self.send(file)
+        self.assertEqual((st, out["imported"]), (200, ["autostart"]), out)
+        self.assertEqual((self.settings.data["autostart"]["mode"], self.settings.data["autostart"]["pad"]), ("pad", [0, 0]))
+
     def test_modules_this_box_cannot_run_are_left_off(self):
         file = self.export()
         board = self.api.registry.board

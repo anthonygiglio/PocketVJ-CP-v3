@@ -524,9 +524,10 @@ class BoxCare:
         for name in sorted(k for k in data if k not in known and k != "schema" and k not in NEVER):
             self.note("%s is not imported by this version; left as it is" % name)
         a = clean.get("autostart")
-        if a and a["mode"] == "pad" and "pads" in clean:
+        if a and a["mode"] == "pad":             # the pad it starts: the file's, or the box's own when the file has no pads
             b, i = a["pad"]
-            banks = clean["pads"]["banks"]
+            with self.settings.lock:
+                banks = copy.deepcopy((clean if "pads" in clean else self.settings.data)["pads"]["banks"])
             if not (b < len(banks) and banks[b]["pads"][i].get("file")):
                 raise bad("autostart: the pad it starts has no clip")
         return clean, list(self._notes), passwords
