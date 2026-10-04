@@ -557,6 +557,25 @@ class ImportTest(Base):
                 json.dump({"state": "running", "at": time.time()}, f)
             self.assertTrue(self.api._update_running())
 
+    def test_a_save_that_fails_leaves_the_box_as_it_was(self):
+        """All or nothing also when the disk is full: not the new settings in memory and the old ones on disk."""
+        file = self.export()
+        file["settings"]["mix"] = {"transition": "cut", "duration": 1.0}
+        file["settings"]["streams"] = []
+        before, memory, held = self.on_disk(), copy.deepcopy(self.settings.data), self.settings.data
+        applied = []
+        self.care._apply = lambda: applied.append(1) or []
+        with mock.patch.object(self.settings, "save", side_effect=OSError(28, "No space left on device")):
+            st, out = self.send(file)
+        self.assertEqual(st, 500, out)
+        self.assertIn("nothing was changed", out["error"])
+        self.assertIn("No space left", out["error"])
+        self.assertIs(self.settings.data, held)                 # the same dictionary others hold
+        self.assertEqual((self.settings.data, self.on_disk(), applied), (memory, before, []))
+        self.assertEqual(self.care._siblings(".before-import-"), [])
+        self.assertEqual(self.call("GET", "/api/status", token=self.full)[0], 200)
+        self.assertEqual(self.send(file)[0], 200)               # and it works once the disk does
+
     def test_only_the_last_few_backups_are_kept(self):
         file = self.export()
         t = [1790000000]

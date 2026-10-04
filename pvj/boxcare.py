@@ -639,8 +639,14 @@ class BoxCare:
                 backup = self._backup()
             except OSError as e:
                 raise ApiError(500, "could not keep a copy of the present settings, so nothing was changed: %s" % (e.strerror or e))
+            previous = copy.deepcopy(current)
             self._replace(new)
-            self.settings.save()
+            try:
+                self.settings.save()
+            except OSError as e:                 # a full or read-only disk: the box goes on with what it had
+                self._replace(previous)
+                self._unlink(os.path.join(os.path.dirname(self.settings.path) or ".", backup))
+                raise ApiError(500, "the settings could not be saved, so nothing was changed: %s" % (e.strerror or e))
         problems = self._apply()
         print("pvj-web: settings imported by %s" % device["name"], flush=True)
         return {"imported": sorted(clean), "notes": notes, "problems": problems, "backup": backup,
