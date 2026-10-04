@@ -10,10 +10,14 @@ What happens to secrets (see also docs/MANUAL.md):
 * The PIN, paired devices and their tokens, remote-support settings (server address, keys) and the support history
   are NEVER exported and NEVER imported. They belong to one box: an import leaves the box's own as they are, and a
   file that carries them is refused. Join codes and support codes live in memory only and are in no file.
-* Projector passwords and stream logins (a user name and password in the address, or an SRT passphrase) are left
-  out of an export unless the person ticks "include passwords"; that cannot be asked for through the remote-support
-  tunnel. Importing a file without them keeps the password the box already has for the same projector (same id,
-  address and port) or stream (same id and address).
+* Projector passwords and the secrets in a stream address are left out of an export unless the person ticks
+  "include passwords"; that cannot be asked for through the remote-support tunnel. What is secret in an address is
+  decided in one place (streams._pieces): a user name and password; for RTMP the stream key (the last part of the
+  path) and the whole query; for SRT the passphrase, the streamid and every query name not on a short list of
+  harmless ones; for RTSP query names that sound like a secret. Importing a file without them keeps the password
+  the box already has for the same projector (same id, address and port), and the box's own full address of a stream
+  with the same id when the file's address is that address without its secrets: a shortened address never replaces
+  a working one.
 * The diagnostics file never contains any of these, with or without a tick: its settings are built from a list of
   what may be shown, a net over key names catches what a later version might add, and every piece of text in it
   (log lines too) is scrubbed of the secrets the box knows and of anything that looks like a login in an address.
@@ -55,7 +59,7 @@ KEEP_IMPORT_BACKUPS = 3
 LOG_UNITS = ("pvj-web.service", "pvj-player.service", "pvj-sysd.service", "pvj-netd.service", "pvj-supportd.service")
 LOG_LINES, LOG_LINE_MAX = 300, 400
 CONFIRM_IMPORT, CONFIRM_RESET = "import", "factory-reset"
-SECRET_QUERY = streams_mod.SECRET_QUERY
+SECRET_QUERY = ("passphrase", "password", "pass", "token", "key", "secret")
 _ID = re.compile(r"[0-9a-f]{8}")
 _SECRET_KEY = re.compile(r"pass|secret|token|salt|hash|credential|(^|_)(pin|key|code|login)(_|$)", re.I)
 _LOG_PIN = re.compile(r"(?i)\b(pin|code)\b([ :=]+)(?=[A-Za-z-]*[0-9])[A-Za-z0-9-]{4,}")
@@ -435,8 +439,9 @@ class BoxCare:
 
     # ---- export ------------------------------------------------------------------------------------------------
     def export(self, body, device, client):
-        """{"passwords": false}: the settings as one file. With "passwords": true the projector passwords and stream
-        logins are in it (never through the support tunnel). The PIN, devices and remote support never are."""
+        """{"passwords": false}: the settings as one file. With "passwords": true the projector passwords and the full
+        stream addresses (logins, stream keys, passphrases) are in it, never through the support tunnel. The PIN,
+        devices and remote support never are."""
         passwords = body.get("passwords", False)
         if not isinstance(passwords, bool):
             raise bad("passwords must be true or false")
@@ -516,7 +521,8 @@ class BoxCare:
         return clean, list(self._notes), passwords
 
     def _keep_secrets(self, clean, current):
-        """A file made without passwords: keep the one this box already has for the same projector or stream."""
+        """A file made without passwords: keep the one this box already has for the same projector, and the box's
+        own full address of a stream whose shortened form is what the file holds."""
         kept = 0
         mine = {p["id"]: p for p in current.get("projectors", [])}
         for p in clean.get("projectors", []):

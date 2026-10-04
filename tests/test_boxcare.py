@@ -111,12 +111,11 @@ class StreamAddressTest(unittest.TestCase):
     def test_only_the_secrets_are_cut_and_every_other_byte_stays(self):
         for url, want, _secrets in ADDRESSES:
             self.assertEqual(boxcare.strip_login(url), want)
-            self.assertEqual(boxcare.strip_login(want), want)
         self.assertIs(boxcare.strip_login, streams_mod.strip_login)       # one rule, for the panel and for the files
 
     def test_the_secret_pieces_are_found_even_behind_a_hash(self):
         url = "srt://me:pw-1@192.168.1.61:9000?streamid=#!::r=live&passphrase=Phrase-9"
-        self.assertEqual(sorted(boxcare.stream_secrets(url)), ["Phrase-9", "me", "pw-1"])
+        self.assertEqual(sorted(boxcare.stream_secrets(url)), ["#!::r=live", "Phrase-9", "me", "pw-1"])
         self.assertEqual(boxcare.stream_secrets("rtsp://192.168.1.60/live"), [])
         self.assertEqual(boxcare.stream_secrets(None), [])
         self.assertEqual(boxcare.stream_where(url), "srt://192.168.1.61:9000")
@@ -131,7 +130,7 @@ class ExportTest(Base):
         self.assertEqual(file["settings"]["schema"], settings_mod.SCHEMA)
         for name in boxcare.NEVER:
             self.assertNotIn(name, file["settings"])
-        secrets = [PROJECTOR_PASSWORD, STREAM_USER, STREAM_PASSWORD, STREAM_PHRASE, self.pin, self.full,
+        secrets = [PROJECTOR_PASSWORD, STREAM_USER, STREAM_PASSWORD, STREAM_PHRASE, STREAM_KEY, self.pin, self.full,
                    self.settings.data["auth"]["pin_hash"], self.settings.data["auth"]["pin_salt"]]
         secrets += [d["token_hash"] for d in self.settings.data["devices"]]
         secrets += [j["code"] for j in self.auth.list_joins()]
@@ -140,8 +139,21 @@ class ExportTest(Base):
         self.assertNotIn("token", text)
         self.assertEqual([p["password"] for p in file["settings"]["projectors"]], ["", ""])
         self.assertEqual([s["url"] for s in file["settings"]["streams"]],
-                         ["rtsp://192.168.1.60:554/live", "srt://192.168.1.61:9000?mode=caller", "rtmp://192.168.1.62/live/" + STREAM_KEY])
+                         ["rtsp://192.168.1.60:554/live", "srt://192.168.1.61:9000?mode=caller", "rtmp://192.168.1.62/live"])
         self.assertEqual(file["settings"]["pads"]["banks"][0]["pads"][0]["file"], "a.mp4")
+
+    def test_no_secret_of_any_stream_address_is_exported_without_the_tick(self):
+        """A stream key in an RTMP path, a query name nobody listed, an SRT streamid, a percent-encoded name."""
+        dev, _ = self.remote_login()
+        self.settings.data["streams"] = [{"id": "bbbb%04d" % n, "name": "s%d" % n, "url": a[0]} for n, a in enumerate(ADDRESSES)]
+        every = {secret for a in ADDRESSES for secret in a[2]}
+        self.assertGreater(len(every), 12)
+        for file in (self.export(), self.h("POST", "/api/system/settings/export", {}, dev, TUNNEL)[1]["file"]):
+            text = json.dumps(file)
+            for secret in every:
+                self.assertNotIn(secret, text)
+            self.assertEqual([s["url"] for s in file["settings"]["streams"]], [a[1] for a in ADDRESSES])
+        self.assertEqual([s["url"] for s in self.export(passwords=True)["settings"]["streams"]], [a[0] for a in ADDRESSES])
 
     def test_passwords_only_when_asked_and_never_the_access_data(self):
         self.h("POST", "/api/support/config", dict(CFG, allowed=True), self.full_dev)
@@ -190,7 +202,7 @@ class ImportTest(Base):
         self.assertEqual(st, 200, out)
         self.assertEqual(out["problems"], [])
         self.assertEqual(self.settings.data, before)             # passwords too: kept from the box
-        self.assertEqual(out["passwords_kept"], 3)
+        self.assertEqual(out["passwords_kept"], 4)              # one projector, a login, a passphrase, a stream key
         self.assertEqual(self.call("GET", "/api/devices", token=self.full)[0], 200)      # still paired
         self.assertEqual(self.settings.data["devices"], before["devices"])
         backup = os.path.join(self.tmp, out["backup"])
@@ -209,15 +221,18 @@ class ImportTest(Base):
         self.assertEqual(self.settings.data["projectors"][0]["password"], PROJECTOR_PASSWORD)
         self.assertIn(STREAM_PASSWORD, self.settings.data["streams"][0]["url"])
 
-    def test_a_stream_address_arrives_unchanged_on_a_box_that_never_had_it(self):
-        srt = "srt://192.168.1.61:9000?mode=caller&streamid=#!::r=live/cam,m=request"
-        self.settings.data["streams"] = [{"id": "bbbb0009", "name": "Truck", "url": srt + "&passphrase=" + STREAM_PHRASE}]
+    def test_a_shortened_address_never_replaces_the_box_s_working_one(self):
+        full = [{"id": "bbbb%04d" % n, "name": "s%d" % n, "url": a[0]} for n, a in enumerate(ADDRESSES)]
+        self.settings.data["streams"] = copy.deepcopy(full)
         file = self.export()
-        self.assertEqual(file["settings"]["streams"][0]["url"], srt)
-        self.settings.data["streams"] = []
+        self.assertEqual([s["url"] for s in file["settings"]["streams"]], [a[1] for a in ADDRESSES])
+        st, out = self.send(file)
+        self.assertEqual((st, out["passwords_kept"]), (200, 1 + len([a for a in ADDRESSES if a[2]])), out)
+        self.assertEqual(self.settings.data["streams"], full)             # every stream still plays
+        self.settings.data["streams"] = []                               # a box that never had them gets what the file holds
         st, out = self.send(file)
         self.assertEqual((st, out["passwords_kept"]), (200, 1))          # the projector's; there was no stream to keep one from
-        self.assertEqual(self.settings.data["streams"], [{"id": "bbbb0009", "name": "Truck", "url": srt}])
+        self.assertEqual([s["url"] for s in self.settings.data["streams"]], [a[1] for a in ADDRESSES])
 
     def test_a_kept_password_never_follows_a_changed_address(self):
         file = self.export()
@@ -227,6 +242,28 @@ class ImportTest(Base):
         self.assertEqual(self.settings.data["projectors"][0], {"id": "aaaa0001", "name": "Left", "host": "192.168.1.99", "port": 4352, "password": ""})
         self.assertEqual(self.settings.data["streams"][0]["url"], "rtsp://192.168.1.99:554/live")
         self.assertIn(STREAM_PHRASE, self.settings.data["streams"][1]["url"])       # unchanged address: kept
+        self.assertIn(STREAM_KEY, self.settings.data["streams"][2]["url"])
+
+    def test_a_kept_password_needs_exactly_the_same_address(self):
+        """Another port, another case, a trailing dot: it may be another machine, so the password is not sent there."""
+        mine = {"id": "aaaa0001", "name": "Left", "host": "proj.local", "port": 4352, "password": PROJECTOR_PASSWORD}
+        stream = {"id": "bbbb0001", "name": "Camera", "url": "rtsp://%s:%s@cam.local:554/live" % (STREAM_USER, STREAM_PASSWORD)}
+        for host, port, url in (("proj.local", 4353, "rtsp://cam.local:555/live"), ("PROJ.local", 4352, "rtsp://CAM.local:554/live"),
+                                ("proj.local.", 4352, "rtsp://cam.local.:554/live"), ("proj.local", 4352, "rtsp://cam.local/live"),
+                                ("proj.local", 4352, "RTSP://cam.local:554/live"), ("proj.local", 4352, "rtsp://cam.local:554/Live")):
+            self.settings.data["projectors"], self.settings.data["streams"] = [dict(mine)], [dict(stream)]
+            file = self.export()
+            self.assertEqual(file["settings"]["streams"][0]["url"], "rtsp://cam.local:554/live")
+            file["settings"]["projectors"][0].update(host=host, port=port)
+            file["settings"]["streams"][0]["url"] = url
+            st, out = self.send(file)
+            self.assertEqual(st, 200, out)
+            self.assertEqual(self.settings.data["streams"][0]["url"], url)
+            if (host, port) == ("proj.local", 4352):
+                self.assertEqual((out["passwords_kept"], self.settings.data["projectors"][0]["password"]), (1, PROJECTOR_PASSWORD))
+            else:
+                self.assertEqual((out["passwords_kept"], self.settings.data["projectors"][0]["password"]), (0, ""))
+            self.assertNotIn(STREAM_PASSWORD, json.dumps(self.settings.data["streams"]))
 
     def test_a_newer_file_is_refused_plainly_and_nothing_changes(self):
         file = self.export()
@@ -559,7 +596,7 @@ class DiagnosticsTest(Base):
         self.assertEqual(s["projectors"][0], {"id": "aaaa0001", "name": "Left", "host": "192.168.1.50", "port": 4352, "has_password": True})
         self.assertEqual(s["streams"], [{"id": "bbbb0001", "name": "Camera", "from": "rtsp://192.168.1.60:554", "has_login": True},
                                         {"id": "bbbb0002", "name": "Truck", "from": "srt://192.168.1.61:9000", "has_login": True},
-                                        {"id": "bbbb0003", "name": "Open", "from": "rtmp://192.168.1.62", "has_login": False}])
+                                        {"id": "bbbb0003", "name": "Open", "from": "rtmp://192.168.1.62", "has_login": True}])
         self.assertEqual(s["support"], {"allowed": True, "max_minutes": 240, "server_set": True, "configured": True})
         self.assertEqual([x["role"] for x in s["devices"]], [x["role"] for x in d["devices"]])
         self.assertEqual(s["pads"]["banks"][0]["pads"][0]["file"], "a.mp4")
