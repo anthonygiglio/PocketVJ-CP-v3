@@ -1675,6 +1675,7 @@
       });
     }
     function describe(e) {
+      if (e.action === 'scene') return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · Scene ' + (window.pvjRoom ? window.pvjRoom.sceneName(e.scene) : e.scene);
       var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'preset' ? 'Start script ' + e.preset :
         ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off' })[e.action] || e.action;
       return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · ' + what;
@@ -1710,6 +1711,7 @@
           ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off']].map(function (a) {
           return h('option', { value: a[0], text: a[1], selected: a[0] === schedForm.action });
         }));
+      var scene = window.pvjRoom ? window.pvjRoom.scheduleField(roomCtx(), action, schedForm, function () { draw(d); }) : null;
       var file = h('select', { class: 'text-input', id: 'schedfile', 'aria-label': 'Clip to play', hidden: schedForm.action !== 'play' },
         S.media.map(function (n) { return h('option', { value: n, text: n, selected: n === schedForm.file }); }));
       if (!schedForm.file && S.media.length) schedForm.file = S.media[0];
@@ -1721,11 +1723,13 @@
       label.addEventListener('input', function () { schedForm.label = label.value; });
       body.appendChild(h('div', { class: 'k', text: 'Add an entry' }));
       body.appendChild(time); body.appendChild(days); body.appendChild(action); body.appendChild(file); body.appendChild(preset); body.appendChild(label);
+      if (scene) body.insertBefore(scene, label);
       body.appendChild(h('button', { class: 'btn on small', id: 'schedadd', text: 'Add entry', onclick: function () {
         if (!schedForm.days.length) return say('Choose at least one day.', true);
         var entry = { time: schedForm.time, days: schedForm.days.slice(), action: schedForm.action, label: schedForm.label };
         if (schedForm.action === 'play') { if (!schedForm.file) return say('Upload a clip first.', true); entry.file = schedForm.file; }
         if (schedForm.action === 'preset') { if (!schedForm.preset) return say('Type the start script name.', true); entry.preset = schedForm.preset.trim(); }
+        if (schedForm.action === 'scene') { if (!schedForm.scene) return say('Add a scene on the Room screen first.', true); entry.scene = schedForm.scene; }
         save({ enabled: d.enabled, entries: d.entries.concat(entry) });
       } }));
     }
@@ -2040,6 +2044,8 @@
   }
 
   // ---- shell ----------------------------------------------------------
+  // The Room screen lives in room.js; it borrows these helpers.
+  function roomCtx() { return { h: h, api: api, say: say, can: can, moduleOn: moduleOn, state: S }; }
   function render() {
     clearTimeout(netTimer);
     clearTimeout(midiTimer);
@@ -2051,7 +2057,15 @@
     app.textContent = '';
     if (!S.device) { app.appendChild(connect()); return; }
     var screens = { live: live, mix: mix, media: media, system: system };
-    var tabs = h('nav', { class: 'tabs', 'aria-label': 'Sections' }, [['live', 'Live'], ['mix', 'Mix'], ['media', 'Media'], ['system', 'System']].map(function (t) {
+    var names = [['live', 'Live'], ['mix', 'Mix'], ['media', 'Media'], ['system', 'System']];
+    // The Room screen (room.js): one more tab while its module is on, and where a presenter or a guest starts
+    if (window.pvjRoom && moduleOn('room')) {
+      screens.room = function () { return window.pvjRoom.screen(roomCtx()); };
+      names.unshift(['room', 'Room']);
+      if (!S.roomSeen && !can('full')) S.tab = 'room';
+      S.roomSeen = true;
+    } else if (S.tab === 'room') S.tab = 'live';
+    var tabs = h('nav', { class: 'tabs' + (names.length > 4 ? ' many' : ''), 'aria-label': 'Sections' }, names.map(function (t) {
       return h('button', { class: 'btn' + (S.tab === t[0] ? ' on' : ''), text: t[1], 'aria-current': S.tab === t[0] ? 'page' : false,
         onclick: function () { S.tab = t[0]; S.msg = ''; loadAll().then(render); } });
     }));
