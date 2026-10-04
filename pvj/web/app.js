@@ -1853,7 +1853,7 @@
       body.appendChild(h('div', { class: 'k', text: 'Only updates signed with your key are installed; older versions are refused; a failed update goes back by itself. A .sha256 file is optional.' }));
       later();
     }
-    refresh();
+    setTimeout(refresh, 0);   // the card is put on the page after this returns; refresh() asks nothing until it is
     return card;
   }
 
