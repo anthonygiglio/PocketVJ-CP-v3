@@ -1,0 +1,1051 @@
+<!-- SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
+     SPDX-License-Identifier: Apache-2.0 -->
+<title>Panel UX Proposal</title>
+<style>
+/* Layout: a phone-sized working copy of the panel on the left (the whole page on a phone), the reasons and the
+   owner's notes beside or below it. Colours are the panel's own seven theme tokens (pvj/themes.d). */
+:root { --bg: #121214; --cd: #1c1c20; --fg: #f2f1ec; --ln: #4a4a54; --mu: #a9a8a3; --ac: #f59e0b; --on: #1a1300;
+  --warn: #b26a00; --bad: #b00020; --onbad: #ffffff; --shade: rgba(0,0,0,.6); color-scheme: dark; }
+.phone[data-theme="night-red"] { --bg: #000000; --cd: #140000; --fg: #ff6a5c; --ln: #6a1a14; --mu: #c2564b; --ac: #ff3b30; --on: #000000; }
+.phone[data-theme="light"] { --bg: #f4f3ef; --cd: #ffffff; --fg: #1c1c1c; --ln: #1c1c1c; --mu: #55554f; --ac: #c2410c; --on: #ffffff; color-scheme: light; }
+.phone[data-theme="high-contrast"] { --bg: #000000; --cd: #000000; --fg: #ffffff; --ln: #ffffff; --mu: #e6e6e6; --ac: #ffff00; --on: #000000; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--ac); outline-offset: 2px; }
+.k { font: 500 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--mu); }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+/* ---- the page around the phone ---- */
+.stage { max-width: 1100px; margin: 0 auto; padding-inline: 16px; padding-block: 10px 48px; display: grid; gap: 14px; }
+.stage > * { min-width: 0; }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-block: 6px; }
+.bar h1 { font-size: 15px; margin: 0 8px 0 0; }
+.seg { display: inline-flex; border: 1.5px solid var(--ln); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--cd); padding: 0 12px; min-height: 40px; font-weight: 600; cursor: pointer; }
+.seg button.on { background: var(--ac); color: var(--on); }
+.bar select { border: 1.5px solid var(--ln); background: var(--cd); border-radius: 8px; min-height: 40px; padding: 0 8px; max-width: 100%; }
+.side { display: flex; flex-direction: column; gap: 14px; }
+.side h2 { font-size: 17px; margin: 0; text-wrap: balance; }
+.side p { margin: 0; color: var(--mu); max-width: 65ch; }
+.side details { border: 1.5px solid var(--ln); border-radius: 6px; background: var(--cd); padding: 0 12px; }
+.side summary { cursor: pointer; font-weight: 600; padding: 12px 0; }
+.side dl { margin: 0 0 12px; display: grid; gap: 10px; }
+.side dt { color: var(--mu); font-size: 14px; }
+.side dd { margin: 2px 0 0; font-size: 15px; max-width: 65ch; }
+.side dd b { color: var(--ac); font-weight: 600; }
+.notes textarea { width: 100%; min-height: 110px; border: 1.5px solid var(--ln); background: var(--cd); border-radius: 6px; padding: 10px; resize: vertical; }
+@media (min-width: 900px) { .stage { grid-template-columns: 420px 1fr; align-items: start; } .bar { grid-column: 1 / -1; } .phonecol { position: sticky; top: 64px; } }
+
+/* ---- the panel, as in pvj/web/app.css ---- */
+.phone { position: relative; border: 1.5px solid var(--ln); border-radius: 16px; overflow: hidden; background: var(--bg); color: var(--fg);
+  height: min(780px, calc(100dvh - 84px)); min-height: 480px; display: flex; flex-direction: column; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.screen { padding: 16px 16px 28px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.top h1, .screen h1 { margin: 0; font-size: 18px; }
+.pill { border: 1.5px solid var(--ln); border-radius: 20px; padding: 4px 10px; background: var(--cd); white-space: nowrap; }
+.card { border: 1.5px solid var(--ln); background: var(--cd); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card h2 { margin: 0; font-size: 15px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row.wrap { flex-wrap: wrap; }
+.grow { flex-grow: 1; }
+.between { justify-content: space-between; }
+.btn { border: 1.5px solid var(--ln); background: var(--cd); color: var(--fg); border-radius: 6px; padding: 0 12px; min-height: 44px; cursor: pointer; font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.on, .pad.on { background: var(--ac); border-color: var(--ac); color: var(--on); }
+.btn.solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn.big { min-height: 56px; }
+.btn.small { min-height: 34px; padding: 0 10px; font-size: 14px; }
+.btn.danger { border-color: var(--bad); }
+.progress { height: 8px; border: 1.5px solid var(--ln); border-radius: 4px; background: var(--bg); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--ac); }
+.banks { display: flex; gap: 8px; }
+.banks .btn { flex: 1 1 0; }
+.pads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pad { border: 1.5px solid var(--ln); background: var(--cd); color: var(--fg); border-radius: 6px; min-height: 80px; cursor: pointer; display: flex;
+  flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 8px; text-align: left; font-weight: 600; font-size: 13px; overflow: hidden; }
+.pad .n { font: 400 10px ui-monospace, Menlo, monospace; color: var(--mu); }
+.pad.on .n { color: var(--on); }
+.pad.empty { border-style: dashed; color: var(--mu); }
+.pad span.t { overflow-wrap: anywhere; }
+.slider { display: flex; flex-direction: column; gap: 6px; }
+.slider label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; }
+.slider input[type=range], input.seek { width: 100%; height: 32px; accent-color: var(--ac); }
+.tabs { display: flex; gap: 4px; border-top: 1.5px solid var(--ln); padding: 8px 12px; background: var(--bg); }
+.tabs .btn { flex: 1 1 0; min-height: 48px; padding: 0 4px; }
+.pin-row { display: flex; gap: 10px; justify-content: center; }
+.pin-row input { width: 56px; height: 64px; border: 1.5px solid var(--ln); background: var(--cd); border-radius: 6px; font: 500 28px ui-monospace, Menlo, monospace; text-align: center; }
+.text-input { border: 1.5px solid var(--ln); background: var(--cd); border-radius: 6px; min-height: 44px; padding: 0 10px; width: 100%; }
+.msg { min-height: 1.4em; font-size: 14px; }
+.msg.err { color: var(--ac); font-weight: 600; }
+.list { display: flex; flex-direction: column; }
+.list .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid var(--ln); padding: 8px 0; font-size: 14px; flex-wrap: wrap; }
+.list .item:first-child { border-top: 0; }
+.list .item > span, .list .item > div { min-width: 0; overflow-wrap: anywhere; }
+.list .item .btn { white-space: nowrap; flex: none; }
+.list .item > span:first-child { flex: 1 1 10rem; }
+.list .item > .row { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.picker { position: absolute; inset: 0; background: var(--shade); display: flex; align-items: flex-end; justify-content: center; z-index: 20; }
+.picker .sheet { background: var(--bg); border: 1.5px solid var(--ln); border-radius: 12px 12px 0 0; width: 100%; max-height: 82%; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.sheet h2 { margin: 0; font-size: 17px; }
+.badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--ln); white-space: nowrap; }
+#preview { width: 100%; aspect-ratio: 16 / 9; border-radius: 6px; background: #000; color: #bbb; display: flex; align-items: center; justify-content: center; font-size: 13px; text-align: center; padding: 8px; }
+
+/* ---- proposed additions (would go at the end of app.css) ---- */
+.strip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--cd); border-bottom: 1.5px solid var(--ln); }
+.strip .what { flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; display: flex; flex-direction: column; }
+.strip .what b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip.black { background: var(--fg); color: var(--bg); }
+.strip.black .k { color: var(--bg); }
+.chip { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--ln); white-space: nowrap; flex: none; }
+.chip.active { background: var(--ac); border-color: var(--ac); color: var(--on); }
+.chip.setup { background: var(--warn); border-color: var(--warn); color: var(--onbad); }
+.chip.problem { background: var(--bad); border-color: var(--bad); color: var(--onbad); }
+.chip.off { color: var(--mu); }
+.dock { display: flex; gap: 8px; padding: 8px 12px 0; background: var(--bg); border-top: 1.5px solid var(--ln); }
+.dock .btn { flex: 1 1 0; }
+.dock + .tabs { border-top: 0; }
+.banner { border: 1.5px dashed var(--ac); border-radius: 6px; padding: 8px 12px; font-size: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.toast { position: absolute; left: 12px; right: 12px; bottom: 132px; z-index: 25; background: var(--fg); color: var(--bg); border-radius: 8px; padding: 10px 12px; font-weight: 600; font-size: 14px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.toast.err { background: var(--bad); color: var(--onbad); }
+.toast button { background: none; border: 1.5px solid currentColor; border-radius: 6px; min-height: 36px; padding: 0 10px; font-weight: 700; cursor: pointer; color: inherit; flex: none; }
+.switch { flex: none; width: 56px; height: 34px; border-radius: 17px; border: 1.5px solid var(--ln); background: var(--bg); position: relative; cursor: pointer; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 25px; height: 25px; border-radius: 50%; background: var(--mu); }
+.switch[aria-checked="true"] { background: var(--ac); border-color: var(--ac); }
+.switch[aria-checked="true"]::after { left: 25px; background: var(--on); }
+.switch:disabled { opacity: .5; cursor: not-allowed; }
+.group { display: flex; flex-direction: column; }
+.group > .k { padding: 6px 0; }
+.mrow { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--ln); min-height: 64px; }
+.mrow .go { flex: 1; min-width: 0; background: none; border: 0; padding: 8px 0; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.mrow .go .nm { font-weight: 600; }
+.mrow .go .st { font-size: 13px; color: var(--mu); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mrow .chev { color: var(--mu); font-size: 20px; flex: none; }
+.back { align-self: flex-start; background: none; border: 0; padding: 8px 0; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.kv { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--ln); padding: 10px 0; font-size: 14px; }
+.kv span:last-child { color: var(--mu); text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.np-title { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.np-left { font: 600 22px ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.clip { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--ln); padding: 8px 0; }
+.clip:first-child { border-top: 0; }
+.clip .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.clip .nm small { display: block; color: var(--mu); font-size: 12px; }
+.clip .btn { flex: none; min-width: 48px; }
+.fold { border: 1.5px solid var(--ln); border-radius: 6px; background: var(--cd); padding: 0 12px; }
+.fold summary { cursor: pointer; font-weight: 600; padding: 12px 0; min-height: 44px; }
+.fold > div { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+.scene { min-height: 64px; text-align: left; display: flex; flex-direction: column; justify-content: center; }
+.scene small { font-weight: 400; color: var(--mu); }
+.scene.on small { color: var(--on); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (prefers-reduced-motion: no-preference) { .progress div { transition: width .3s linear; } .switch::after { transition: left .12s; } }
+</style>
+
+<div class="stage">
+  <div class="bar" id="bar"></div>
+  <div class="phonecol"><div class="phone" id="phone"></div></div>
+  <div class="side" id="side"></div>
+</div>
+
+<script>
+// SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
+// SPDX-License-Identifier: Apache-2.0
+// A click-through proposal for the panel's navigation and screens. Nothing here talks to a box: the "box" is the
+// object B below. Plain JavaScript and textContent only, with the panel's own helper h(), so each idea can be
+// carried into pvj/web/app.js with little change. All names, sizes, addresses and codes are examples.
+(function () {
+  'use strict';
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === false || v === null || v === undefined) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    var add = function (kid) {
+      if (kid === null || kid === undefined || kid === false) return;
+      if (Array.isArray(kid)) return kid.forEach(add);
+      el.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
+    };
+    for (var i = 2; i < arguments.length; i++) add(arguments[i]);
+    return el;
+  }
+  function $(id) { return document.getElementById(id); }
+  function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s; }
+  function short(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60); }
+  function size(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb.toFixed(1) + ' MB'; }
+  function stem(f) { return f.replace(/\.[^.]+$/, ''); }
+
+  // ---- the pretend box ---------------------------------------------------
+  var RANK = { view: 1, live: 2, full: 3 };
+  var ROLE = { view: 'Guest', live: 'Presenter', full: 'Owner' };
+  var ROLE_CAN = { view: 'You can watch what is playing. You cannot change anything.',
+    live: 'You can play clips, start ambience, black out and switch projectors. Settings stay with the owner.',
+    full: 'You can do everything, including settings.' };
+  var SHADERS = ['aurora', 'drift', 'ember', 'horizon', 'lattice', 'nebula', 'prism', 'pulse', 'silk', 'tide'];
+  var B = {
+    now: { kind: 'clip', file: 'loop-a.mkv', label: 'Loop A', dur: 200, pos: 74, loop: true },
+    paused: false, blackout: false, faded: false, test: false, scene: '',
+    mix: { opacity: 100, size: 100, x: 0, y: 0, speed: 100, volume: 100, transition: 'dip', duration: 1, rotate: 0, fh: false, fv: false, muted: false, overlay: false },
+    media: [
+      { n: '01_welcome.jpg', mb: 0.8, dur: 0, fmt: 'JPEG picture, 1920x1080', snd: 'no sound' },
+      { n: '02_sponsors.jpg', mb: 0.9, dur: 0, fmt: 'JPEG picture, 1920x1080', snd: 'no sound' },
+      { n: 'friday_film_4k.mov', mb: 6200, dur: 5820, fmt: 'ProRes 3840x2160, 24 fps', snd: 'stereo', adv: 'Too heavy for this box and likely to stutter. Convert it to H.264, 1920x1080 (the manual has a recipe).' },
+      { n: 'intro.mkv', mb: 38, dur: 42, fmt: 'H.264 1920x1080, 30 fps', snd: 'stereo' },
+      { n: 'logo.png', mb: 0.6, dur: 0, fmt: 'PNG picture, 1920x1080', snd: 'no sound' },
+      { n: 'loop-a.mkv', mb: 164, dur: 200, fmt: 'H.264 1920x1080, 30 fps', snd: 'no sound' },
+      { n: 'loop-b.mkv', mb: 151, dur: 180, fmt: 'H.264 1920x1080, 30 fps', snd: 'no sound' },
+      { n: 'outro.mkv', mb: 44, dur: 55, fmt: 'H.264 1920x1080, 30 fps', snd: 'stereo' },
+      { n: 'sting.mkv', mb: 9, dur: 8, fmt: 'H.264 1920x1080, 30 fps', snd: 'stereo' },
+      { n: 'tunnel.mkv', mb: 210, dur: 240, fmt: 'H.264 1920x1080, 30 fps', snd: 'no sound' }],
+    usb: { drive: 'NXLX-USB', files: [{ n: 'trailer.mp4', mb: 1240, dur: 150 }, { n: 'loop-a.mkv', mb: 164, dur: 200 }] },
+    banks: ['Bank A', 'Bank B', 'Bank C'].map(function (name, b) {
+      var pads = []; for (var i = 0; i < 12; i++) pads.push({ file: '', label: '', ending: 'loop' });
+      if (b === 0) [['intro.mkv', 'Intro', 'stop'], ['tunnel.mkv', 'Tunnel', 'loop'], ['loop-a.mkv', 'Loop A', 'loop'], ['loop-b.mkv', 'Loop B', 'loop'], ['sting.mkv', 'Sting', 'hold'], ['outro.mkv', 'Outro', 'stop']]
+        .forEach(function (p, i) { pads[i] = { file: p[0], label: p[1], ending: p[2] }; });
+      return { name: name, pads: pads };
+    }),
+    free: 84.4, proj: [{ n: 'Main wall', on: true, input: 'HDMI 1', lamp: 412 }, { n: 'Painting wall', on: false, input: 'HDMI 1', lamp: 1310 }],
+    uploads: [], copy: null
+  };
+  // Modules and settings pages. on: the switch; setup: the first-run step is done; armed: today's second switch in the card.
+  var M = {
+    projector: { on: true, setup: true }, shaders: { on: true, setup: true }, scheduler: { on: true, setup: true, armed: true },
+    autostart: { on: true, setup: true }, audio: { on: true, setup: true }, appearance: { on: true, setup: true },
+    streams: { on: false, setup: false }, mapper: { on: false, setup: true }, wall: { on: false, setup: false },
+    midi: { on: true, setup: false, armed: false }, dmx: { on: false, setup: false, armed: false }, osc: { on: false, setup: false, armed: false },
+    access: { on: true, setup: true }, network: { on: false, setup: false }, updates: { on: true, setup: true }, settings: { on: true, setup: true },
+    support: { on: false, setup: false }, health: { on: true, setup: true }, box: { on: true, setup: true }, diag: { on: true, setup: true },
+    restart: { on: true, setup: true }, reset: { on: true, setup: true }
+  };
+  var GROUPS = [['room', 'Room and everyday'], ['picture', 'Sources and picture'], ['control', 'Controllers'], ['once', 'Set once'], ['box', 'This box']];
+  var MODS = [
+    { id: 'projector', name: 'Projectors', old: 'Projector control', group: 'room', sw: true, find: 'pjlink epson lamp input mute on off',
+      about: 'Switch the room\'s projectors on and off, choose their input and mute them, from the Room screen or here.',
+      need: 'add a projector', steps: [{ t: 'Add your first projector', hint: 'First switch PJLink on in the projector\'s own network menu, and note its address.', fields: ['Name (for example Main wall)', 'Address (for example 192.168.1.50)', 'Password, if it has one'], go: 'Add projector' }],
+      active: function () { var n = B.proj.filter(function (p) { return p.on; }).length; return n ? n + ' of ' + B.proj.length + ' switched on' : ''; },
+      ready: function () { return B.proj.length + ' projectors, all off'; } },
+    { id: 'shaders', name: 'Ambience (Shaders and Vibes)', old: 'Shaders and Vibes', group: 'room', sw: true, find: 'vibes isf shader ambience generator',
+      about: 'Moving pictures drawn by the box itself. Vibes plays them endlessly with one tap: the Ambience button on Live and Room.',
+      active: function () { return B.now && B.now.kind === 'vibes' ? 'Vibes is on: ' + SHADERS[B.now.idx] : ''; }, ready: function () { return '10 shaders, 8 in Vibes, 3 minutes each'; } },
+    { id: 'scheduler', name: 'Weekly schedule', old: 'Weekly schedule', group: 'room', sw: true, find: 'time clock timer opening closing',
+      about: 'Start ambience, play a clip, black out or switch projectors at set times on chosen days.',
+      need: 'add a first entry', steps: [{ t: 'Check the box clock', hint: 'The box says it is Saturday 16:42. A Pi has no clock battery, so check this after a power cut.', fields: [], go: 'The clock is right' }, { t: 'Add your first entry', hint: 'For example: every day at 17:00, start ambience.', fields: ['Time (for example 17:00)', 'What happens'], go: 'Add entry' }],
+      ready: function () { return '3 entries. Next: Start ambience, today 17:00'; } },
+    { id: 'autostart', name: 'At power-up', old: 'Autostart', group: 'room', find: 'autostart boot start crash usb',
+      about: 'What the box plays by itself when it gets power, and after a crash.', ready: function () { return 'Starts ambience (Vibes) after 10 seconds'; } },
+    { id: 'audio', name: 'Sound output', old: 'Sound output', group: 'room', find: 'audio hdmi headphones speaker test tone volume',
+      about: 'Where the sound goes, with a test tone for left and right.', ready: function () { return 'Automatic: the HDMI port with the screen'; } },
+    { id: 'appearance', name: 'Look of this panel', old: 'Appearance', group: 'room', find: 'theme colour color dark night red accent contrast',
+      about: 'The panel\'s theme and accent colour. Night red keeps a dark room dark.', ready: function () { return 'Theme: ' + ({ 'dark-stage': 'Dark stage', 'night-red': 'Night red', light: 'Light', 'high-contrast': 'High contrast' })[UI.theme]; } },
+    { id: 'streams', name: 'Network streams', old: 'Streams: SRT, RTSP, RTMP', group: 'picture', sw: true, find: 'srt rtsp rtmp stream camera address',
+      about: 'Save stream addresses and play them like clips.', need: 'add a stream address',
+      steps: [{ t: 'Add your first stream', hint: 'Paste the address the sender gave you. It starts with srt://, rtsp:// or rtmp://.', fields: ['Name', 'Address'], go: 'Save stream' }], ready: function () { return '1 stream saved'; } },
+    { id: 'mapper', name: 'Projection mapping', old: 'Projection mapper', group: 'picture', sw: true, find: 'mapper warp quad grid triangle surface corner',
+      about: 'Warp the picture onto surfaces. The editor is on Mix, under Layers.', ready: function () { return 'No surfaces yet. Open the editor on Mix'; } },
+    { id: 'wall', name: 'Video wall and sync', old: 'Video wall and sync', group: 'picture', sw: true, find: 'sync server client wall tile bezel boxes',
+      about: 'Several boxes play in step: one server leads, the clients follow.', need: 'choose server or client',
+      steps: [{ t: 'Is this box the server or a client?', hint: 'One box leads (the server). Every other box is a client and follows it.', fields: ['Server or client', 'Group name'], go: 'Save' }], ready: function () { return 'Server, group "leyline"'; } },
+    { id: 'midi', name: 'MIDI controller', old: 'MIDI controller (USB)', group: 'control', sw: true, find: 'midi usb controller learn knob fader pad',
+      about: 'Play pads, fade and mix from a USB MIDI controller.', need: 'plug in a controller and teach it',
+      steps: [{ t: 'Plug in the controller', hint: 'None found yet. Plug it into a USB port of the box; it shows up here within a few seconds.', fields: [], go: 'Look again' }, { t: 'Teach the first control', hint: 'Choose what to control, then move the knob or press the pad you want for it.', fields: ['What to control (for example Blackout)'], go: 'Learn' }],
+      ready: function () { return 'Controller ready, 1 control learned'; } },
+    { id: 'dmx', name: 'DMX from a lighting desk', old: 'DMX over the network (Art-Net, sACN)', group: 'control', sw: true, find: 'dmx art-net artnet sacn universe channel lighting',
+      about: 'A lighting console controls the box over the network (Art-Net or sACN).', need: 'choose the universe and channel',
+      steps: [{ t: 'Where does the desk send?', hint: 'Ask the lighting person for these three values.', fields: ['Art-Net or sACN', 'Universe', 'First channel'], go: 'Save and listen' }], ready: function () { return 'Listening: Art-Net, universe 0, channel 1'; } },
+    { id: 'osc', name: 'OSC remote control', old: 'Control (OSC)', group: 'control', sw: true, find: 'osc touchosc resolume qlab port',
+      about: 'TouchOSC, Resolume, QLab and others can control the box.', need: 'check the port and who may send',
+      steps: [{ t: 'Who may send to this box?', hint: 'Private networks are allowed already. The port is 9000 unless your controller needs another.', fields: ['Port'], go: 'Save and listen' }], ready: function () { return 'Listening on port 9000'; } },
+    { id: 'access', name: 'People and codes', old: 'Access', group: 'once', find: 'pin code guest presenter qr device pair access forget print',
+      about: 'Who is paired, guest and presenter codes with their QR codes, and the owner PIN.', ready: function () { return '3 devices paired. Presenter code valid for 12 more minutes'; } },
+    { id: 'network', name: 'Network (wired)', old: 'Network settings (wired)', group: 'once', sw: true, find: 'ip address dhcp fixed static direct cable ethernet wifi',
+      about: 'Change the wired network from the panel. A change reverts by itself unless you confirm it.', need: 'read the warning first',
+      steps: [{ t: 'Before you change the network', hint: 'A wrong setting can cut this phone off. Every change is undone after 60 seconds unless you confirm it from the new address. Try it first with a screen and keyboard on the box.', fields: [], go: 'I understand' }],
+      ready: function () { return 'Automatic address, now 192.168.0.169'; }, offText: 'Off (read only). Address now 192.168.0.169' },
+    { id: 'updates', name: 'Updates', old: 'Updates', group: 'once', find: 'update version install usb upgrade', about: 'Install a signed update from a USB drive or an upload. It rolls back by itself if the panel does not return.', ready: function () { return 'Version 0.1.0. Nothing waiting'; } },
+    { id: 'settings', name: 'Settings file', old: 'Settings file', group: 'once', find: 'export import backup restore settings', about: 'Save this box\'s settings to a file, or load them onto another box.', ready: function () { return 'Never exported'; } },
+    { id: 'support', name: 'Remote support', old: 'Remote support', group: 'once', sw: true, find: 'support help remote session code tunnel',
+      about: 'Lets your support contact reach this panel during a session you start. Off means nothing outside can reach the box.', need: 'enter the support server details',
+      steps: [{ t: 'Enter the support server details', hint: 'Your support contact gives you these once.', fields: ['Support server (host:port)', 'Support server key'], go: 'Save' }], ready: function () { return 'Allowed. No session open'; } },
+    { id: 'health', name: 'Health', old: 'Health', group: 'box', find: 'power temperature voltage load helpers address stutter',
+      about: 'Whether the box is well, in plain words.', prob: function () { return 'Power supply dipped since the last start'; }, ready: function () { return 'All well'; } },
+    { id: 'box', name: 'About this box', old: 'Box, Vitals', group: 'box', find: 'version disk space screen clock time model board', about: 'Versions, free space, screens and the box clock.', ready: function () { return 'Raspberry Pi 4 · 52°C · 84.4 GB free · clock set'; } },
+    { id: 'diag', name: 'Diagnostics file', old: 'Diagnostics', group: 'box', find: 'diagnostics log report help', about: 'One file to send to whoever is helping you. No PIN, password, code or key is in it.', ready: function () { return 'Makes one file to send to support'; } },
+    { id: 'restart', name: 'Restart and power off', old: 'Box, Player', group: 'box', find: 'restart reboot power off shutdown player stuck', about: 'Restart the player if the picture is stuck, restart the whole box, or power it off safely.', ready: function () { return 'Player running for 6 hours'; } },
+    { id: 'reset', name: 'Factory reset', old: 'Factory reset', group: 'box', danger: true, find: 'factory reset erase wipe unpair', about: 'Every setting goes back to how a new box starts and every device is unpaired. Clips stay.', ready: function () { return 'Erases every setting. Asks twice'; } }
+  ];
+  var PLANNED = ['NDI', 'AES67 and Dante audio', 'Presenter', 'Layout import (MadMapper, Resolume)', 'PiWall (legacy, Pi 3 only)'];
+  function mod(id) { return MODS.filter(function (m) { return m.id === id; })[0]; }
+  function mstate(m) {
+    var s = M[m.id];
+    if (m.sw && !s.on) return ['off', 'Off', m.offText || ''];
+    if (m.prob && m.prob()) return ['problem', 'Problem', m.prob()];
+    if (m.steps && !s.setup) return ['setup', 'Needs setup', 'To finish: ' + m.need];
+    var a = m.active && m.active();
+    if (a) return ['active', 'Active', a];
+    return ['ready', m.sw ? 'Ready' : '', m.ready()];
+  }
+
+  // ---- prototype state ---------------------------------------------------
+  var UI = { mode: 'new', role: 'full', joined: true, tab: 'system', page: null, from: 'system', sheet: null, editing: false, bank: 0, msg: '', msgErr: false,
+    toast: null, find: '', theme: 'dark-stage', owner: false, step: 0, snap: '', more: false, welcome: false };
+  function can(r) { return RANK[UI.role] >= RANK[r]; }
+  function isNew() { return UI.mode === 'new'; }
+  var toastTimer = null;
+  function toast(text, label, fn, err) { UI.toast = { text: text, label: label, fn: fn, err: err }; clearTimeout(toastTimer); toastTimer = setTimeout(function () { UI.toast = null; drawToast(); }, 6000); drawToast(); }
+  function say(text, err) { UI.msg = text || ''; UI.msgErr = !!err; var m = $('msg'); if (m) { m.textContent = UI.msg; m.className = 'msg' + (err ? ' err' : ''); } }
+  // tell: the proposed panel answers in a toast on every screen; today's panel writes to the one message line.
+  function tell(now, old, err, label, fn) { if (isNew()) toast(now, label, fn, err); else if (old !== null) say(old === undefined ? now : old, err); }
+  function deny() { tell('Guests can only watch. Ask the owner for a presenter code.', 'This device is view only.', true); }
+
+  // ---- what the box does -------------------------------------------------
+  function title() {
+    if (B.test) return 'Test pattern (colour bars)';
+    if (!B.now) return isNew() ? 'Nothing playing' : 'Player idle';
+    if (B.now.kind === 'vibes') return (isNew() ? 'Ambience: ' : 'Vibes: ') + SHADERS[B.now.idx];
+    return isNew() ? B.now.label : B.now.file;
+  }
+  function stateWord() { return B.blackout ? 'Blackout' : B.faded ? 'Faded out' : !B.now && !B.test ? 'Idle' : B.paused ? 'Paused' : 'Playing'; }
+  function timeLeft() {
+    if (!B.now || B.test) return '';
+    if (B.now.kind === 'vibes') return 'next in ' + short(B.now.dur - B.now.pos);
+    if (!B.now.dur) return 'picture';
+    return short(B.now.dur - B.now.pos) + ' left' + (B.now.loop ? ', then again' : '');
+  }
+  function play(file, label, ending) {
+    if (!can('live')) return deny();
+    var m = B.media.filter(function (x) { return x.n === file; })[0] || B.usb.files.filter(function (x) { return x.n === file; })[0] || { dur: 0 };
+    B.now = { kind: 'clip', file: file, label: label || stem(file), dur: m.dur, pos: 0, loop: ending ? ending === 'loop' : true, ending: ending || 'loop' };
+    B.paused = false; B.test = false; B.scene = '';
+    if (B.blackout || B.faded) tell('Playing ' + B.now.label + ', but the screen is still black.', '', false, 'Bring picture back', show);
+    else tell('Playing ' + B.now.label + '.', 'Playing ' + file);
+    render();
+  }
+  function show() { B.blackout = false; B.faded = false; if (isNew()) toast('The picture is back.'); render(); }
+  function stop() {
+    if (!can('live')) return deny();
+    var was = B.now; B.now = null; B.test = false; B.paused = false; B.scene = '';
+    if (was) tell('Stopped. The screen is black.', null, false, 'Undo', function () { B.now = was; render(); });
+    render();
+  }
+  function vibes(on) {
+    if (!can('live')) return deny();
+    if (on) { B.now = { kind: 'vibes', idx: Math.floor(Math.random() * 10), dur: 180, pos: 0 }; B.paused = false; B.test = false; }
+    else { B.now = null; B.scene = ''; }
+    tell(on ? 'Ambience is on. It runs until you stop it or play something.' : 'Ambience stopped. The screen is black.', null);
+    render();
+  }
+  function blackout(on) { if (!can('live')) return deny(); B.blackout = on; if (!on) B.faded = false; render(); }
+  function fade(out) { if (!can('live')) return deny(); B.faded = out; if (!out) B.blackout = false; if (!isNew()) say(''); render(); }
+  function pause() { if (!can('live')) return deny(); B.paused = !B.paused; render(); }
+  function closeRoom() {
+    var was = { now: B.now, proj: B.proj.map(function (p) { return p.on; }) };
+    B.now = null; B.test = false; B.scene = 'closed'; B.proj.forEach(function (p) { p.on = false; });
+    toast('Room closed: playback stopped, 2 projectors switching off.', 'Undo', function () { B.now = was.now; B.scene = ''; B.proj.forEach(function (p, i) { p.on = was.proj[i]; }); render(); });
+    render();
+  }
+  setInterval(function () {
+    if (B.now && !B.paused) {
+      B.now.pos += B.now.kind === 'clip' ? B.mix.speed / 100 : 1;
+      if (B.now.dur && B.now.pos >= B.now.dur) {
+        if (B.now.kind === 'vibes') { B.now.idx = (B.now.idx + 1) % 10; B.now.pos = 0; }
+        else if (B.now.loop) B.now.pos = 0;
+        else if (B.now.ending === 'hold') { B.now.pos = B.now.dur; B.paused = true; }
+        else { B.now = null; render(); }
+      }
+    }
+    var busy = false;
+    B.uploads.forEach(function (u) {
+      if (u.state !== 'up') return;
+      busy = true; u.pct = Math.min(100, u.pct + 12);
+      if (u.fail && u.pct >= 36) { u.state = 'fail'; render(); }
+      else if (u.pct >= 100) { u.state = 'done'; B.media.push({ n: u.n, mb: u.mb, dur: 96, fmt: 'H.264 1920x1080, 30 fps', snd: 'stereo' }); B.media.sort(function (a, b) { return a.n < b.n ? -1 : 1; }); render(); }
+    });
+    if (B.copy && B.copy.pct < 100) { B.copy.pct += 10; if (B.copy.pct >= 100) { B.media.push({ n: B.copy.n, mb: 1240, dur: 150, fmt: 'H.264 1920x1080, 25 fps', snd: 'stereo' }); B.media.sort(function (a, b) { return a.n < b.n ? -1 : 1; }); render(); } busy = true; }
+    patch(busy);
+  }, 1000);
+  function patch(busy) {
+    var frac = B.now && B.now.dur ? Math.min(1, B.now.pos / B.now.dur) : 0, el;
+    if ((el = $('np'))) el.textContent = title();
+    if ((el = $('time'))) el.textContent = B.now && B.now.kind === 'clip' ? clock(B.now.pos) + ' / ' + clock(B.now.dur) : '--:-- / --:--';
+    if ((el = $('seek')) && document.activeElement !== el) el.value = Math.round(frac * 1000);
+    if ((el = $('st-time'))) el.textContent = [stateWord(), timeLeft()].filter(Boolean).join(' · ');
+    if ((el = $('np-left'))) el.textContent = timeLeft();
+    if ((el = $('np-bar'))) el.style.width = Math.round(frac * 100) + '%';
+    if (busy) B.uploads.forEach(function (u, i) { var b = $('up' + i), t = $('upt' + i); if (b) b.style.width = u.pct + '%'; if (t && u.state === 'up') t.textContent = 'Uploading ' + u.n + ': ' + u.pct + '%'; });
+    if (busy && B.copy && (el = $('importline'))) el.textContent = B.copy.pct >= 100 ? B.copy.n + ' is now on the box.' : 'Copying ' + B.copy.n + ': ' + B.copy.pct + '%';
+  }
+
+  // ---- shared bits -------------------------------------------------------
+  function msgLine() { return h('div', { id: 'msg', class: 'msg' + (UI.msgErr ? ' err' : ''), role: 'status', text: UI.msg }); }
+  function sw(on, label, fn, disabled) { return h('button', { class: 'switch', role: 'switch', 'aria-checked': on ? 'true' : 'false', 'aria-label': label, disabled: disabled, onclick: function (e) { e.stopPropagation(); fn(!on); } }); }
+  function sheet(title, kids) {
+    return h('div', { class: 'picker', onclick: function (e) { if (e.target.className === 'picker') { UI.sheet = null; render(); } } },
+      h('div', { class: 'sheet', role: 'dialog', 'aria-label': title }, h('h2', { text: title }), kids));
+  }
+  function closeBtn(label) { return h('button', { class: 'btn', text: label || 'Cancel', onclick: function () { UI.sheet = null; render(); } }); }
+  function go(tab) { UI.tab = tab; UI.page = null; UI.msg = ''; UI.find = ''; UI.editing = false; scrollTop = 0; render(); }
+  function openMod(id, from) { UI.page = id; UI.from = from || UI.tab; UI.step = 0; scrollTop = 0; render(); }
+  function padOf(file) { var hit = ''; B.banks.forEach(function (b) { b.pads.forEach(function (p, i) { if (!hit && p.file === file) hit = b.name + ', pad ' + (i + 1); }); }); return hit; }
+
+  // ==== TODAY'S PANEL (rebuilt from pvj/web/app.js: same order, same words) ====
+  function oldConnect() {
+    var pins = [0, 1, 2, 3].map(function (i) { return h('input', { inputmode: 'numeric', maxlength: 1, id: 'opin' + i, 'aria-label': 'PIN digit ' + (i + 1) }); });
+    var code = h('input', { class: 'text-input mono', id: 'ojoincode', inputmode: 'numeric', maxlength: 6, placeholder: '6 digit code', 'aria-label': 'Guest or presenter code (6 digits)' });
+    return h('div', { class: 'screen' },
+      h('h1', { text: 'Connect to your box', style: 'font-size:26px' }),
+      h('p', { style: 'margin:0', text: 'Scan the QR code on the screen, or type the code shown there. The box\'s owner can use the 4 digit PIN instead. No internet needed.' }),
+      h('div', { class: 'k', text: 'Guest or presenter code' }), code,
+      h('label', { class: 'k', for: 'odevname', text: 'Name for this device' }), h('input', { class: 'text-input', id: 'odevname', value: 'My phone' }),
+      h('button', { class: 'btn big', text: 'Join with code', onclick: function () {
+        if (code.value.length !== 6) return say('Enter the 6 digit code shown on the screen.', true);
+        if (code.value !== '123456' && code.value !== '654321') return say('That code is wrong or has expired. Ask for a new one.', true);
+        UI.role = code.value === '123456' ? 'live' : 'view'; UI.joined = true; UI.tab = 'live'; UI.msg = ''; drawBar(); render();
+      } }),
+      h('div', { class: 'k', text: 'Owner: PIN' }), h('div', { class: 'pin-row' }, pins),
+      h('button', { class: 'btn on big', text: 'Pair with PIN', onclick: function () {
+        if (pins.map(function (p) { return p.value; }).join('').length !== 4) return say('Enter the 4 digit PIN shown on the box.', true);
+        UI.role = 'full'; UI.joined = true; UI.tab = 'live'; UI.msg = ''; drawBar(); render();
+      } }),
+      msgLine(), h('div', { class: 'k', text: 'Connection lost? The box keeps playing. Reconnect any time.' }));
+  }
+  function oldLive() {
+    var live = can('live'), pads = h('div', { class: 'pads' });
+    B.banks[UI.bank].pads.forEach(function (p, i) {
+      var playing = B.now && p.file && B.now.file === p.file;
+      pads.appendChild(h('button', { class: 'pad' + (playing ? ' on' : '') + (p.file ? '' : ' empty'), onclick: function () {
+        if (UI.editing && can('full')) { UI.sheet = { kind: 'oldpad', index: i }; return render(); }
+        if (!p.file) return say(can('full') ? 'Empty pad. Tap "Edit pads" to assign a clip.' : 'Empty pad.', true);
+        if (!live) return say('This device is view only.', true);
+        play(p.file, p.label, p.ending); say('');
+      } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) }), h('span', { class: 't', text: p.label || (p.file ? stem(p.file) : 'Empty') })));
+    });
+    var vb = M.shaders.on ? h('div', { class: 'row' }, h('button', { class: 'btn big grow' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), disabled: !live,
+      text: B.now && B.now.kind === 'vibes' ? 'Vibes is on. Stop' : 'Vibes', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } })) : null;
+    return h('div', { class: 'screen' },
+      h('div', { class: 'top' }, h('h1', { text: 'nxlx.mastercontrol' }), h('div', { class: 'pill k', text: 'PI4 · 52°C · OK' })),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Now playing' }), h('div', { id: 'np' }),
+        h('input', { type: 'range', class: 'seek', id: 'seek', min: 0, max: 1000, value: 0, disabled: !live, 'aria-label': 'Position in the clip', onchange: function (e) { if (B.now && B.now.dur) B.now.pos = B.now.dur * e.target.value / 1000; } }),
+        h('div', { class: 'k', id: 'time' }),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small grow', text: '⏮ Prev', disabled: true }),
+          h('button', { class: 'btn small grow', text: '− 10 s', disabled: !live, onclick: function () { if (B.now) B.now.pos = Math.max(0, B.now.pos - 10); patch(); } }),
+          h('button', { class: 'btn small grow', text: '+ 10 s', disabled: !live, onclick: function () { if (B.now) B.now.pos += 10; patch(); } }),
+          h('button', { class: 'btn small grow', text: 'Next ⏭', disabled: true })),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small grow', text: 'Fade in', disabled: !live, onclick: function () { fade(false); } }),
+          h('button', { class: 'btn small grow' + (B.test ? ' on' : ''), text: B.test ? 'Test pattern off' : 'Test pattern', disabled: !live, onclick: function () { B.test = !B.test; render(); } }))),
+      vb,
+      h('div', { class: 'card' }, h('div', { class: 'row between' }, h('div', { class: 'k', text: 'Screen' }),
+        h('button', { class: 'btn small', text: 'Take snapshot', onclick: function () { UI.snap = B.blackout || B.faded ? '(black)' : title(); render(); } })),
+        h('div', { class: 'k', text: 'A snapshot briefly stalls playback, so it only happens when you tap.' }),
+        UI.snap ? h('div', { id: 'preview', text: UI.snap }) : null),
+      h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn' + (i === UI.bank ? ' on' : ''), text: b.name, onclick: function () { UI.bank = i; render(); } }); })),
+      pads,
+      can('full') ? h('button', { class: 'btn small', text: UI.editing ? 'Done editing' : 'Edit pads', onclick: function () { UI.editing = !UI.editing; render(); } }) : null,
+      msgLine(),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn big grow', text: 'Fade out', disabled: !live, onclick: function () { fade(true); } }),
+        h('button', { class: 'btn big grow', text: B.paused ? 'Resume' : 'Freeze', disabled: !live, onclick: pause }),
+        h('button', { class: 'btn big grow', text: 'Stop', disabled: !live, onclick: stop }),
+        h('button', { class: 'btn big grow' + (B.blackout ? ' solid' : ''), text: B.blackout ? 'Show' : 'Blackout', disabled: !live, onclick: function () { B.blackout = !B.blackout; render(); } })));
+  }
+  function oldPadSheet() {
+    var i = UI.sheet.index, cur = B.banks[UI.bank].pads[i];
+    var ending = h('select', { class: 'text-input', id: 'opadending' }, [['loop', 'Loop'], ['stop', 'Play once, then black'], ['hold', 'Play once, hold the last frame']].map(function (e) { return h('option', { value: e[0], text: e[1], selected: e[0] === cur.ending }); }));
+    function pick(f) { B.banks[UI.bank].pads[i] = { file: f, label: f ? stem(f) : '', ending: ending.value }; UI.sheet = null; render(); }
+    return sheet('Pad ' + (i + 1), [h('label', { class: 'k', for: 'opadending', text: 'When the clip ends' }), ending,
+      h('div', { class: 'list' }, B.media.map(function (m) { return h('button', { class: 'btn', text: m.n, onclick: function () { pick(m.n); } }); })),
+      h('button', { class: 'btn', text: 'Clear pad', onclick: function () { pick(''); } }), closeBtn()]);
+  }
+  function oldDialog() {
+    var s = UI.sheet, input = s.ask ? h('input', { class: 'text-input', id: 'odlg', value: s.value }) : null;
+    return sheet('Browser dialog', [h('div', { text: s.text }), input, h('div', { class: 'row' },
+      h('button', { class: 'btn grow', text: 'Cancel', onclick: function () { UI.sheet = null; render(); } }),
+      h('button', { class: 'btn grow', text: 'OK', onclick: function () { UI.sheet = null; s.ok(input ? input.value : true); render(); } }))]);
+  }
+  function oldMedia() {
+    var full = can('full'), live = can('live');
+    var ups = h('div', { class: 'list' }, B.uploads.map(function (u, i) {
+      return h('div', { class: 'item' }, h('div', { class: 'grow' }, h('div', { class: 'k', id: 'upt' + i, text: u.state === 'done' ? u.n + ': done' : u.state === 'fail' ? u.n + ': connection lost' : u.n + ' (' + size(u.mb) + ')' }),
+        u.state === 'up' ? h('div', { class: 'progress' }, h('div', { id: 'up' + i, style: 'width:' + u.pct + '%' })) : null));
+    }));
+    return h('div', { class: 'screen' },
+      h('div', { class: 'top' }, h('h1', { text: 'Media' }), h('button', { class: 'btn small', text: 'Refresh', onclick: render })),
+      live ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Play the whole folder' }),
+        h('div', { class: 'row' }, ['Play all, loop', 'Play all once', 'Shuffle all'].map(function (t) { return h('button', { class: 'btn small grow', text: t, onclick: function () { say('Playing all clips (8 clips)'); } }); })),
+        h('div', { class: 'k', text: 'Play by number (files named 01_..., 02_...)' }),
+        h('div', { class: 'row' }, h('select', { class: 'text-input', id: 'onumsel', 'aria-label': 'Clip number' }, h('option', { text: '01_' }), h('option', { text: '02_' })),
+          h('button', { class: 'btn small grow', text: 'Loop' }), h('button', { class: 'btn small grow', text: 'Once' }))) : null,
+      live ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Slideshow' }),
+        h('select', { class: 'text-input', id: 'oslidesrc', 'aria-label': 'Pictures from' }, h('option', { text: 'Media folder (3 pictures)' })),
+        h('select', { class: 'text-input', id: 'oslidesecs', 'aria-label': 'Each picture for' }, h('option', { text: 'Each picture for 5 seconds' })),
+        h('select', { class: 'text-input', id: 'oslideend', 'aria-label': 'After the last picture' }, h('option', { text: 'Then start again' })),
+        h('label', { class: 'row', for: 'oslideshuffle' }, h('input', { type: 'checkbox', id: 'oslideshuffle' }), h('span', { text: 'Random order' })),
+        h('button', { class: 'btn on small', text: 'Start slideshow', onclick: function () { say('Slideshow: 3 pictures'); } }),
+        h('div', { class: 'k', text: 'Prev and Next on the Live screen step through the pictures.' })) : null,
+      full ? h('div', { class: 'card' }, h('div', { class: 'k', text: B.free + ' GB free · largest file 8.0 GB' }),
+        h('button', { class: 'btn on', text: 'Upload clips', onclick: function () { UI.sheet = { kind: 'files' }; render(); } }), ups) : null,
+      h('div', { class: 'card' }, h('div', { class: 'list' }, B.media.map(function (d) {
+        return h('div', { class: 'item' }, h('span', {}, d.n, h('br'), h('span', { class: 'k', text: size(d.mb) })),
+          h('span', { class: 'row' },
+            h('button', { class: 'btn small', text: 'Play', disabled: !live, onclick: function () { play(d.n); } }),
+            h('button', { class: 'btn small', text: 'Info', onclick: function () { say(d.n + ': ' + d.fmt + ' · ' + (d.snd === 'no sound' ? 'no sound' : 'sound: ' + d.snd) + (d.dur ? ' · ' + clock(d.dur) : '') + (d.adv ? '. Note: ' + d.adv : '')); } }),
+            full ? h('button', { class: 'btn small', text: 'Rename', onclick: function () { UI.sheet = { kind: 'dlg', ask: true, text: 'New name', value: d.n, ok: function (v) { if (v) d.n = v; } }; render(); } }) : null,
+            full ? h('button', { class: 'btn small', text: 'Delete', onclick: function () { UI.sheet = { kind: 'dlg', text: 'Delete ' + d.n + '?', ok: function () { B.media.splice(B.media.indexOf(d), 1); } }; render(); } }) : null));
+      }))),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'USB drive: ' + B.usb.drive + ' (read only, plays straight from the drive)' }),
+        h('div', { class: 'list' }, B.usb.files.map(function (f) {
+          var have = B.media.some(function (m) { return m.n === f.n; });
+          return h('div', { class: 'item' }, h('span', {}, f.n, h('br'), h('span', { class: 'k', text: size(f.mb) + (have ? ' · also on the box' : '') })),
+            h('span', { class: 'row' }, h('button', { class: 'btn small', text: 'Play', disabled: !live, onclick: function () { play(f.n); } }),
+              full ? h('button', { class: 'btn small', text: have ? 'Copy again' : 'Copy to the box', onclick: function () { B.copy = { n: f.n, pct: 0 }; patch(true); } }) : null));
+        }))),
+      h('div', { class: 'k', id: 'importline', role: 'status' }), msgLine());
+  }
+  function oldSlider(id, label, key, min, max, fmt) {
+    var out = h('span', { class: 'k', text: fmt(B.mix[key]) });
+    return h('div', { class: 'card slider' }, h('label', { for: id }, label, out),
+      h('input', { id: id, type: 'range', min: min, max: max, value: B.mix[key], disabled: !can('live'), oninput: function (e) { B.mix[key] = +e.target.value; out.textContent = fmt(B.mix[key]); } }));
+  }
+  function choice(opts, cur, pick, disabled) {
+    return h('div', { class: 'row' }, opts.map(function (o) { return h('button', { class: 'btn grow' + (o[1] === cur ? ' on' : ''), text: o[0], disabled: disabled || !can('live') || o[2], onclick: function () { pick(o[1]); render(); } }); }));
+  }
+  var pct = function (v) { return v + '%'; }, num = function (v) { return String(v); }, spd = function (v) { return (v / 100).toFixed(2) + 'x'; };
+  function oldMix() {
+    var m = B.mix, live = can('live');
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Mix' })),
+      oldSlider('omo', 'Opacity', 'opacity', 0, 100, pct), oldSlider('oms', 'Size', 'size', 1, 200, pct), oldSlider('omp', 'Position X', 'x', -100, 100, num),
+      oldSlider('ompy', 'Position Y', 'y', -100, 100, num), oldSlider('omv', 'Speed', 'speed', 25, 200, spd), oldSlider('omvol', 'Volume', 'volume', 0, 130, pct),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Transition between clips' }),
+        choice([['Cut', 'cut'], ['Dip to black', 'dip'], ['Crossfade (soon)', 'x', true]], m.transition, function (v) { m.transition = v; }),
+        h('div', { class: 'k', text: 'Duration' }), choice([['0.5s', 0.5], ['1s', 1], ['2s', 2], ['5s', 5]], m.duration, function (v) { m.duration = v; })),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Mirror (for rear projection or a mirror rig; costs the box some work)' }),
+        h('div', { class: 'row' }, h('button', { class: 'btn grow' + (m.fh ? ' on' : ''), text: 'Flip left-right', disabled: !live, onclick: function () { m.fh = !m.fh; render(); } }),
+          h('button', { class: 'btn grow' + (m.fv ? ' on' : ''), text: 'Flip upside down', disabled: !live, onclick: function () { m.fv = !m.fv; render(); } }))),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Overlay picture (logo or mask over the video)' }),
+        h('select', { class: 'text-input', id: 'ooverlay', 'aria-label': 'Overlay picture', disabled: !live }, h('option', { text: 'logo.png' })),
+        h('button', { class: 'btn' + (m.overlay ? ' on' : ''), text: m.overlay ? 'Overlay is on. Turn off' : 'Show overlay', disabled: !live, onclick: function () { m.overlay = !m.overlay; render(); } })),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Projection mapping (beta)' }),
+        h('div', { class: 'k', text: M.mapper.on ? 'Mapping is off. (The editor card is not rebuilt in this prototype.)' : 'Off. Switch on "Projection mapper" under System > Modules (beta).' })),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Shaders and Vibes (beta)' }),
+        M.shaders.on ? [h('div', { class: 'k', text: B.now && B.now.kind === 'vibes' ? 'On screen: nxlx-' + SHADERS[B.now.idx] + ' · Vibes is on' : 'No shader on screen.' }),
+          h('button', { class: 'btn' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), disabled: !live, text: B.now && B.now.kind === 'vibes' ? 'Vibes is on. Stop' : 'Start Vibes', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } }),
+          h('div', { class: 'k', text: '(The list of ten shaders follows here in the real panel.)' })]
+          : h('div', { class: 'k', text: 'Off. Switch on "Shaders and Vibes" under System > Modules (beta).' })),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'Rotate' }), choice([['0°', 0], ['90°', 90], ['180°', 180], ['270°', 270]], m.rotate, function (v) { m.rotate = v; })),
+      h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Loop: ' + (B.now && B.now.loop ? 'on' : 'off'), disabled: !live, onclick: function () { if (B.now) B.now.loop = !B.now.loop; render(); } }),
+        h('button', { class: 'btn grow', text: 'Audio: ' + (m.muted ? 'mute' : 'on'), disabled: !live, onclick: function () { m.muted = !m.muted; render(); } }),
+        h('button', { class: 'btn grow', text: 'Reset mix', disabled: !live, onclick: resetMix })),
+      msgLine());
+  }
+  function resetMix() { var m = B.mix; m.opacity = 100; m.size = 100; m.x = 0; m.y = 0; m.speed = 100; m.volume = 100; m.rotate = 0; m.fh = false; m.fv = false; render(); }
+  // Today's System: one scroll of cards, in the order of system() in app.js. Card contents are shortened.
+  var OLD_MODULES = [['Media library', 'Not built yet', null, true], ['Player engine and web panel', 'Core', null, true], ['AES67 and Dante audio', 'Not built yet'],
+    ['DMX over the network (Art-Net, sACN)', 'beta', 'dmx'], ['Layout import (MadMapper, Resolume)', 'Not built yet'], ['MIDI controller (USB)', 'beta', 'midi'], ['NDI', 'Not built yet'],
+    ['Network settings (wired)', 'beta', 'network'], ['Presenter', 'Not built yet'], ['Projection mapper', 'beta', 'mapper'], ['Projector control', 'beta', 'projector'],
+    ['Shaders and Vibes', 'beta', 'shaders'], ['Streams: SRT, RTSP, RTMP', 'beta', 'streams'], ['Video wall and sync', 'beta', 'wall'], ['Weekly schedule', 'beta', 'scheduler'], ['PiWall (legacy, Pi 3 only)', 'Not built yet']];
+  function oldCard(titleText, kids) { return h('div', { class: 'card' }, h('h2', { text: titleText }), kids); }
+  function oldModCard(titleText, id, oldName, body, arm) {
+    if (!M[id].on) return oldCard(titleText, h('div', { class: 'k', text: 'Off. Switch on "' + oldName + '" under Modules above (beta).' }));
+    return oldCard(titleText, [h('div', { class: 'k', text: body }),
+      arm ? h('button', { class: 'btn' + (M[id].armed ? ' on' : ''), text: M[id].armed ? arm + ' is on. Turn off' : 'Turn ' + (arm === 'Schedule' ? 'schedule' : arm) + ' on', disabled: !can('full'), onclick: function () { M[id].armed = !M[id].armed; render(); } }) : null]);
+  }
+  function oldSystem() {
+    var full = can('full');
+    var kv = function (k, v) { return h('div', { class: 'row between' }, h('span', { text: k }), h('span', { class: 'k', text: v })); };
+    var cards = [
+      oldCard('Vitals', [kv('Board', 'Raspberry Pi 4 Model B'), kv('Temperature', '52°C'), kv('Player', 'Running'), kv('This device', 'My phone (' + UI.role + ')')]),
+      oldCard('Health', [kv('Power', 'Dipped since start'), kv('Temperature', 'Fine'), kv('Player', 'Software decoding, 0 dropped'), kv('Addresses', '192.168.0.169')]),
+      oldCard('Box', [kv('Version', '0.1.0'), kv('Free space', '84.4 GB'), kv('Clock', 'Sat 16:42'), full ? h('div', { class: 'row' }, h('button', { class: 'btn small grow', text: 'Restart the box' }), h('button', { class: 'btn small grow', text: 'Power off' })) : null]),
+      h('div', { class: 'card' }, h('h2', { text: 'Modules' }), h('div', { class: 'list' }, OLD_MODULES.map(function (o) {
+        var on = o[3] || (o[2] && M[o[2]].on);
+        return h('div', { class: 'item' }, h('span', {}, o[0], h('br'), h('span', { class: 'k', text: '0.1.0 · ' + o[1] })),
+          h('button', { class: 'btn small' + (on ? ' on' : ''), text: on ? 'On' : 'Off', disabled: !full || !o[2], onclick: function () { M[o[2]].on = !M[o[2]].on; render(); } }));
+      }))),
+      oldCard('Sound output', h('div', { class: 'k', text: 'Automatic (HDMI). Test tones: L, Both, R' })),
+      oldCard('Autostart', h('div', { class: 'k', text: 'At power-up: Vibes, after 10 s' })),
+      oldModCard('Streams', 'streams', 'Streams: SRT, RTSP, RTMP', 'No streams saved yet.'),
+      oldModCard('Projectors', 'projector', 'Projector control', 'Main wall 192.168.1.50 · On. Painting wall 192.168.1.51 · Off. All on, All off.'),
+      oldModCard('Sync and video wall', 'wall', 'Video wall and sync', 'Off, Server or Client.')];
+    if (full) cards.push(oldCard('Remote support', h('div', { class: 'k', text: 'Remote support is off. Nothing can reach this box from outside until you allow it and start a session.' })),
+      oldCard('Updates', h('div', { class: 'k', text: 'Installed: 0.1.0. Nothing waiting.' })),
+      oldCard('Settings file', [h('button', { class: 'btn small', text: 'Export settings' }), h('button', { class: 'btn small', text: 'Import settings...' })]),
+      oldCard('Diagnostics', h('button', { class: 'btn small', text: 'Download diagnostics file' })),
+      oldCard('Factory reset', [h('div', { class: 'k', text: 'Every setting goes back to how a new box starts, and every phone, tablet and guest is unpaired.' }), h('button', { class: 'btn small', text: 'Reset to factory settings' })]),
+      oldModCard('Schedule', 'scheduler', 'Weekly schedule', '3 entries. Box clock: Sat 16:42.', 'Schedule'),
+      oldModCard('Network', 'network', 'Network settings (wired)', 'Wired: automatic, 192.168.0.169.'),
+      h('div', { class: 'card' }, h('h2', { text: 'Control (OSC)' }), h('button', { class: 'btn' + (M.osc.armed ? ' on' : ''), text: M.osc.armed ? 'OSC is on. Turn off' : 'Turn OSC on', onclick: function () { M.osc.armed = !M.osc.armed; render(); } })),
+      oldModCard('DMX', 'dmx', 'DMX over the network', 'Art-Net, universe 0, channel 1.', 'DMX'),
+      oldModCard('MIDI', 'midi', 'MIDI controller (USB)', 'No controller found.', 'MIDI'),
+      oldCard('Appearance', h('div', { class: 'k', text: 'Themes: Dark stage, Night red, Light, High contrast. Accent colour.' })),
+      oldCard('Access', h('div', { class: 'k', text: 'Devices, guest and presenter codes with QR, show on display, print sheet.' })),
+      oldCard('Player', h('button', { class: 'btn', text: 'Restart player now', onclick: function () { say('Player restarting. The service brings it straight back.'); } })));
+    cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () { if (full) return say('Full-access devices are removed from the list above.', true); UI.joined = false; render(); } }));
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'System' })), msgLine(), cards);
+  }
+
+  // ==== THE PROPOSAL ====
+  function newConnect() {
+    var code = h('input', { class: 'text-input mono', id: 'joincode', inputmode: 'numeric', maxlength: 6, placeholder: '6 digit code', style: 'font-size:24px;min-height:60px;text-align:center;letter-spacing:.2em',
+      'aria-label': 'Code shown on the big screen (6 digits)', value: UI.scanned ? '123456' : '' });
+    var err = h('div', { class: 'msg err', id: 'joinerr', role: 'status' });
+    var pins = [0, 1, 2, 3].map(function (i) { return h('input', { inputmode: 'numeric', maxlength: 1, id: 'pin' + i, 'aria-label': 'PIN digit ' + (i + 1), oninput: function (e) { if (e.target.value && pins[i + 1]) pins[i + 1].focus(); } }); });
+    function join(role) { UI.role = role; UI.joined = true; UI.tab = role === 'full' ? 'live' : 'room'; UI.welcome = true; UI.scanned = false; UI.owner = false; drawBar(); render(); }
+    return h('div', { class: 'screen' },
+      h('h1', { text: 'Join the room', style: 'font-size:26px' }),
+      h('p', { style: 'margin:0', text: UI.scanned ? 'Code read from the QR code. Tap Join.' : 'Scan the QR code on the big screen with your camera, or type the 6 digit code shown next to it.' }),
+      code, err,
+      h('button', { class: 'btn on big', id: 'joinbtn', text: 'Join', onclick: function () {
+        if (code.value.length !== 6) { err.textContent = 'The code has 6 digits. It is on the big screen, next to the QR code.'; return; }
+        if (code.value !== '123456' && code.value !== '654321') { err.textContent = 'That code is wrong or has expired. Ask the person in charge for a new one.'; return; }
+        join(code.value === '123456' ? 'live' : 'view');
+      } }),
+      h('div', { class: 'k', text: 'No internet needed. This phone is remembered until someone removes it.' }),
+      h('div', { class: 'grow', style: 'min-height:24px' }),
+      UI.owner ? h('div', { class: 'card' }, h('div', { class: 'k', text: 'Owner PIN: on the box\'s screen at first start, or run sudo pvj-pin' }), h('div', { class: 'pin-row' }, pins),
+        h('button', { class: 'btn big', id: 'pairbtn', text: 'Pair as owner', onclick: function () {
+          if (pins.map(function (p) { return p.value; }).join('').length !== 4) { err.textContent = 'Enter the 4 digit owner PIN.'; return; }
+          join('full');
+        } }))
+        : h('button', { class: 'btn', text: 'I am the owner (use the PIN)', onclick: function () { UI.owner = true; render(); } }),
+      h('button', { class: 'back', text: UI.scanned ? 'Show the screen without a scanned code' : 'Show what a scanned QR code looks like', onclick: function () { UI.scanned = !UI.scanned; render(); } }));
+  }
+  function strip() {
+    var dark = B.blackout || B.faded;
+    return h('div', { class: 'strip' + (dark ? ' black' : '') },
+      h('button', { class: 'what', 'aria-label': 'What is on the screen. Opens Live', onclick: function () { go('live'); } },
+        h('b', { id: 'st-title', text: dark ? 'The screen is black' : title() }), h('span', { class: 'k', id: 'st-time' })),
+      dark && can('live') && UI.tab !== 'live' ? h('button', { class: 'btn small', text: 'Bring back', onclick: show }) : null,
+      h('button', { class: 'chip', text: ROLE[UI.role], 'aria-label': 'You are a ' + ROLE[UI.role] + '. What that means', onclick: function () { UI.sheet = { kind: 'role' }; render(); } }));
+  }
+  function watchBanner() { return can('live') ? null : h('div', { class: 'banner' }, h('span', { text: 'You are watching only. To control the room, ask for a presenter code.' })); }
+  function newRoom() {
+    var live = can('live'), amb = B.now && B.now.kind === 'vibes';
+    function scene(id, name, what, fn) { return h('button', { class: 'btn scene' + (B.scene === id ? ' on' : ''), disabled: !live, onclick: function () { fn(); B.scene = id; render(); } }, h('span', { text: name }), h('small', { text: what })); }
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Room' })), watchBanner(),
+      h('div', { class: 'banner' }, h('span', { text: 'Placeholder. The real Room screen (groups, scenes) is being built on the branch room-scenes. This page only shows where it lives: first tab, the screen staff land on.' })),
+      h('div', { class: 'k', text: 'Scenes' }),
+      h('div', { class: 'grid2' },
+        M.shaders.on ? scene('amb', 'Ambience', amb ? 'On now' : 'Projectors on, Vibes', function () { B.proj[0].on = true; vibes(true); }) : null,
+        scene('movie', 'Movie night', 'Main wall, HDMI 2', function () { B.proj[0].on = true; B.proj[0].input = 'HDMI 2'; B.now = null; toast('Movie night: Main wall on, input HDMI 2.'); }),
+        scene('games', 'Games', 'Both walls, consoles', function () { B.proj.forEach(function (p) { p.on = true; p.input = 'HDMI 2'; }); B.now = null; toast('Games: both projectors on, input HDMI 2.'); }),
+        scene('talk', 'Presentation', 'Main wall, this box', function () { B.proj[0].on = true; B.proj[0].input = 'HDMI 1'; toast('Presentation: Main wall on, showing this box.'); })),
+      h('div', { class: 'k', text: 'Projectors' }),
+      h('div', { class: 'card' }, B.proj.map(function (p) {
+        return h('div', { class: 'mrow', style: 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: p.n }),
+          h('span', { class: 'st' }, h('span', { class: 'chip ' + (p.on ? 'active' : 'off'), text: p.on ? 'On' : 'Off' }), p.on ? p.input : 'Switched off')),
+          sw(p.on, p.n + ' power', function (v) { p.on = v; B.scene = ''; toast(p.n + (v ? ' is switching on. It needs about 30 seconds to warm up.' : ' is switching off.')); render(); }, !live));
+      })),
+      live ? h('button', { class: 'btn big', text: 'Close the room (everything off)', onclick: function () { UI.sheet = { kind: 'close' }; render(); } }) : null);
+  }
+  function newLive() {
+    var live = can('live'), full = can('full'), amb = B.now && B.now.kind === 'vibes', dur = B.now && B.now.dur;
+    var pads = h('div', { class: 'pads' });
+    B.banks[UI.bank].pads.forEach(function (p, i) {
+      if (!p.file && !full) return;
+      var playing = B.now && p.file && B.now.file === p.file;
+      pads.appendChild(h('button', { class: 'pad' + (playing ? ' on' : '') + (p.file ? '' : ' empty'), 'aria-pressed': playing ? 'true' : 'false', onclick: function () {
+        if (!p.file || UI.editing) { if (full) { UI.sheet = { kind: 'pad', index: i, file: p.file, ending: p.ending, label: p.label }; render(); } return; }
+        play(p.file, p.label, p.ending);
+      } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) + (p.file ? ' · ' + ({ loop: 'loops', stop: 'once', hold: 'once, holds' })[p.ending] : '') }),
+        h('span', { class: 't', text: p.file ? (UI.editing ? 'Change: ' : '') + p.label : '+ Add clip' })));
+    });
+    return h('div', { class: 'screen' }, watchBanner(),
+      h('div', { class: 'card' },
+        h('div', { class: 'row between' }, h('div', { class: 'k', text: 'On the screen now' }), h('span', { class: 'chip ' + (B.blackout || B.faded ? 'problem' : B.now && !B.paused ? 'active' : 'off'), text: stateWord() })),
+        h('div', { class: 'np-title', id: 'np', text: title() }),
+        B.now && B.now.kind === 'clip' && B.now.label !== stem(B.now.file) ? h('div', { class: 'k', text: 'Clip ' + B.now.file }) : null,
+        B.now ? h('div', { class: 'progress' }, h('div', { id: 'np-bar' })) : null,
+        h('div', { class: 'row between' }, h('div', { class: 'np-left', id: 'np-left', text: timeLeft() }), dur && B.now.kind === 'clip' ? h('div', { class: 'k', text: 'of ' + short(dur) }) : null),
+        live && (B.now || B.test) ? h('div', { class: 'row' },
+          B.now && B.now.kind === 'clip' ? h('button', { class: 'btn grow', id: 'freeze', text: B.paused ? 'Resume' : 'Pause', onclick: pause }) : null,
+          amb ? h('button', { class: 'btn grow', text: 'Next shader', onclick: function () { B.now.idx = (B.now.idx + 1) % 10; B.now.pos = 0; render(); } }) : null,
+          h('button', { class: 'btn grow', id: 'stop', text: 'Stop', onclick: function () { if (B.test) { B.test = false; return render(); } stop(); } })) : null,
+        !B.now && !B.test ? h('div', { class: 'k', text: live ? 'Tap a pad below to play it' + (M.shaders.on ? ', or start ambience.' : '.') : 'Nothing is playing.' }) : null),
+      M.shaders.on ? (live ? h('button', { class: 'btn big' + (amb ? ' on' : ''), id: 'vibes', 'aria-pressed': amb ? 'true' : 'false', text: amb ? 'Ambience is on. Tap to stop' : 'Start ambience (Vibes)', onclick: function () { vibes(!amb); } }) : null)
+        : (full ? h('button', { class: 'btn', text: 'Ambience (Vibes) is switched off. Set it up', onclick: function () { openMod('shaders', 'live'); } }) : null),
+      UI.editing ? h('div', { class: 'banner' }, h('span', { text: 'Editing pads. Tap a pad to change it.' }), h('button', { class: 'btn small on', text: 'Done', onclick: function () { UI.editing = false; render(); } })) : null,
+      h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn' + (i === UI.bank ? ' on' : ''), text: b.name, 'aria-pressed': i === UI.bank ? 'true' : 'false', onclick: function () { UI.bank = i; render(); } }); })),
+      pads.children.length ? pads : h('div', { class: 'k', text: 'No clips on this bank yet.' }),
+      full && !UI.editing ? h('button', { class: 'btn small', text: 'Edit pads', onclick: function () { UI.editing = true; render(); } }) : null,
+      live ? h('details', { class: 'fold', open: UI.more, ontoggle: function (e) { UI.more = e.target.open; } }, h('summary', { text: 'More controls: jump, volume, test pattern, snapshot' }), h('div', {},
+        h('div', { class: 'row' },
+          h('button', { class: 'btn grow', text: 'Back 10 s', disabled: !dur, onclick: function () { B.now.pos = Math.max(0, B.now.pos - 10); patch(); } }),
+          h('button', { class: 'btn grow', text: 'Forward 10 s', disabled: !dur, onclick: function () { B.now.pos += 10; patch(); } }),
+          h('button', { class: 'btn grow', text: 'From the start', disabled: !dur, onclick: function () { B.now.pos = 0; patch(); } })),
+        newSlider('lvol', 'Volume', 'volume', 0, 130, 100, pct),
+        h('button', { class: 'btn' + (B.test ? ' on' : ''), text: B.test ? 'Test pattern is on. Turn off' : 'Show test pattern (colour bars)', onclick: function () { B.test = !B.test; render(); } }),
+        h('button', { class: 'btn', text: 'Take a snapshot of the screen', onclick: function () { UI.snap = B.blackout || B.faded ? 'Black' : title(); UI.more = true; render(); } }),
+        UI.snap ? h('div', { id: 'preview', text: 'Snapshot (example): ' + UI.snap }) : h('div', { class: 'k', text: 'A snapshot pauses the picture for a moment.' }))) : null);
+  }
+  function dock() {
+    var dark = B.blackout || B.faded;
+    return h('div', { class: 'dock' },
+      h('button', { class: 'btn big', id: 'fade', text: B.faded ? 'Fade in' : 'Fade out', disabled: B.blackout, onclick: function () { fade(!B.faded); } }),
+      h('button', { class: 'btn big' + (dark ? ' solid' : ''), id: 'black', 'aria-pressed': dark ? 'true' : 'false', text: dark ? 'Bring picture back' : 'Blackout', onclick: function () { if (dark) show(); else blackout(true); } }));
+  }
+  function padSheet() {
+    var s = UI.sheet, i = s.index;
+    var label = h('input', { class: 'text-input', id: 'padlabel', maxlength: 40, value: s.label || '', placeholder: 'Name on the pad', oninput: function (e) { s.label = e.target.value; s.typed = true; } });
+    var ending = h('select', { class: 'text-input', id: 'padending', onchange: function (e) { s.ending = e.target.value; } }, [['loop', 'Loop until something else plays'], ['stop', 'Play once, then black'], ['hold', 'Play once, hold the last picture']].map(function (e) { return h('option', { value: e[0], text: e[1], selected: e[0] === s.ending }); }));
+    return sheet('Pad ' + (i + 1) + ' on ' + B.banks[UI.bank].name, [
+      h('div', { class: 'k', text: '1. Choose the clip' }),
+      h('div', { class: 'list', style: 'max-height:210px;overflow:auto;border:1px solid var(--ln);border-radius:6px;padding:0 8px' }, B.media.map(function (m) {
+        return h('button', { class: 'clip', style: 'background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;cursor:pointer;min-height:44px;width:100%' + (s.file === m.n ? ';font-weight:700;color:var(--ac)' : ''),
+          'aria-pressed': s.file === m.n ? 'true' : 'false', onclick: function () { s.file = m.n; if (!s.typed) s.label = stem(m.n); render(); } }, h('span', { class: 'nm', text: (s.file === m.n ? '✓ ' : '') + m.n }));
+      })),
+      h('label', { class: 'k', for: 'padlabel', text: '2. Name on the pad' }), label,
+      h('label', { class: 'k', for: 'padending', text: '3. When the clip ends' }), ending,
+      h('button', { class: 'btn on big', text: 'Save pad', disabled: !s.file, onclick: function () {
+        B.banks[UI.bank].pads[i] = { file: s.file, label: s.label || stem(s.file), ending: s.ending }; UI.sheet = null; toast('Pad ' + (i + 1) + ' now plays ' + (s.label || stem(s.file)) + '.'); render();
+      } }),
+      h('div', { class: 'row' }, B.banks[UI.bank].pads[i].file ? h('button', { class: 'btn grow', text: 'Empty this pad', onclick: function () {
+        var was = B.banks[UI.bank].pads[i]; B.banks[UI.bank].pads[i] = { file: '', label: '', ending: 'loop' }; UI.sheet = null;
+        toast('Pad ' + (i + 1) + ' is empty.', 'Undo', function () { B.banks[UI.bank].pads[i] = was; render(); }); render();
+      } }) : null, h('button', { class: 'btn grow', text: 'Cancel', onclick: function () { UI.sheet = null; render(); } }))]);
+  }
+  function newSlider(id, label, key, min, max, def, fmt) {
+    var out = h('button', { class: 'chip', text: fmt(B.mix[key]), 'aria-label': 'Reset ' + label, onclick: function () { B.mix[key] = def; render(); } });
+    return h('div', { class: 'slider' }, h('label', { for: id }, label, out),
+      h('input', { id: id, type: 'range', min: min, max: max, value: B.mix[key], oninput: function (e) { B.mix[key] = +e.target.value; out.textContent = fmt(B.mix[key]) + (B.mix[key] !== def ? ' · reset' : ''); } }));
+  }
+  function layerRow(name, state, text, on, toggle, open) {
+    return h('div', { class: 'mrow' }, h('button', { class: 'go', onclick: open }, h('span', { class: 'nm', text: name }), h('span', { class: 'st' }, h('span', { class: 'chip ' + state[0], text: state[1] }), text)),
+      toggle ? sw(on, name, toggle) : null, h('span', { class: 'chev', text: '›', 'aria-hidden': 'true' }));
+  }
+  function newMix() {
+    var m = B.mix, moved = m.size !== 100 || m.x || m.y || m.rotate || m.fh || m.fv;
+    var setup = [m.size + '% size', m.x || m.y ? 'moved' : 'centred', m.rotate ? 'turned ' + m.rotate + '°' : 'not turned', m.fh || m.fv ? 'mirrored' : 'not mirrored'].join(' · ');
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'Mix' })),
+      h('div', { class: 'k', text: 'While playing' }),
+      h('div', { class: 'card' }, newSlider('mo', 'Brightness (opacity)', 'opacity', 0, 100, 100, pct), newSlider('mv', 'Speed', 'speed', 25, 200, 100, spd), newSlider('mvol', 'Volume', 'volume', 0, 130, 100, pct),
+        h('div', { class: 'mrow' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: 'Sound' }), h('span', { class: 'st', text: m.muted ? 'Muted' : 'On' })), sw(!m.muted, 'Sound', function (v) { m.muted = !v; render(); }))),
+      h('div', { class: 'card' }, h('div', { class: 'k', text: 'From one clip to the next' }),
+        choice([['Cut', 'cut'], ['Dip to black', 'dip']], m.transition, function (v) { m.transition = v; }),
+        m.transition === 'dip' ? [h('div', { class: 'k', text: 'How long the dip takes' }), choice([['0.5 s', 0.5], ['1 s', 1], ['2 s', 2], ['5 s', 5]], m.duration, function (v) { m.duration = v; })] : null),
+      h('div', { class: 'k', text: 'Layers' }),
+      h('div', { class: 'card' },
+        layerRow('Logo or mask on top', m.overlay ? ['active', 'On'] : ['off', 'Off'], 'logo.png', m.overlay, function (v) { m.overlay = v; toast(v ? 'logo.png is on top of the picture.' : 'The overlay is off.'); render(); }, function () { toast('The overlay page (choose the picture) is not part of this prototype.'); }),
+        layerRow('Projection mapping', M.mapper.on ? ['ready', 'Ready'] : ['off', 'Off'], M.mapper.on ? 'No surfaces yet' : '', M.mapper.on, function (v) { setMod(mod('mapper'), v); }, function () { openMod('mapper', 'mix'); }),
+        layerRow('Shaders', mstate(mod('shaders')).slice(0, 2), mstate(mod('shaders'))[2], M.shaders.on, function (v) { setMod(mod('shaders'), v); }, function () { openMod('shaders', 'mix'); })),
+      h('div', { class: 'k', text: 'Picture setup (set once for the room)' }),
+      h('details', { class: 'fold' }, h('summary', { text: setup }), h('div', {},
+        newSlider('ms', 'Size', 'size', 1, 200, 100, pct), newSlider('mp', 'Left or right', 'x', -100, 100, 0, num), newSlider('mpy', 'Up or down', 'y', -100, 100, 0, num),
+        h('div', { class: 'k', text: 'Turn the picture' }), choice([['0°', 0], ['90°', 90], ['180°', 180], ['270°', 270]], m.rotate, function (v) { m.rotate = v; }),
+        h('div', { class: 'k', text: 'Mirror (rear projection or a mirror rig)' }),
+        h('div', { class: 'row' }, h('button', { class: 'btn grow' + (m.fh ? ' on' : ''), 'aria-pressed': m.fh ? 'true' : 'false', text: 'Left to right', onclick: function () { m.fh = !m.fh; render(); } }),
+          h('button', { class: 'btn grow' + (m.fv ? ' on' : ''), 'aria-pressed': m.fv ? 'true' : 'false', text: 'Upside down', onclick: function () { m.fv = !m.fv; render(); } })),
+        h('button', { class: 'btn', text: 'Put the picture back to normal', disabled: !moved, onclick: function () {
+          var was = JSON.stringify(m); resetMix(); toast('Picture setup is back to normal.', 'Undo', function () { B.mix = JSON.parse(was); render(); });
+        } }))));
+  }
+  function newMedia() {
+    var full = can('full'), live = can('live'), q = UI.find.toLowerCase();
+    var rows = B.media.filter(function (d) { return !q || d.n.toLowerCase().indexOf(q) >= 0; }).map(function (d) {
+      var on = B.now && B.now.file === d.n, pad = padOf(d.n);
+      return h('div', { class: 'clip' }, h('span', { class: 'nm' }, d.n, h('small', { text: [on ? 'On the screen now' : '', d.dur ? short(d.dur) : 'Picture', size(d.mb), pad, d.adv ? 'May stutter' : ''].filter(Boolean).join(' · ') })),
+        live ? h('button', { class: 'btn' + (on ? ' on' : ''), text: on ? 'Playing' : 'Play', 'aria-label': 'Play ' + d.n, onclick: function () { play(d.n); } }) : null,
+        h('button', { class: 'btn', text: '⋯', 'aria-label': 'More for ' + d.n + ': details' + (full ? ', put on a pad, rename, delete' : ''), onclick: function () { UI.sheet = { kind: 'clip', clip: d, view: 'menu' }; render(); } }));
+    });
+    return h('div', { class: 'screen' },
+      h('div', { class: 'top' }, h('h1', { text: 'Media' }), full ? h('button', { class: 'btn on', id: 'uploadbtn', text: 'Upload clips', onclick: function () { UI.sheet = { kind: 'files' }; render(); } }) : null),
+      watchBanner(),
+      B.uploads.map(function (u, i) {
+        if (u.state === 'gone') return null;
+        return h('div', { class: 'card' },
+          h('div', { id: 'upt' + i, style: 'font-weight:600', text: u.state === 'up' ? 'Uploading ' + u.n + ': ' + u.pct + '%' : u.state === 'done' ? u.n + ' is on the box.' : u.n + ' did not upload: the connection dropped at ' + u.pct + '%. Nothing was saved, so it is safe to try again.' }),
+          u.state === 'up' ? [h('div', { class: 'progress' }, h('div', { id: 'up' + i, style: 'width:' + u.pct + '%' })), h('div', { class: 'row between' }, h('span', { class: 'k', text: size(u.mb) + ' · keep this page open' }),
+            h('button', { class: 'btn small', text: 'Cancel', onclick: function () { u.state = 'gone'; toast('Upload cancelled. Nothing was saved.'); render(); } }))] : null,
+          u.state === 'done' ? h('div', { class: 'row' }, h('button', { class: 'btn grow on', text: 'Put on a pad', onclick: function () { u.state = 'gone'; UI.sheet = { kind: 'clip', clip: B.media.filter(function (m) { return m.n === u.n; })[0], view: 'pad' }; render(); } }),
+            h('button', { class: 'btn grow', text: 'Play now', onclick: function () { u.state = 'gone'; play(u.n); } }), h('button', { class: 'btn', text: 'Done', onclick: function () { u.state = 'gone'; render(); } })) : null,
+          u.state === 'fail' ? h('div', { class: 'row' }, h('button', { class: 'btn grow on', text: 'Try again', onclick: function () { u.state = 'up'; u.pct = 0; u.fail = false; render(); } }), h('button', { class: 'btn', text: 'Dismiss', onclick: function () { u.state = 'gone'; render(); } })) : null);
+      }),
+      h('input', { class: 'text-input', id: 'clipfind', type: 'search', placeholder: 'Find a clip', 'aria-label': 'Find a clip', value: UI.find, oninput: function (e) { UI.find = e.target.value; render(); var f = $('clipfind'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }),
+      h('div', { class: 'card' }, rows.length ? rows : h('div', { class: 'k', text: q ? 'No clip has "' + UI.find + '" in its name.' : 'No clips yet. Upload some, or play them straight from a USB drive.' })),
+      full ? h('div', { class: 'k', text: B.free + ' GB free on the box · one file can be up to 8 GB' }) : null,
+      h('div', { class: 'k', text: 'USB drive ' + B.usb.drive + ' (plays straight from the drive)' }),
+      h('div', { class: 'card' }, B.usb.files.map(function (f) {
+        var have = B.media.some(function (m) { return m.n === f.n; }), copying = B.copy && B.copy.n === f.n && B.copy.pct < 100;
+        return h('div', { class: 'clip' }, h('span', { class: 'nm' }, f.n, h('small', { id: copying ? 'importline' : null, text: copying ? 'Copying ' + f.n + ': ' + B.copy.pct + '%' : [short(f.dur), size(f.mb), have ? 'Already on the box' : ''].filter(Boolean).join(' · ') })),
+          live ? h('button', { class: 'btn', text: 'Play', 'aria-label': 'Play ' + f.n + ' from the USB drive', onclick: function () { play(f.n); } }) : null,
+          full && !have ? h('button', { class: 'btn', text: copying ? 'Copying' : 'Keep', disabled: copying, 'aria-label': 'Copy ' + f.n + ' to the box', onclick: function () { B.copy = { n: f.n, pct: 0 }; toast('Copying ' + f.n + ' to the box. You can keep working.'); render(); } }) : null);
+      })),
+      live ? h('div', { class: 'k', text: 'Other ways to play' }) : null,
+      live ? h('details', { class: 'fold' }, h('summary', { text: 'Play everything in the folder' }), h('div', {},
+        h('div', { class: 'row' }, [['In order, forever', 'Playing all 8 clips in order, again and again.'], ['In order, once', 'Playing all 8 clips once.'], ['Shuffled', 'Playing all 8 clips in a random order.']].map(function (o) {
+          return h('button', { class: 'btn grow', text: o[0], onclick: function () { B.now = { kind: 'clip', file: 'intro.mkv', label: 'All clips (1 of 8)', dur: 42, pos: 0, loop: true }; toast(o[1]); render(); } });
+        })), h('div', { class: 'k', text: 'Clips named 01_, 02_ and so on can also be started by number from OSC and the schedule.' }))) : null,
+      live ? h('details', { class: 'fold' }, h('summary', { text: 'Slideshow of the pictures (3)' }), h('div', {},
+        h('select', { class: 'text-input', id: 'slidesecs', 'aria-label': 'Each picture for' }, ['5 seconds each', '10 seconds each', '30 seconds each', '1 minute each'].map(function (t) { return h('option', { text: t }); })),
+        h('select', { class: 'text-input', id: 'slideend', 'aria-label': 'After the last picture' }, ['Then start again', 'Then keep the last picture', 'Then black'].map(function (t) { return h('option', { text: t }); })),
+        h('button', { class: 'btn on', text: 'Start slideshow', onclick: function () { B.now = { kind: 'clip', file: '01_welcome.jpg', label: 'Slideshow (1 of 3)', dur: 5, pos: 0, loop: true }; toast('Slideshow started: 3 pictures.'); render(); } }))) : null);
+  }
+  function fileSheet() {
+    function add(n, mb, fail) { B.uploads = B.uploads.filter(function (u) { return u.state !== 'gone'; }); B.uploads.push({ n: n, mb: mb, pct: 0, state: 'up', fail: fail }); UI.sheet = null; render(); }
+    return sheet('Choose files (stand-in for the phone\'s file chooser)', [
+      h('div', { class: 'k', text: 'In the real panel your phone\'s own file chooser opens here. Pick an example:' }),
+      h('button', { class: 'btn', text: 'friday_loop.mp4 (182 MB): uploads fine', onclick: function () { add('friday_loop.mp4', 182); } }),
+      h('button', { class: 'btn', text: 'big_show.mp4 (1.4 GB): the connection drops', onclick: function () { add('big_show.mp4', 1434, true); } }), closeBtn()]);
+  }
+  function clipSheet() {
+    var s = UI.sheet, d = s.clip, pad = padOf(d.n);
+    function back() { s.view = 'menu'; render(); }
+    if (s.view === 'pad') {
+      return sheet('Put ' + d.n + ' on a pad', [h('div', { class: 'k', text: B.banks[UI.bank].name + '. Tap a pad. A pad that is taken is replaced.' }),
+        h('div', { class: 'banks' }, B.banks.map(function (b, i) { return h('button', { class: 'btn small' + (i === UI.bank ? ' on' : ''), text: b.name, onclick: function () { UI.bank = i; render(); } }); })),
+        h('div', { class: 'pads' }, B.banks[UI.bank].pads.map(function (p, i) {
+          return h('button', { class: 'pad' + (p.file ? '' : ' empty'), style: 'min-height:56px', onclick: function () {
+            var was = B.banks[UI.bank].pads[i]; B.banks[UI.bank].pads[i] = { file: d.n, label: stem(d.n), ending: 'loop' }; UI.sheet = null;
+            toast(stem(d.n) + ' is on pad ' + (i + 1) + ' of ' + B.banks[UI.bank].name + '.', 'Undo', function () { B.banks[UI.bank].pads[i] = was; render(); }); render();
+          } }, h('span', { class: 'n', text: (i < 9 ? '0' : '') + (i + 1) }), h('span', { class: 't', text: p.label || 'Free' }));
+        })), h('button', { class: 'btn', text: 'Back', onclick: back })]);
+    }
+    if (s.view === 'rename') {
+      var input = h('input', { class: 'text-input', id: 'rename', value: d.n, 'aria-label': 'New name' });
+      return sheet('Rename ' + d.n, [input, pad ? h('div', { class: 'k', text: 'It stays on ' + pad + '.' }) : null,
+        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Back', onclick: back }), h('button', { class: 'btn grow on', text: 'Save name', onclick: function () {
+          var to = input.value.trim(), old = d.n; if (!to) return;
+          B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === old) p.file = to; }); }); if (B.now && B.now.file === old) B.now.file = to;
+          d.n = to; UI.sheet = null; toast('Renamed to ' + to + '.'); render();
+        } }))]);
+    }
+    if (s.view === 'delete') {
+      return sheet('Delete ' + d.n + '?', [h('div', { text: 'The file is removed from the box for good.' + (pad ? ' It is on ' + pad + ', which will be empty.' : '') + (B.now && B.now.file === d.n ? ' It is on the screen right now.' : '') }),
+        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Keep it', onclick: back }), h('button', { class: 'btn grow danger', text: 'Delete', onclick: function () {
+          B.media.splice(B.media.indexOf(d), 1); B.banks.forEach(function (b) { b.pads.forEach(function (p) { if (p.file === d.n) { p.file = ''; p.label = ''; } }); });
+          UI.sheet = null; toast(d.n + ' was deleted.'); render();
+        } }))]);
+    }
+    return sheet(d.n, [
+      h('div', {}, [['Format', d.fmt], ['Length', d.dur ? short(d.dur) : 'A picture'], ['Sound', d.snd], ['Size', size(d.mb)], ['On a pad', pad || 'No']].map(function (r) { return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', { text: r[1] })); })),
+      d.adv ? h('div', { class: 'banner', text: d.adv }) : h('div', { class: 'k', text: 'Should play smoothly on this box.' }),
+      can('live') ? h('button', { class: 'btn on', text: 'Play now', onclick: function () { UI.sheet = null; play(d.n); } }) : null,
+      can('full') ? [h('button', { class: 'btn', text: 'Put on a pad', onclick: function () { s.view = 'pad'; render(); } }),
+        h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Rename', onclick: function () { s.view = 'rename'; render(); } }), h('button', { class: 'btn grow danger', text: 'Delete', onclick: function () { s.view = 'delete'; render(); } }))] : null,
+      closeBtn('Close')]);
+  }
+  // ---- System: a short index, and one page per module --------------------
+  function setMod(m, on) {
+    var s = M[m.id]; s.on = on; if ('armed' in s) s.armed = on;
+    if (!on) { if (m.id === 'shaders' && B.now && B.now.kind === 'vibes') B.now = null; toast(m.name + ' is off. Its settings are kept.', 'Undo', function () { s.on = true; render(); }); return render(); }
+    if (m.steps && !s.setup) { toast(m.name + ' is on. One thing to set up first.'); return openMod(m.id, UI.page ? UI.from : UI.tab); }
+    toast(m.name + ' is on.'); render();
+  }
+  function mrow(m) {
+    var st = mstate(m), full = can('full');
+    return h('div', { class: 'mrow', 'data-mod': m.id },
+      h('button', { class: 'go', onclick: function () { openMod(m.id, 'system'); } }, h('span', { class: 'nm', text: m.name }),
+        h('span', { class: 'st' }, st[1] ? h('span', { class: 'chip ' + st[0], text: st[1] }) : null, st[2])),
+      m.sw ? sw(M[m.id].on, m.name, function (v) { setMod(m, v); }, !full) : null,
+      h('span', { class: 'chev', text: '›', 'aria-hidden': 'true' }));
+  }
+  function newSystem() {
+    var q = UI.find.toLowerCase().trim(), full = can('full');
+    var hit = function (m) { return !q || (m.name + ' ' + m.old + ' ' + m.find).toLowerCase().indexOf(q) >= 0; };
+    var attention = MODS.filter(function (m) { var s = mstate(m)[0]; return s === 'problem' || s === 'setup'; });
+    var groups = GROUPS.map(function (g) {
+      var rows = MODS.filter(function (m) { return m.group === g[0] && hit(m); });
+      return rows.length ? h('div', { class: 'group' }, h('div', { class: 'k', text: g[1] }), h('div', { class: 'card', style: 'padding:0 12px;gap:0' }, rows.map(mrow))) : null;
+    }).filter(Boolean);
+    return h('div', { class: 'screen' }, h('div', { class: 'top' }, h('h1', { text: 'System' }), h('span', { class: 'k', text: 'Pi 4 · 0.1.0' })),
+      h('input', { class: 'text-input', id: 'sysfind', type: 'search', placeholder: 'Find a setting (try "pin", "clock" or "art-net")', 'aria-label': 'Find a setting', value: UI.find,
+        oninput: function (e) { UI.find = e.target.value; render(); var f = $('sysfind'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }),
+      !q && attention.length ? h('div', { class: 'card' }, h('div', { class: 'k', text: attention.length + (attention.length === 1 ? ' thing needs' : ' things need') + ' a look' }),
+        attention.map(function (m) { var st = mstate(m); return h('button', { class: 'btn', style: 'text-align:left;padding:8px 12px;font-weight:400;display:flex;gap:8px;align-items:center;flex-wrap:wrap', onclick: function () { openMod(m.id, 'system'); } },
+          h('span', { class: 'chip ' + st[0], text: st[1] }), h('span', { text: m.name + ': ' + st[2] })); }))
+        : (!q ? h('div', { class: 'card' }, h('div', { text: 'The box is well. Nothing needs a look.' })) : null),
+      groups.length ? groups : h('div', { class: 'k', text: 'Nothing matches "' + UI.find + '". Try another word, or clear the box to see everything.' }),
+      !q ? h('details', { class: 'fold' }, h('summary', { text: 'Not built yet (' + PLANNED.length + ')' }), h('div', {}, PLANNED.map(function (n) { return h('div', { class: 'k', text: n }); }))) : null,
+      !full ? h('div', { class: 'k', text: 'Only the owner can change these.' }) : null);
+  }
+  function fakeField(label, i) { return [h('label', { class: 'k', for: 'f' + i, text: label }), h('input', { class: 'text-input', id: 'f' + i, 'aria-label': label })]; }
+  function modPage(m) {
+    var s = M[m.id], st = mstate(m), full = can('full'), body = [];
+    var notHere = function () { toast('This prototype stops here. The settings inside each module are covered by the module audit.'); };
+    if (m.sw && !s.on) body.push(h('div', { class: 'k', text: 'Switch it on to set it up. Nothing here runs while it is off' + (m.id === 'network' ? '; the box keeps its current address.' : '.') }));
+    else if (m.steps && !s.setup) {
+      var step = m.steps[Math.min(UI.step, m.steps.length - 1)];
+      body.push(h('div', { class: 'card', id: 'firstrun' }, h('div', { class: 'k', text: 'Set up · step ' + (UI.step + 1) + ' of ' + m.steps.length }), h('h2', { text: step.t }), h('div', { text: step.hint }),
+        step.fields.map(fakeField),
+        h('div', { class: 'row' }, UI.step ? h('button', { class: 'btn', text: 'Back', onclick: function () { UI.step--; render(); } }) : null,
+          h('button', { class: 'btn on grow', text: step.go, onclick: function () {
+            if (UI.step + 1 < m.steps.length) { UI.step++; return render(); }
+            s.setup = true; UI.step = 0; toast(m.name + ' is set up and ready.'); render();
+          } })),
+        h('button', { class: 'back', text: 'Not now (switch it off again)', onclick: function () { s.on = false; if ('armed' in s) s.armed = false; render(); } })));
+    } else if (m.id === 'projector') {
+      body.push(h('div', { class: 'card' }, B.proj.map(function (p, i) {
+        return h('div', { class: 'mrow', style: i ? '' : 'border-top:0' }, h('div', { class: 'go', style: 'cursor:default' }, h('span', { class: 'nm', text: p.n }),
+          h('span', { class: 'st', text: 'Epson · 192.168.1.' + (50 + i) + ' · ' + (p.on ? 'On, ' + p.input : 'Off') + ' · lamp ' + p.lamp + ' h' })), sw(p.on, p.n + ' power', function (v) { p.on = v; render(); }, !can('live')));
+      })), h('button', { class: 'btn', text: 'Add a projector', onclick: notHere }));
+    } else if (m.id === 'shaders') {
+      body.push(h('button', { class: 'btn big' + (B.now && B.now.kind === 'vibes' ? ' on' : ''), text: B.now && B.now.kind === 'vibes' ? 'Ambience is on. Tap to stop' : 'Start ambience (Vibes)', onclick: function () { vibes(!(B.now && B.now.kind === 'vibes')); } }),
+        h('div', { class: 'card' }, SHADERS.map(function (n, i) {
+          var on = B.now && B.now.kind === 'vibes' && B.now.idx === i;
+          return h('div', { class: 'clip' }, h('span', { class: 'nm' }, 'nxlx-' + n, h('small', { text: (i < 8 ? 'In Vibes' : 'Not in Vibes') + ' · ' + (i % 3 === 2 ? 'heavier' : 'light') + ' work for the box' })),
+            h('button', { class: 'btn' + (on ? ' on' : ''), text: on ? 'On screen' : 'Play', onclick: function () { B.now = { kind: 'vibes', idx: i, dur: 180, pos: 0 }; render(); } }));
+        })),
+        h('div', { class: 'card', style: 'gap:0' }, [['Each shader stays', '3 minutes'], ['Change values each round', 'Yes'], ['Drawing size', '720 lines']].map(function (r) { return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', { text: r[1] })); })),
+        h('button', { class: 'btn', text: 'Upload an ISF shader (.fs)', onclick: notHere }));
+    } else if (m.id === 'health') {
+      body.push(h('div', { class: 'card', style: 'gap:0' }, [['Power', 'problem', 'Dipped since the last start. Use the official 5 V 3 A supply.'], ['Temperature', 'ready', '52°C, fine'], ['Player', 'ready', 'Running, no dropped frames'], ['Helpers', 'ready', 'All running']].map(function (r) {
+        return h('div', { class: 'kv' }, h('span', { text: r[0] }), h('span', {}, r[1] === 'problem' ? h('span', { class: 'chip problem', text: 'Problem' }) : null, ' ' + r[2]));
+      })));
+    } else if (m.id === 'reset') {
+      var word = h('input', { class: 'text-input', id: 'resetword', placeholder: 'Type RESET', 'aria-label': 'Type RESET to confirm' });
+      body.push(h('div', { class: 'card' }, h('div', { text: 'This cannot be undone. Export the settings file first if you may want them back.' }), word,
+        h('button', { class: 'btn danger', text: 'Erase every setting', onclick: function () { if (word.value !== 'RESET') return toast('Type RESET in the box first.', null, null, true); toast('In the real panel the box would now reset. Nothing happened here.'); } })));
+    } else if (m.id === 'appearance') {
+      body.push(choice([['Dark stage', 'dark-stage'], ['Night red', 'night-red']], UI.theme, setTheme, !full), choice([['Light', 'light'], ['High contrast', 'high-contrast']], UI.theme, setTheme, !full));
+    } else {
+      body.push(h('div', { class: 'card' }, h('div', { text: st[2] }), h('button', { class: 'btn', text: 'Change', disabled: !full, onclick: notHere })));
+    }
+    return h('div', { class: 'screen' },
+      h('button', { class: 'back', text: '‹ Back to ' + ({ system: 'System', mix: 'Mix', live: 'Live' })[UI.from], onclick: function () { UI.page = null; UI.tab = UI.from; scrollTop = 0; render(); } }),
+      h('div', { class: 'row between' }, h('h1', { text: m.name }), m.sw ? sw(s.on, m.name, function (v) { setMod(m, v); }, !full) : null),
+      h('div', { class: 'row wrap' }, st[1] ? h('span', { class: 'chip ' + st[0], text: st[1] }) : null, h('span', { class: 'k', text: m.sw ? (s.on ? 'Switched on' : 'Switched off') : 'Always available' })),
+      h('p', { style: 'margin:0', text: m.about }), body,
+      m.sw ? h('div', { class: 'k', text: 'Beta. Was called "' + m.old + '".' }) : null);
+  }
+  function roleSheet() {
+    return sheet('You are a ' + ROLE[UI.role].toLowerCase(), [h('div', { text: ROLE_CAN[UI.role] }),
+      h('div', { class: 'k', text: 'This phone: My phone · the box is ' + (mstate(mod('health'))[0] === 'problem' ? 'running, with one warning' : 'well') }),
+      UI.role !== 'full' ? h('button', { class: 'btn', text: 'Forget this phone (leave the room)', onclick: function () { UI.sheet = null; UI.joined = false; render(); } }) : null, closeBtn('Close')]);
+  }
+  function closeSheet() {
+    return sheet('Close the room?', [h('div', { text: 'This stops what is playing and switches off ' + B.proj.filter(function (p) { return p.on; }).length + ' projector(s). The box itself stays on, ready for tomorrow.' }),
+      h('div', { class: 'row' }, h('button', { class: 'btn grow', text: 'Not yet', onclick: function () { UI.sheet = null; render(); } }), h('button', { class: 'btn grow on', text: 'Close the room', onclick: function () { UI.sheet = null; closeRoom(); } }))]);
+  }
+
+  // ---- drawing -----------------------------------------------------------
+  var phone = $('phone'), scrollTop = 0, lastKey = '';
+  function setTheme(t) { UI.theme = t; phone.setAttribute('data-theme', t); drawBar(); }
+  function tabsFor() {
+    if (!isNew()) return [['live', 'Live'], ['mix', 'Mix'], ['media', 'Media'], ['system', 'System']];
+    return UI.role === 'full' ? [['room', 'Room'], ['live', 'Live'], ['mix', 'Mix'], ['media', 'Media'], ['system', 'System']] : UI.role === 'live' ? [['room', 'Room'], ['live', 'Live'], ['media', 'Media']] : [['room', 'Room'], ['live', 'Live']];
+  }
+  function drawToast() {
+    var old = phone.querySelector('.toast'); if (old) old.remove();
+    var t = UI.toast; if (!t || !isNew()) return;
+    phone.appendChild(h('div', { class: 'toast' + (t.err ? ' err' : ''), role: 'status' }, h('span', { text: t.text }),
+      t.label ? h('button', { text: t.label, onclick: function () { UI.toast = null; t.fn(); drawToast(); } }) : null));
+  }
+  function render() {
+    var sc = phone.querySelector('.scroll'), key = UI.mode + UI.tab + UI.page + UI.joined;
+    if (sc && key === lastKey) scrollTop = sc.scrollTop; else if (key !== lastKey) scrollTop = 0;
+    lastKey = key;
+    phone.textContent = '';
+    if (!UI.joined) { phone.appendChild(h('div', { class: 'scroll' }, isNew() ? newConnect() : oldConnect())); drawSide(); return; }
+    var tabs = tabsFor();
+    if (!tabs.some(function (t) { return t[0] === UI.tab; })) { UI.tab = tabs[0][0]; UI.page = null; }
+    var screens = isNew() ? { room: newRoom, live: newLive, mix: newMix, media: newMedia, system: newSystem } : { live: oldLive, mix: oldMix, media: oldMedia, system: oldSystem };
+    var body = isNew() && UI.page ? modPage(mod(UI.page)) : screens[UI.tab]();
+    var scroll = h('div', { class: 'scroll' }, body);
+    if (isNew()) phone.appendChild(strip());
+    phone.appendChild(scroll);
+    if (isNew() && UI.tab === 'live' && !UI.page && can('live')) phone.appendChild(dock());
+    phone.appendChild(h('nav', { class: 'tabs', 'aria-label': 'Sections' }, tabs.map(function (t) {
+      return h('button', { class: 'btn' + (UI.tab === t[0] ? ' on' : ''), text: t[1], 'aria-current': UI.tab === t[0] ? 'page' : false, onclick: function () { go(t[0]); } });
+    })));
+    var s = UI.sheet;
+    if (UI.welcome) { UI.welcome = false; if (isNew()) s = UI.sheet = { kind: 'role' }; }
+    if (s) phone.appendChild(s.kind === 'pad' ? padSheet() : s.kind === 'oldpad' ? oldPadSheet() : s.kind === 'dlg' ? oldDialog() : s.kind === 'files' ? fileSheet() : s.kind === 'clip' ? clipSheet() : s.kind === 'close' ? closeSheet() : roleSheet());
+    scroll.scrollTop = scrollTop;
+    drawToast(); patch(true); drawSide();
+  }
+  function drawBar() {
+    var bar = $('bar'); bar.textContent = '';
+    var seg = function (opts, cur, pick, label) { return h('div', { class: 'seg', role: 'group', 'aria-label': label }, opts.map(function (o) { return h('button', { class: o[0] === cur ? 'on' : '', text: o[1], 'aria-pressed': o[0] === cur ? 'true' : 'false', onclick: function () { pick(o[0]); } }); })); };
+    bar.appendChild(seg([['old', 'Current'], ['new', 'Proposed']], UI.mode, function (v) { UI.mode = v; UI.sheet = null; UI.page = null; UI.toast = null; UI.msg = ''; UI.editing = false; UI.find = ''; drawBar(); render(); }, 'Which panel'));
+    bar.appendChild(h('select', { id: 'rolepick', 'aria-label': 'Who is holding the phone', onchange: function (e) {
+      if (e.target.value === 'connect') { UI.joined = false; } else { UI.role = e.target.value; UI.joined = true; }
+      UI.sheet = null; UI.page = null; UI.editing = false; drawBar(); render();
+    } }, [['full', 'As the owner'], ['live', 'As staff (presenter)'], ['view', 'As a guest'], ['connect', 'First visit (pairing)']].map(function (o) { return h('option', { value: o[0], text: o[1], selected: UI.joined ? o[0] === UI.role : o[0] === 'connect' }); })));
+    bar.appendChild(h('select', { id: 'themepick', 'aria-label': 'Theme', onchange: function (e) { setTheme(e.target.value); render(); } },
+      [['dark-stage', 'Dark stage'], ['night-red', 'Night red'], ['light', 'Light'], ['high-contrast', 'High contrast']].map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === UI.theme }); })));
+  }
+
+  // ---- what changed and why, and the owner's notes ------------------------
+  var WHY = [
+    ['system', 'System and switching modules on and off', [
+      ['Today the switch and the thing it switches are far apart. Modules is the fourth card; the DMX card is fifteen cards further down and says "Switch on under Modules above".', 'One row per module: name, state, switch. Tap the row for that module\'s own page, where the same switch sits at the top.'],
+      ['DMX, MIDI, the schedule and OSC need two switches (the module, then "Turn DMX on" inside its card). The manual has a troubleshooting line for this.', 'One switch. Turning it on does both. Turning it off keeps the settings and offers Undo.'],
+      ['Switching a module on shows nothing new on screen; you have to know to scroll to its card and what to fill in.', 'Switching on opens a short first-run step ("Add your first projector"). Until it is done the row says Needs setup, and what is missing.'],
+      ['Every row reads "0.1.0 · beta". Media library says "Not built yet" and is On. Five rows cannot be switched at all.', 'Each row says what it is doing in plain words: Off, Needs setup, Ready, Active or Problem. Modules that are not built yet sit in one folded line.'],
+      ['23 cards in one scroll, with Factory reset between Diagnostics and Schedule, and off modules still taking a card each.', 'Five short groups: everyday, picture, controllers, set once, this box. Factory reset is last and asks you to type RESET.'],
+      ['No way to find a setting except scrolling.', 'A find box on top (it knows other words too: "pin" finds People and codes). A "needs a look" summary lists problems first.']]],
+    ['nav', 'Navigation, roles and status everywhere', [
+      ['Four tabs for everyone. Staff get the same Mix and System as the owner, with buttons greyed out and no reason given.', 'Owner: Room, Live, Mix, Media, System. Staff: Room, Live, Media. Guest: Room, Live. Each role sees only what it can use.'],
+      ['Three sets of words for roles: view, live, full in the panel; guest and presenter on the codes; "watch only" in remote support.', 'Guest, Presenter, Owner everywhere. The chip in the top bar says which you are and what that allows.'],
+      ['What is playing, blackout and Vibes show only on Live. On Media you can play a clip into a blacked-out screen and not know.', 'A status bar on every screen: what is on the screen, time left, and a white bar with "Bring back" while the screen is black.'],
+      ['Answers appear in one message line whose place changes: under the pads on Live, at the very bottom of Media and Mix, at the top of System.', 'One toast in the same place on every screen, with Undo where an action can be undone.'],
+      ['The pill on Live says "PI4 · 52°C · OK": board jargon in the most valuable corner.', 'Health moves to System, and surfaces as "needs a look" only when something is wrong.']]],
+    ['live', 'Live', [
+      ['Fade out, Freeze, Stop and Blackout come after the twelve pads and Edit pads, so on a phone Blackout is a scroll away.', 'Blackout and Fade out are docked above the tabs, always under the thumb.'],
+      ['Four ways to make the screen dark with three different ways back: Blackout becomes "Show", Fade out is undone by a small Fade in in another card.', 'Each button turns into its own way back in the same place: Blackout becomes "Bring picture back", Fade out becomes Fade in.'],
+      ['Time shows as 00:01 / 03:20, and the name is the file name, not the pad name.', 'The pad name in large type, and time left ("2:06 left, then again").'],
+      ['Transport, test pattern and snapshot take the first screenful; pads, the main job, are below.', 'Now playing, ambience, pads. The rest folds under "More controls".'],
+      ['Edit pads looks the same as playing. The ending must be chosen before the clip, because tapping a clip saves at once. The pad name cannot be typed.', 'A clear "Editing pads" banner; the sheet goes clip, name, ending, Save. An empty pad opens the sheet directly.']]],
+    ['media', 'Media', [
+      ['The clip list is the fourth card, under Quick play, Slideshow and Upload.', 'The clips come first, with a find box. Play everything and Slideshow fold under "Other ways to play".'],
+      ['Four equal buttons per clip (Play, Info, Rename, Delete), 34 px high, Delete beside Play.', 'One Play button per row, and a "more" button for details, pad, rename and delete.'],
+      ['Info writes one long sentence into the message line at the bottom of the page, off screen.', 'Details open in a sheet as rows, with advice in plain words ("May stutter").'],
+      ['Upload then put it on a pad: about nine taps across two tabs, and you must remember the file name.', 'When an upload finishes the card offers "Put on a pad" and "Play now": four taps, same screen.'],
+      ['A failed upload leaves "name: connection lost" in small grey text. Rename and Delete use browser dialogs.', 'A failed upload says what happened, that nothing was saved, and offers Try again. Delete says which pad it empties.']]],
+    ['mix', 'Mix', [
+      ['Performance controls (opacity, speed) are mixed with room setup (size, position, rotate, mirror). A presenter can rotate the room\'s picture by accident.', 'Three groups: While playing, Layers, Picture setup. Setup is folded, owner only, with a one-line summary.'],
+      ['Rotate sits four cards away from Mirror. "Position X" has no unit. One Reset mix resets everything.', 'Plain names ("Left or right"), each value is its own reset button, and "back to normal" has Undo.'],
+      ['Loop and Audio show their state only in the label ("Audio: mute"), unlike every other toggle.', 'Switches, like everywhere else.'],
+      ['Mapping and Shaders cards say "Switch on under System > Modules".', 'Each layer is a row with its switch right there, and opens the same module page as System does.']]],
+    ['connect', 'First visit and pairing', [
+      ['Two forms on one screen, and the highlighted button is the owner\'s PIN, although most people who arrive are staff with a code.', 'The code comes first with one big Join button. "I am the owner" opens the PIN.'],
+      ['"Name for this device" sits between the code and its button.', 'No name needed to join. After joining, a short sheet says what your role can do.'],
+      ['Errors appear under both forms, far from the field.', 'The error sits under the field and says where to find the code.']]],
+    ['room', 'Room (placeholder)', [
+      ['Closing takes Stop on Live, then System, a long scroll to Projectors, then All off.', 'Room is the first tab and the screen staff land on. "Close the room" is one button with a confirmation and Undo. The real screen is being built separately; this only reserves its place.']]]
+  ];
+  var notes = { db: null, state: 'Loading notes...', text: {}, drawn: '' };
+  function screenKey() { return !UI.joined ? 'connect' : UI.page ? 'system' : UI.tab; }
+  function drawSide() {
+    var key = screenKey(), side = $('side');
+    if (notes.drawn === key + UI.mode && side.firstChild) return;
+    var ta = $('notetext'); if (ta && notes.drawn) notes.text[notes.drawn.replace(/(old|new)$/, '')] = ta.value;
+    notes.drawn = key + UI.mode; side.textContent = '';
+    var name = WHY.filter(function (w) { return w[0] === key; })[0];
+    side.appendChild(h('div', {}, h('h2', { text: 'What changed and why' }),
+      h('p', { text: 'Use the phone on the left like the real panel. Switch between Current and Proposed at the top; "Current" is today\'s panel rebuilt from its code. Everything shown is example data and nothing reaches a real box.' })));
+    WHY.forEach(function (w) {
+      side.appendChild(h('details', { open: w[0] === key || (w[0] === 'nav' && key === 'system') }, h('summary', { text: w[1] }),
+        h('dl', {}, w[2].map(function (r) { return h('div', {}, h('dt', { text: 'Today: ' + r[0] }), h('dd', {}, h('b', { text: 'Proposed: ' }), r[1])); }))));
+    });
+    var area = h('textarea', { id: 'notetext', 'aria-label': 'Your notes on this screen', placeholder: 'What works, what does not, what you would change...' });
+    area.value = notes.text[key] || '';
+    side.appendChild(h('div', { class: 'notes card' }, h('h2', { text: 'Your notes on: ' + (name ? name[1] : key) }), area,
+      h('div', { class: 'row wrap' }, h('button', { class: 'btn on', id: 'notesave', text: 'Save note', disabled: !notes.db, onclick: function () { saveNote(key, area.value); } }), h('span', { class: 'k', id: 'notestate', text: notes.state }))));
+  }
+  function noteState(t) { notes.state = t; var el = $('notestate'); if (el) el.textContent = t; }
+  function saveNote(key, text) {
+    notes.text[key] = text; noteState('Saving...');
+    notes.db.doc('notes/' + key).set({ screen: key, text: text, saved: new Date().toISOString() }).then(function () { noteState('Saved. Claude can read it.'); }, function (e) { noteState('Could not save: ' + ((e && e.message) || 'unknown error') + '. Try again.'); });
+  }
+  var use = window.claude && window.claude.use ? window.claude.use('db') : Promise.resolve(null);
+  use.then(function (db) {
+    if (!db) { noteState('Notes cannot be saved in this view. Open the page from its claude.ai link while signed in.'); return; }
+    notes.db = db; var b = $('notesave'); if (b) b.disabled = false; noteState('Notes are saved with this page, one per screen.');
+    return db.collection('notes').get().then(function (snap) {
+      snap.docs.forEach(function (d) { var v = d.data() || {}; if (typeof v.text === 'string' && !(d.id in notes.text)) notes.text[d.id] = v.text; });
+      var ta = $('notetext'); if (ta && !ta.value) ta.value = notes.text[screenKey()] || '';
+    });
+  }).catch(function () { noteState('Notes are not available right now.'); });
+
+  setTheme(UI.theme);
+  render();
+})();
+</script>
