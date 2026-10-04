@@ -165,6 +165,8 @@ class Api:
         self.projectors = projector_mod.Monitor(self, log=lambda line: self.log(line))    # started by server.build and the module switch
         self.dmx = None           # DmxManager or None
         self.midi = None          # MidiManager or None
+        from . import room as room_mod
+        self.room = room_mod.Room(self, log=lambda line: self.log(line))     # groups, scenes and the Room screen (see room.py)
 
     # --- helpers -------------------------------------------------------
     def _apply_opacity(self, percent):
@@ -1183,6 +1185,8 @@ class Api:
             self.sync.apply()
         if module_id == "projector":       # starts or stops the background status checks
             self.projectors.apply()
+        if module_id == "room" and not self.registry.enabled("room"):     # off: what a scene had not sent yet is dropped
+            self.room.stop()
         for mid, manager in (("control-dmx", self.dmx), ("control-midi", self.midi)):
             if module_id == mid and manager is not None:   # switching the module off stops the receiver
                 try:
@@ -2017,6 +2021,10 @@ class Api:
             ("GET", "/api/projectors"): ("view", self.get_projectors),
             ("POST", "/api/projectors"): ("full", self.set_projectors),
             ("POST", "/api/projector"): ("live", self.projector_action),
+            ("GET", "/api/room"): ("view", self.room.api_get),
+            ("POST", "/api/room"): ("full", self.room.api_set),
+            ("POST", "/api/room/scene"): ("live", self.room.api_scene),
+            ("POST", "/api/room/group"): ("live", self.room.api_group),
             ("GET", "/api/audio"): ("view", self.get_audio),
             ("POST", "/api/audio"): ("full", self.set_audio),
             ("GET", "/api/autostart"): ("view", self.get_autostart),
