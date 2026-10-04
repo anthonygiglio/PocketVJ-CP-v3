@@ -295,6 +295,20 @@ class ImportTest(Base):
         del file["settings"]["schema"]
         self.assertEqual(self.send(file)[0], 400)
 
+    def test_a_malformed_older_file_is_refused_not_a_crash(self):
+        """A migration is written for what an older version wrote; a file that holds something else must not
+        become an error 500 with a traceback."""
+        before, memory = self.on_disk(), copy.deepcopy(self.settings.data)
+        for control in ([], "s", {"midi": "x"}, None, 5):
+            file = self.export()
+            file["settings"].update(schema=7, control=control)
+            st, out = self.send(file)
+            self.assertEqual(st, 400, (control, out))
+            self.assertIn("cannot be used", out["error"])
+            self.assertNotIn("Traceback", json.dumps(out))
+            self.assertEqual((self.on_disk(), self.settings.data), (before, memory))
+        self.assertEqual(self.care._siblings(".before-import-"), [])
+
     def test_what_a_later_schema_adds_comes_from_its_own_migration(self):
         """The checks know schema 13. On a box with a later schema, what that schema adds is put back by its
         migration, and a section it adds keeps the box's value."""

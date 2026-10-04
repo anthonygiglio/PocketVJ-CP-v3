@@ -497,6 +497,7 @@ class BoxCare:
         current = self.settings._current
         if isinstance(data.get("schema"), bool) or not isinstance(data.get("schema"), int):
             raise bad("the file does not say which settings schema it holds")
+        schema = data["schema"]
         try:
             migrate(data, self.settings._migrations, current)          # the same path as a normal load
         except SettingsError as e:
@@ -504,6 +505,8 @@ class BoxCare:
                 raise bad("the file is from a newer version (settings schema %d, this box knows %d); update the box first"
                           % (data["schema"], current), 409)
             raise bad("the file cannot be used: %s" % e)
+        except Exception as e:                   # a migration met something an older version never wrote
+            raise bad("the file cannot be used: its settings are not what schema %s held (%s)" % (schema, type(e).__name__))
         known = {n for n, _ in SECTIONS}
         unknown = sorted(k for k in data if k not in known and k != "schema" and k not in default_settings())
         if unknown:
