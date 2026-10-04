@@ -369,6 +369,39 @@ class SceneTest(RoomBase):
         self.assertEqual(a.input, "31")                                                   # and nothing follows it
         self.assertIsNone(self.api.projectors.status(pa)["pending_input"])
 
+    def test_a_button_outside_the_room_is_also_a_newer_choice(self):
+        """A room step that is waiting must not land after Off on the Projectors card, /beameroff or the schedule,
+        nor a scene's source after a newer pick in the card's input chooser."""
+        a, pa = self.projector("Left", slow=True)
+        main = self.group("Main wall", [pa])
+        on = self.scene("On", [{"group": main, "power": "on", "input": "32", "picture": "mute"}])
+        self.post("/api/projector", {"id": pa, "action": "on"})
+        a.finish()
+        self.post("/api/projector", {"id": pa, "action": "off"})
+        self.assertEqual(a.power, "2")                                                    # cooling down: it refuses everything
+        self.post("/api/room/scene", {"scene": on})
+        self.assertTrue(wait_for(lambda: sets(a).count("POWR 1") >= 3), sets(a))          # the room keeps asking
+        self.assertEqual(self.api.handle("POST", *osc.translate("/beameroff", [1.0]), osc.OSC_DEVICE, "192.168.0.9")[0], 200)
+        self.assertTrue(wait_for(lambda: not self.job()["running"]))
+        time.sleep(0.3)                                                                   # a command already on the wire is over by now
+        mark = len(a.received)
+        a.finish()
+        time.sleep(0.6)
+        self.assertEqual([line[2:] for line in a.received[mark:] if not line.endswith("?")], [])
+        self.assertEqual((a.power, self.job()["text"]), ("0", "Main wall: changed by a later choice."))
+        # the same for a source: the scene's is still to come when the card's chooser picks another
+        self.post("/api/room/scene", {"scene": on})
+        self.assertTrue(wait_for(lambda: self.api.projectors.status(pa)["pending_input"] == "32"))
+        self.assertEqual(self.post("/api/projector", {"id": pa, "action": "input", "input": "31"})[1]["results"][pa]["pending"], True)
+        self.assertTrue(wait_for(lambda: self.api.projectors.status(pa)["pending_input"] == "31"))
+        time.sleep(0.3)
+        self.assertEqual(self.api.projectors.status(pa)["pending_input"], "31")           # the room did not stop the newer retry
+        a.finish()
+        self.assertTrue(wait_for(lambda: a.input == "31" and a.video_mute), sets(a))      # the scene's mute still goes: nobody chose otherwise
+        self.assertTrue(self.finished())
+        self.assertNotIn("INPT 32", sets(a)[sets(a).index("INPT 31"):])
+        self.assertEqual(self.job()["text"], "Main wall: on, picture muted, changed by a later choice.")
+
     def test_a_scene_for_other_projectors_also_ends_the_first_one(self):
         a, pa = self.projector("Left", slow=True)
         b, pb = self.projector("Right")

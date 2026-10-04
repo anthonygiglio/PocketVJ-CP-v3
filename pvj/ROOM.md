@@ -32,6 +32,7 @@ And one thing **the box** does: leave alone, play a clip (loop or once), play a 
 - A mute for a projector that is switched off (and that the scene did not switch on) is reported at once as "it is switched off", not after 90 seconds.
 - **A second scene replaces the first.** What the first had not sent yet is dropped, also for projectors the second scene does not mention; an input change still being retried for it is stopped; and each projector's commands go out from one thread, in the order they were chosen, so an older command can never follow a newer one.
 - **A group button joins in.** On, a source or a mute pressed while a scene is still under way replaces only its own kind of step for that group's projectors (a mute pressed during warm-up does not cancel the scene's source). Off replaces everything still to come for them.
+- **A button outside the room counts too.** On, Off, a mute or an input pressed on the Projectors card, the old OSC `/beameron` and `/beameroff`, or a `projector_on` or `projector_off` schedule entry drops what the room still had to send of that kind for those projectors (Off drops everything), before it sends. So a scene that is still waiting for a projector to cool down does not switch it on after someone has pressed Off.
 - Switching the Room module off, removing a projector, or a factory reset ends what is still to come; nothing more is sent.
 
 ## The Room screen

@@ -1573,6 +1573,7 @@ class Api:
             if not isinstance(body.get("input"), str) or body["input"] not in known:
                 raise bad("that is not one of this projector's inputs")
             action = ("input", body["input"])
+        self.room.supersede([p["id"] for p in targets], action)     # a scene's step of this kind still to come is dropped: this choice is newer
         if body.get("background"):
             def run():
                 failed = [r["error"] for r in self._projector_run(targets, action).values() if not r["ok"]]

@@ -18,6 +18,8 @@ How a scene or a group button reaches the projectors:
 * A second scene replaces the first: what the first had not sent yet is dropped, an input change still being
   retried for it is stopped, and the same thread then sends the newer choice, so an older command can never
   follow a newer one. A group button only replaces its own kind of step (Off replaces everything).
+* A button outside the room (the Projectors card, /beameroff, a schedule entry) does the same to the room's
+  steps of its kind before it sends (supersede), so the last choice made anywhere is the one that stands.
 
 What the box does in a scene is a short list of existing API actions (BOX below); a later feature adds one entry.
 """
@@ -292,6 +294,30 @@ class Room:
         if slot.thread is None:
             slot.thread = threading.Thread(target=self._run, args=(slot,), name="room", daemon=True)
             slot.thread.start()
+
+    def supersede(self, pids, action):
+        """A button outside the room was pressed for these projectors (the Projectors card, /beameron, a schedule
+        entry: Api.projector_action calls this before it sends): what the room still had to send of the same kind
+        is dropped, everything if it is "off", so a room step that is waiting or being retried never lands after
+        that newer choice."""
+        if isinstance(action, tuple):
+            kinds = {"input"}
+        elif action in ("on", "off"):
+            kinds = {"power"}
+        elif action.partition("_")[0] in ("mute", "unmute"):
+            kinds = {action.partition("_")[2]} if "_" in action else {"picture", "sound"}
+        else:
+            return
+        with self.lock:
+            for pid in pids:
+                slot = self._slots.get(pid)
+                hit = [s for s in slot.steps if s.live and (action == "off" or s.kind in kinds)] if slot else []
+                for s in hit:
+                    if s.kind == "input" and action != "off" and slot.handed == s.want:
+                        slot.handed = None            # Monitor.set_input replaces that retry itself; it is not ours to stop
+                    s.state, s.text = "dropped", "changed by a later choice"
+                if hit:
+                    self._kick(slot)
 
     def threads(self):
         with self.lock:
