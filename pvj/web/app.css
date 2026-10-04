@@ -129,3 +129,20 @@ button.linkish { background: none; border: 0; padding: 4px 0; color: inherit; fo
 .health-ok .badge { border-color: var(--ac); }
 .health-warn .badge { background: #b26a00; color: #fff; border-color: #b26a00; }
 .health-bad .badge { background: #b00020; color: #fff; border-color: #b00020; }
+/* Room screen: big buttons for staff, long names wrap, and five tabs still fit a phone */
+.tabs.many { gap: 3px; padding-left: 8px; padding-right: 8px; }
+.tabs.many .btn { padding: 0 2px; min-width: 0; font-size: 14px; }
+.room-groups { display: flex; flex-direction: column; gap: 12px; }
+.room-scenes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.room-scenes .btn, .room-group .btn { min-width: 0; overflow-wrap: anywhere; }
+.room-group .row.between { flex-wrap: wrap; }
+.room-group h2 { min-width: 0; overflow-wrap: anywhere; }
+.room-source { flex: 1 1 40%; }
+.room-text, .room-result { font-size: 14px; overflow-wrap: anywhere; }
+.room-result.err { color: var(--ac); font-weight: 600; }
+.room-state.state-on { background: var(--ac); border-color: var(--ac); color: var(--on); }
+.room-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+@media (min-width: 900px) {
+  .room-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .room-scenes { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}

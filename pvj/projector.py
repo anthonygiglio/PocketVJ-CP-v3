@@ -538,6 +538,17 @@ class Monitor:
         self.poke(pid)
         return {"pending": False}
 
+    def cancel_input(self, pid, code):
+        """Stop retrying a change to input `code` (the room's scene was replaced by a newer choice). A retry that
+        is being sent is over before this returns, and none follows. True if there was one to stop."""
+        with self._input_lock(pid):
+            with self.lock:
+                w = self._workers.get(pid)
+                if w is None or not w.pending or w.pending["input"] != code:
+                    return False
+                w.pending = None
+        return True
+
     def _retry(self, w, entry, pending):
         label = (entry.get("labels") or {}).get(pending["input"]) or input_name(pending["input"])
         with self._input_lock(w.pid):
