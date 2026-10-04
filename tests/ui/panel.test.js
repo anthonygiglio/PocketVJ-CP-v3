@@ -257,6 +257,7 @@ function startServer() {
     await page.click('#miditoggle');
     await page.waitForFunction(() => /waiting for a controller/.test(document.getElementById('midiline').textContent));
     await page.waitForSelector('#midinomap');
+    for (const a of ['vibes', 'vibes_next', 'vibes_dwell']) assert.strictEqual(await page.locator('#midiaction option[value="' + a + '"]').count(), 1, 'the MIDI action list offers ' + a);
     await page.selectOption('#midiaction', 'pad');
     await page.selectOption('#midibank', '1');
     await page.click('#midilearn');
@@ -508,6 +509,50 @@ function startServer() {
     await fitsCard('.card', 'System');
     if (shots) await page.screenshot({ path: path.join(shots, '4-system.png'), fullPage: true });
 
+    // Box care: export the settings (no access data in the file), change something, import the file back; a file
+    // with a repeated key is refused; diagnostics downloads; factory reset wants a choice and can be cancelled
+    // (a real reset would unpair this test's own device, so it is covered by tests/test_boxcare.py)
+    await page.waitForSelector('#settingscard #exportbtn');
+    const [exported] = await Promise.all([page.waitForEvent('download'), page.click('#exportbtn')]);
+    assert(/^nxlx-settings-.+\.json$/.test(exported.suggestedFilename()), 'export file name: ' + exported.suggestedFilename());
+    const exportedText = require('fs').readFileSync(await exported.path(), 'utf8');
+    const exportedFile = JSON.parse(exportedText);
+    assert.strictEqual(exportedFile.passwords_included, false, 'no passwords unless ticked');
+    for (const k of ['auth', 'devices', 'support', 'support_log']) assert(!(k in exportedFile.settings), k + ' must not be exported');
+    assert(!/token|pin_hash|a2tra2tr/.test(exportedText), 'no access data or support key in the export');
+    const post = (path, body) => page.evaluate(([p, b]) => fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PVJ-Request': '1' }, body: JSON.stringify(b) }).then((r) => r.status), [path, body]);
+    const otherDuration = exportedFile.settings.mix.duration === 3 ? 4 : 3;
+    assert.strictEqual(await post('/api/mix', { transition: exportedFile.settings.mix.transition, duration: otherDuration }), 200);
+    page.once('dialog', (d) => d.accept());
+    await page.setInputFiles('#importpick', { name: 'my-settings.json', mimeType: 'application/json', buffer: Buffer.from(exportedText) });
+    await page.waitForFunction(() => /Settings imported/.test(document.getElementById('msg').textContent));
+    await page.waitForFunction(() => /no passwords/.test(document.getElementById('importresult').textContent));
+    const mixNow = await page.evaluate(() => fetch('/api/status').then((r) => r.json()).then((j) => j.mix.duration));
+    assert.strictEqual(mixNow, exportedFile.settings.mix.duration, 'the import put the exported value back');
+    assert.strictEqual(await page.evaluate(() => fetch('/api/status').then((r) => r.status)), 200, 'still paired after an import');
+    page.once('dialog', (d) => d.accept());
+    await page.setInputFiles('#importpick', { name: 'twice.json', mimeType: 'application/json', buffer: Buffer.from(exportedText.replace('{', '{"format": "x", ')) });
+    await page.waitForFunction(() => /appears twice/.test(document.getElementById('msg').textContent));
+    const [diag] = await Promise.all([page.waitForEvent('download'), page.click('#diagbtn')]);
+    assert(/^nxlx-diagnostics-.+\.json$/.test(diag.suggestedFilename()), 'diagnostics file name');
+    const diagText = require('fs').readFileSync(await diag.path(), 'utf8');
+    const diagFile = JSON.parse(diagText);
+    assert(diagFile.version && diagFile.health && diagFile.settings && diagFile.log, 'diagnostics has its parts');
+    assert(!/token_hash|pin_hash|pin_salt|server_key|a2tra2tr/.test(diagText) && !diagText.includes(info.pin + ' ('), 'no secret in the diagnostics file');
+    await page.waitForFunction(() => /^Log: /.test(document.getElementById('diagnote').textContent));
+    let resets = 0;
+    page.on('request', (r) => { if (r.url().endsWith('/api/system/factory-reset')) resets++; });
+    await page.click('#resetbtn');
+    await page.waitForFunction(() => /Choose what happens to the clips/.test(document.getElementById('msg').textContent));
+    await page.selectOption('#resetmedia', 'keep');
+    let asked = '';
+    page.once('dialog', (d) => { asked = d.message(); d.dismiss(); });
+    await page.click('#resetbtn');
+    await page.waitForFunction(() => document.getElementById('resetmedia').value === 'keep');
+    assert(/every device is unpaired/.test(asked) && /The clips stay/.test(asked), 'the reset question says what it does: ' + asked);
+    assert.strictEqual(resets, 0, 'a cancelled reset sends nothing');
+    await fitsCard('#settingscard, #diagcard, #resetcard', 'Box care');
+
     // Guest (view only) via the link in a fresh context
     const guestCtx = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const guest = await guestCtx.newPage();
@@ -542,6 +587,37 @@ function startServer() {
     await scanner.waitForSelector('.pads');
     assert(await scanner.isDisabled('#black'), 'a guest code gives view-only access');
     await scanCtx.close();
+
+    // Shaders and Vibes: switch the module on, start the rotation with the big button on Live, then choose one shader
+    // by hand on Mix (which ends the rotation) and stop. The harness player draws nothing (--vo=null), so this
+    // checks the panel and the API, not the picture; the picture is checked in tests/test_shaders_gpu.py.
+    await page.click('nav >> text=Live');
+    await page.waitForSelector('.pads');
+    assert.strictEqual(await page.locator('#vibes').count(), 0, 'no Vibes button while the module is off');
+    await page.click('nav >> text=System');
+    await page.click('.item:has-text("Shaders and Vibes") >> button');
+    await page.waitForFunction(() => fetch('/api/modules').then((r) => r.json()).then((d) => d.modules.some((m) => m.id === 'shaders' && m.enabled)));
+    await page.click('nav >> text=Live');
+    await page.waitForSelector('#vibes');
+    await page.click('#vibes');
+    await page.waitForFunction(() => /^Vibes: nxlx-/.test((document.getElementById('np') || {}).textContent), null, { timeout: 15000 });
+    await page.waitForFunction(() => /Vibes is on/.test((document.getElementById('vibes') || {}).textContent));
+    await page.click('nav >> text=Mix');
+    await page.waitForSelector('#shadercard [data-shader="nxlx-tide.fs"]');
+    assert.strictEqual(await page.locator('#shadercard [data-shader]').count(), 10, 'the ten bundled shaders are listed');
+    await page.waitForFunction(() => /Vibes is on/.test((document.getElementById('shaderline') || {}).textContent));
+    await page.click('#shadercard [data-shader="nxlx-tide.fs"] >> text=Play');
+    await page.waitForFunction(() => /On screen: nxlx-tide/.test((document.getElementById('shaderline') || {}).textContent));
+    await page.waitForSelector('#shin-speed');                       // its number inputs are sliders
+    const vibesAfter = await page.evaluate(() => fetch('/api/shaders').then((r) => r.json()).then((d) => d.vibes.running));
+    assert.strictEqual(vibesAfter, false, 'choosing a shader by hand ends the rotation');
+    await page.fill('#vibesdwell', '45');
+    await page.click('#shadersave');
+    await page.waitForFunction(() => fetch('/api/shaders').then((r) => r.json()).then((d) => d.config.dwell === 45));
+    await page.click('nav >> text=Live');
+    await page.waitForFunction(() => /^Shader: nxlx-tide/.test((document.getElementById('np') || {}).textContent), null, { timeout: 8000 });
+    await page.click('#stop');
+    await page.waitForFunction(() => /Player idle/.test((document.getElementById('np') || {}).textContent), null, { timeout: 8000 });
 
     // Desktop width
     await page.setViewportSize({ width: 1280, height: 800 });

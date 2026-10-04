@@ -136,6 +136,7 @@ Beta modules are **off** until you switch them on under System > Modules. Module
 | **Weekly schedule**: play, start scripts, stop, blackout, show and projector power at set times | [pvj/SCHEDULE.md](../pvj/SCHEDULE.md) |
 | **Video wall and sync**: boxes play in step (server and client), each can show a tile of the picture | [pvj/SYNC.md](../pvj/SYNC.md) |
 | **Projection mapper**: quads, triangles and grids, lined up from the phone (card on Mix) | [pvj/MAPPER.md](../pvj/MAPPER.md) |
+| **Shaders and Vibes**: moving pictures made by the GPU, and one button that plays them endlessly | below, and [pvj/SHADERS.md](../pvj/SHADERS.md) |
 | **Projector control** over PJLink: on, off, input, picture and sound mute, live status, lamp hours and warnings. **No real projector has been tested yet** | [pvj/PROJECTORS.md](../pvj/PROJECTORS.md) |
 | **Streams**: SRT, RTSP, RTMP | [pvj/STREAMS.md](../pvj/STREAMS.md) |
 | **DMX over the network**: Art-Net and sACN | [pvj/DMX.md](../pvj/DMX.md) |
@@ -156,6 +157,19 @@ The Projectors card shows what each projector says it is (maker, model), its sta
 
 Check the box clock before relying on the schedule: a Pi has no battery clock, and until the network sets the time the clock is wrong.
 
+### Shaders and Vibes (beta)
+
+A shader is a small program that the box's graphics chip runs to draw a moving picture: there is no clip, so it never ends and never repeats exactly. The box takes shaders in the **ISF** format (Interactive Shader Format, `.fs` files) and comes with ten slow, quiet ones made for ambience.
+
+Switch **Shaders and Vibes** on under System > Modules (beta, off by default; not offered on a Raspberry Pi 3).
+
+- **Vibes** is the big button that then appears on the **Live** screen (presenters and full-access devices). One tap and the box plays shaders endlessly: a shuffled order, three minutes each, a dip to black between them, and slightly different speeds, sizes and colours every round. It ends when you press **Stop**, press the button again, or play anything else; it never takes the screen back by itself.
+- On the **Mix** screen the **Shaders and Vibes** card lists the shaders. **Play** shows one until you play something else; its number inputs appear as sliders. Full-access devices choose which shaders Vibes may use, how long each stays (10 seconds to an hour), how many lines the shader is drawn with (fewer is lighter work), and upload their own `.fs` files (generator shaders only; a file the box cannot show is refused with the reason).
+- Opacity, the fades, Blackout, the overlay picture and the projection mapping all work on a shader as they do on a clip.
+- Vibes can also start by itself: choose **Vibes** under System > Autostart, add a **Start Vibes** entry to the schedule, send the OSC address `/pvj/vibes`, assign **Vibes on / off**, **next shader** and the time each shader stays to a MIDI controller with Learn, or use the ninth DMX channel (see [pvj/MIDI.md](../pvj/MIDI.md) and [pvj/DMX.md](../pvj/DMX.md)).
+
+**Not measured, and not seen on a screen yet.** How smoothly each shader runs on a Pi 4, a Pi 5 or a PC has not been measured on any board, and nobody has watched this on a display: so far it has only run in automated tests on a software graphics chip. Watch the screen the first time; if the picture stutters, choose fewer lines on the card or take the heavier shaders out of Vibes (each shader's cost is listed). Details: [pvj/SHADERS.md](../pvj/SHADERS.md).
+
 ## 6. Keep it safe and recoverable
 
 - **Keep the show network private.** The panel is protected by a PIN and per-device tokens, but it is not built to face the internet. OSC, DMX and MIDI are off until you switch them on; OSC and DMX only accept senders on private networks (plus ranges you add).
@@ -170,6 +184,31 @@ Check the box clock before relying on the schedule: a Pi has no battery clock, a
 ## Health
 
 System > Health says in plain words whether the box is well: the power supply (a Pi warns when the voltage drops; any drop is remembered until the next reboot, because it is the most common cause of odd stutters, network drops and damaged SD cards: use the official supply, 5 V 3 A for a Pi 4), the temperature (above 80 C a Pi slows down), the player (decoded in hardware or software, and dropped frames a second while playing), the load, and whether the helpers are running. It also lists the addresses to open the panel from another device, and a full-access device can put the address on the display for 2 minutes.
+
+## Settings file, diagnostics and factory reset
+
+Three cards in System, for full-access devices only.
+
+**Settings file.** *Export settings* saves the box's settings as one file (`nxlx-settings-<box>-<date>.json`): pads, modules, theme, mix, OSC, schedule, streams, DMX and MIDI, autostart, sound output, the picture over the video, projectors, the mapping and sync. *Import settings* loads such a file: it is checked first (a file from a newer version is refused, one from an older version is brought up to date, and every value goes through the same checks as the panel's own forms), a copy of the present settings is kept on the box (`settings.json.before-import-<time>` beside the settings file, the last three), and only then are the settings replaced. One wrong value stops the whole import and nothing changes. The clips themselves are not in the file: pads and the schedule refer to them by name.
+
+What happens to secrets:
+
+| | Export | Import |
+| --- | --- | --- |
+| The PIN, paired devices and their tokens | never in the file | the box keeps its own; a file that holds any is refused |
+| Remote support (server, keys, address, history) | never in the file | the box keeps its own |
+| Guest, presenter and support codes | never in the file (they are not saved anywhere) | not affected |
+| Projector passwords and the secrets in a stream address (a name and password, an RTMP stream key, an SRT passphrase or stream id) | left out, unless you tick *Include projector passwords and stream logins* | a file without them keeps the password the box already has for the same projector at the same address, and the full address the box already has for the same stream; otherwise type it in again |
+
+Without the tick a stream address is shortened to what is not secret: the name and password go; an RTMP address loses the last part of its path (the stream key) and everything after a `?`; an SRT address keeps only plain connection options such as `mode` and `latency`, so the passphrase and the stream id go; an RTSP address loses query values whose name sounds like a secret (password, token, key, auth, sign). A shortened address does not play on a box that never had the stream: add the stream again there, or export with the tick. On the box the file came from, an import keeps the full address it already has. A file with passwords holds them, and the full addresses, in plain text. The streams list and the player status in the panel hide the same parts, for every device.
+
+**Diagnostics.** *Download diagnostics file* saves one file to send to whoever is helping you: the version, the board, the screens, module states, the Health card's data, the last update, and the settings with every secret removed (no PIN, token, code, key, password or stream login; a stream is shown only as where it comes from). The panel runs without system rights and is not allowed to read the system log, so the file says so instead of holding log lines; on the box, `sudo journalctl -b -u 'pvj-*'` prints them. If a box is set up so that the panel can read the log, the lines are included with PINs, codes and logins removed.
+
+**Factory reset.** Choose whether the clips stay or are deleted, then *Reset to factory settings* and confirm. Playback stops, every setting goes back to how a new box starts, every phone, tablet and guest is unpaired (this one too), codes and a running support session end, and the box makes a new PIN, so the PIN screen is back on the display (`sudo pvj-pin` also prints it). Deleting the clips removes the media files in the box's own media folder and nothing else; a USB drive is never emptied, and if the box keeps its clips on a USB drive (`PVJ_MEDIA_DIR`) the reset refuses to delete them. What a reset does not touch: the wired network settings (System > Network changes the system's own configuration), your own themes, anything in `/etc/pvj` (the signing key, fleet support details), and the settings backups that updates keep for a rollback (`/var/lib/pvj/backups`, readable by root only). Those backups still hold the old devices: after a reset, do not run `sudo pvj-update rollback` unless you mean to bring the old settings back, or remove them first with `sudo rm -r /var/lib/pvj/backups`.
+
+Through a remote support session, the settings can be exported without passwords and the diagnostics file downloaded; importing, exporting with passwords and factory reset are refused.
+
+Not tested on a real box yet (2026-10-03): the three cards were tested with the automatic tests and a browser test only.
 
 ## 7. Troubleshooting
 
@@ -188,6 +227,8 @@ System > Health says in plain words whether the box is well: the power supply (a
 | A projector shows no inputs to choose | Many projectors list their inputs only while switched on: switch it on, wait for "On", then System > Projectors > Refresh details |
 | The mapped picture stutters | Map at 1920x1080 or less on a Pi 4, and leave Edit on the display when you are done (editing costs more) |
 | Schedule fires at the wrong time | Check the box clock shown on the Schedule card and the time zone |
+| Someone is helping you from far away | System > Diagnostics > Download diagnostics file, and send it; it holds no PIN or password |
+| The box should go to someone else, or start over | System > Factory reset |
 
 ## 8. Not built yet
 

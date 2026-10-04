@@ -89,7 +89,7 @@ class ValidateTest(unittest.TestCase):
             self.refused({"scenes": [self.scene(groups=[row])]})
 
     def test_the_box_does_only_what_is_on_the_list(self):
-        self.assertEqual(sorted(room.BOX), ["blackout", "file", "leave", "pad", "stop", "stream"])
+        self.assertEqual(sorted(room.BOX), ["blackout", "file", "leave", "pad", "stop", "stream", "vibes", "vibes_stop"])
         for box in ({"action": "reboot"}, {"action": "file", "file": "../etc/passwd"}, {"action": "file", "file": "notes.txt"},
                     {"action": "file", "file": "a.mp4", "loop": "yes"}, {"action": "pad", "pad": [0]}, {"action": "pad", "pad": [0, 12]},
                     {"action": "pad", "pad": [True, 1]}, {"action": "stream"}, {"action": ["stop"]}, "stop"):
@@ -516,6 +516,22 @@ class SceneTest(RoomBase):
         for bad in ({"scene": "ffffffff"}, {"number": 99}, {"number": 0}, {"name": "nope"}, {"scene": ["x"]}):
             self.assertEqual(self.post("/api/room/scene", bad)[0], 404, bad)
         self.assertEqual(self.post("/api/room/scene", {})[0], 400)
+
+
+class VibesBoxTest(RoomBase):
+    def test_a_scene_starts_and_stops_vibes_through_its_own_api(self):
+        self.scene("Ambience", [], {"action": "vibes"})
+        self.scene("Quiet", [], {"action": "vibes_stop"})
+        body = self.post("/api/room/scene", {"name": "Ambience"})[1]                      # the Shaders and Vibes module is off
+        self.assertEqual(body["box"], {"ok": False, "text": "turn on the Shaders and Vibes module in System first"})
+        asked = []
+        self.api.vibes.api_vibes = lambda b, device, client: asked.append((b, device["role"])) or {"running": b["on"]}
+        self.post("/api/blackout", {"on": True})
+        self.assertEqual(self.post("/api/room/scene", {"name": "Ambience"})[1]["box"], {"ok": True, "text": "Vibes"})
+        self.assertFalse(self.api.mix["blackout"])
+        self.assertEqual(self.post("/api/room/scene", {"name": "Quiet"})[1]["box"], {"ok": True, "text": "Vibes stopped"})
+        self.assertEqual(asked, [({"on": True}, "live"), ({"on": False}, "live")])
+        self.assertEqual(self.job()["text"], "Box: Vibes stopped.")
 
 
 class ScheduleOscMidiTest(RoomBase):

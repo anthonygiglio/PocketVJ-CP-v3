@@ -146,6 +146,8 @@
       if (b.action === 'stream') parts.push('Box: play a saved stream');
       if (b.action === 'stop') parts.push('Box: stop');
       if (b.action === 'blackout') parts.push('Box: blackout');
+      if (b.action === 'vibes') parts.push('Box: start Vibes');
+      if (b.action === 'vibes_stop') parts.push('Box: stop Vibes');
       return parts.join(' · ') || 'Does nothing yet';
     }
     function learn(s) {  // give a MIDI control this scene: the same Learn as System > MIDI controllers
@@ -252,6 +254,7 @@
       var b = draft.scene.box, media = c.state.media || [];
       var kinds = [['leave', 'The box: leave alone'], ['file', 'The box plays a clip'], ['pad', 'The box plays a pad']];
       if (c.moduleOn('inputs-srt')) kinds.push(['stream', 'The box plays a saved stream']);
+      if (c.moduleOn('shaders')) kinds.push(['vibes', 'The box starts Vibes (shaders)'], ['vibes_stop', 'The box stops Vibes']);
       kinds.push(['stop', 'The box stops its clip'], ['blackout', 'The box goes black']);
       if (!b.file && media.length) b.file = media[0];
       var file = choose('Clip to play', media.map(function (n) { return [n, n]; }), b.file, function (v) { b.file = v; }, 'roomsfile');

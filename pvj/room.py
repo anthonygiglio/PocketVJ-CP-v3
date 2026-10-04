@@ -87,6 +87,8 @@ BOX = {
     "stream": (_box_stream, lambda b: [("/api/play", {"stream": b["stream"]})], True),
     "stop": (lambda b: {}, lambda b: [("/api/control", {"action": "stop"})], False),
     "blackout": (lambda b: {}, lambda b: [("/api/blackout", {"on": True})], False),
+    "vibes": (lambda b: {}, lambda b: [("/api/vibes", {"on": True})], True),             # the shader rotation (vibes.py)
+    "vibes_stop": (lambda b: {}, lambda b: [("/api/vibes", {"on": False})], False),
 }
 
 
@@ -451,7 +453,7 @@ class Room:
         if action not in BOX or action == "leave":
             return None
         _clean, calls, shows = BOX[action]
-        text = {"stop": "stopped", "blackout": "blackout"}.get(action, "playing")
+        text = {"stop": "stopped", "blackout": "blackout", "vibes": "Vibes", "vibes_stop": "Vibes stopped"}.get(action, "playing")
         try:
             todo = calls(box)
             if shows:

@@ -321,6 +321,7 @@
             var on = !(S.status && S.status.player && S.status.player.test_pattern);
             act('POST', '/api/testpattern', { on: on }, poll);
           } }))),
+      window.pvjShaders ? window.pvjShaders.liveRow(shaderCtx()) : null,
       previewBlock(),
       h('div', { class: 'banks' }, S.banks.map(function (b, i) {
         return h('button', { class: 'btn' + (i === S.bank ? ' on' : ''), text: b.name.replace('Bank ', 'Bank '), 'aria-pressed': i === S.bank ? 'true' : 'false',
@@ -378,6 +379,8 @@
     bar.addEventListener('pointerup', function () { setTimeout(function () { seeking = false; }, 1500); });
     return bar;
   }
+  // Shaders and Vibes lives in shaders.js; it borrows these helpers.
+  function shaderCtx() { return { h: h, api: api, act: act, can: can, say: say, poll: poll, moduleOn: moduleOn, state: S }; }
   function patchLive() {
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};
     var np = document.getElementById('np');
@@ -395,6 +398,7 @@
     if (pl.test_pattern) np.textContent = 'Test pattern (colour bars)';
     if (pl.test_tone) np.textContent = 'Test tone (' + pl.test_tone + ')';
     if (pl.capture) np.textContent = 'Live input' + (pl.capture.device ? ' (' + pl.capture.device + ', ' + pl.capture.mode + ')' : '');
+    if (window.pvjShaders) window.pvjShaders.patch(shaderCtx(), pl, np);
     var temp = typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : '';
     document.getElementById('pill').textContent = [sys.board, temp, pl.running ? 'OK' : 'No player'].filter(Boolean).join(' · ');
     var f = document.getElementById('freeze'); if (f) f.textContent = pl.paused ? 'Resume' : 'Freeze';
@@ -481,6 +485,7 @@
             onclick: function () { act('POST', '/api/control', { action: 'flip_v', value: !m.flip_v }, function () { poll(); setTimeout(render, 200); }); } }))),
       overlayCard(),
       mapperCard(),
+      window.pvjShaders ? window.pvjShaders.card(shaderCtx()) : null,
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Rotate' }),
         choice([0, 90, 180, 270].map(function (d) { return { label: d + '°', value: d }; }), m.rotate === undefined ? 0 : m.rotate,
@@ -974,6 +979,7 @@
     cards.push(modulesCard(full), audioCard(full), autostartCard(full), streamsCard(full), projectorsCard(full), syncCard());
     if (full || (S.device && S.device.remote)) cards.push(supportCard());
     if (full) cards.push(updateCard());
+    if (full) cards.push.apply(cards, boxCareCards());
     if (full) cards.push(scheduleCard(), networkCard(), oscCard(), dmxCard(), midiCard(), appearanceCard(), accessCard(), h('div', { class: 'card' }, h('h2', { text: 'Player' }),
       h('button', { class: 'btn', text: 'Restart player now', onclick: function () { act('POST', '/api/player/restart', {}, function () { say('Player restarting. The service brings it straight back.'); }); } })));
     cards.push(h('button', { class: 'btn', text: 'Forget this device', onclick: function () {
@@ -1089,7 +1095,7 @@
       body.textContent = '';
       body.appendChild(h('div', { class: 'k', id: 'dmxline', text: d.error ? 'Problem: ' + d.error :
         (d.listening ? 'Listening on UDP ' + d.port + ' (' + d.received + ' frames for this universe)' : 'Off') }));
-      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + 7) + ': ' + d.channels.join(' ') }));
+      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + d.channels.length - 1) + ': ' + d.channels.join(' ') }));
       var proto = h('select', { class: 'text-input', id: 'dmxproto', 'aria-label': 'Protocol' },
         [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)']].map(function (p) { return h('option', { value: p[0], text: p[1], selected: p[0] === d.protocol }); }));
       var uni = h('input', { class: 'text-input mono', id: 'dmxuni', type: 'number', 'aria-label': 'Universe', value: dmxForm.universe === null ? d.universe : dmxForm.universe });
@@ -1109,7 +1115,7 @@
       body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'dmxtoggle', text: d.enabled ? 'DMX is on. Turn off' : 'Turn DMX on',
         onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
       body.appendChild(proto); body.appendChild(h('label', { class: 'k', for: 'dmxuni', text: 'Universe' })); body.appendChild(uni);
-      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels)' })); body.appendChild(start); body.appendChild(allow);
+      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels; a ninth, if sent, is Vibes)' })); body.appendChild(start); body.appendChild(allow);
       body.appendChild(h('button', { class: 'btn small', id: 'dmxsave', text: 'Save', onclick: function () { send(fields()); } }));
       body.appendChild(h('div', { class: 'k', text: 'Off until you turn it on. Only private networks may send. The first frame only sets a starting point, and the box holds its last state if the signal stops.' }));
     }
@@ -1122,7 +1128,8 @@
   }
   var MIDI_ACTIONS = [['pad', 'Play a pad'], ['stop', 'Stop'], ['pause', 'Pause / resume'], ['blackout', 'Blackout on / off'], ['fadeout', 'Fade out'],
     ['reset', 'Reset mix'], ['opacity', 'Opacity (fader)'], ['size', 'Size (fader)'], ['position', 'Position X (fader)'], ['speed', 'Speed (fader)'],
-    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)']];
+    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)'],
+    ['vibes', 'Vibes on / off'], ['vibes_next', 'Vibes: next shader'], ['vibes_dwell', 'Vibes: time each shader stays (fader)']];
   var midiForm = { action: 'opacity', bank: 0, index: 0 };  // survives redraws
   var midiTimer = null;
   function midiCard() {
@@ -1250,7 +1257,8 @@
     var body = h('div', { class: 'list', id: 'autobody' });
     var card = h('div', { class: 'card', id: 'autocard' }, h('h2', { text: 'Autostart' }), body);
     var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['slideshow', 'Slideshow of the pictures'],
-      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script']];
+      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script'],
+      ['vibes', 'Vibes: shaders, endlessly (needs the Shaders and Vibes module)']];
     function padName(p) {
       var b = (S.banks || [])[p[0]], pad = b && b.pads && b.pads[p[1]];
       return 'Bank ' + (p[0] + 1) + ', pad ' + (p[1] + 1) + (pad && (pad.label || pad.file) ? ': ' + (pad.label || pad.file) : '');
@@ -1441,6 +1449,104 @@
     }
     refresh();
     return card;
+  }
+
+  // ---- box care: settings export and import, diagnostics, factory reset (pvj/boxcare.py) ----
+  var careForm = { passwords: false, media: '' };   // survives redraws
+  function saveFile(name, data) {
+    var url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' }));
+    var a = h('a', { href: url, download: name, hidden: true });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+  function boxCareCards() {
+    var pw = document.getElementById('exportpw'), md = document.getElementById('resetmedia');
+    if (pw) careForm.passwords = pw.checked;       // read from the page before it is rebuilt (an event can be lost)
+    if (md) careForm.media = md.value;
+    var remote = !!(S.device && S.device.remote);
+    var cards = [];
+
+    // settings
+    var tick = h('input', { type: 'checkbox', id: 'exportpw', checked: careForm.passwords });
+    tick.addEventListener('change', function () { careForm.passwords = tick.checked; });
+    var result = h('div', { class: 'k', id: 'importresult', role: 'status' });
+    var pick = h('input', { type: 'file', id: 'importpick', accept: '.json,application/json', hidden: true });
+    pick.addEventListener('change', function () {
+      var f = pick.files && pick.files[0];
+      pick.value = '';
+      if (!f) return;
+      if (!window.confirm('Replace this box\'s settings with ' + f.name + '? The PIN, the paired devices and remote support stay as they are. A copy of the present settings is kept on the box.')) return;
+      say('Importing ' + f.name + '...');
+      fetch('/api/system/settings/import?confirm=import', { method: 'POST', credentials: 'same-origin',
+        headers: { 'X-PVJ-Request': '1', 'Content-Type': 'application/json' }, body: f })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, data: j }; }); },
+          function () { return { ok: false, status: 0, data: { error: 'no connection' } }; })
+        .then(function (r) {
+          if (!r.ok) return say(r.data.error || 'The import failed (HTTP ' + r.status + ')', true);
+          var lines = (r.data.problems || []).map(function (t) { return 'Check: ' + t; }).concat(r.data.notes || []);
+          if (!r.data.passwords_in_file) lines.push('The file holds no passwords; ' + r.data.passwords_kept + ' already on this box were kept.');
+          loadAll().then(function () {
+            render();
+            say('Settings imported.' + (r.data.problems && r.data.problems.length ? ' Some parts need a look (see the Settings file card).' : ''));
+            var el = document.getElementById('importresult');
+            if (el) el.textContent = lines.join(' · ');
+          });
+        });
+    });
+    cards.push(h('div', { class: 'card', id: 'settingscard' }, h('h2', { text: 'Settings file' }),
+      h('div', { class: 'list' },
+        h('div', { class: 'k', text: 'Save this box\'s settings as one file, or load them from one. The PIN, the paired devices and remote support are never in the file.' }),
+        remote ? null : h('label', { class: 'row', for: 'exportpw' }, tick, h('span', { text: 'Include projector passwords and stream logins (keep that file private)' })),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small grow', id: 'exportbtn', text: 'Export settings', onclick: function () {
+            act('POST', '/api/system/settings/export', { passwords: !remote && tick.checked }, function (d) {
+              saveFile(d.name, d.file);
+              say('Settings saved as ' + d.name + (d.file.passwords_included ? ' (with passwords).' : ' (no passwords in it).'));
+            });
+          } }),
+          remote ? null : h('button', { class: 'btn small grow', id: 'importbtn', text: 'Import settings...', onclick: function () { pick.click(); } })),
+        pick, result)));
+
+    // diagnostics
+    var note = h('div', { class: 'k', id: 'diagnote', role: 'status' });
+    cards.push(h('div', { class: 'card', id: 'diagcard' }, h('h2', { text: 'Diagnostics' }),
+      h('div', { class: 'list' },
+        h('div', { class: 'k', text: 'One file to send to whoever is helping you: versions, the board, modules, health and the settings. No PIN, password, code or key is in it.' }),
+        h('button', { class: 'btn small', id: 'diagbtn', text: 'Download diagnostics file', onclick: function () {
+          act('GET', '/api/system/diagnostics', null, function (d) {
+            saveFile(d.name, d.file);
+            say('Diagnostics saved as ' + d.name + '.');
+            note.textContent = d.file.log && d.file.log.note ? 'Log: ' + d.file.log.note : '';
+          });
+        } }),
+        note)));
+
+    // factory reset: never through remote support
+    if (!remote) {
+      var media = h('select', { class: 'text-input', id: 'resetmedia', 'aria-label': 'What happens to the clips' },
+        [['', 'What happens to the clips?'], ['keep', 'Keep the clips on the box'], ['delete', 'Delete the clips too']].map(function (o) {
+          return h('option', { value: o[0], text: o[1], selected: o[0] === careForm.media });
+        }));
+      media.addEventListener('change', function () { careForm.media = media.value; });
+      cards.push(h('div', { class: 'card', id: 'resetcard' }, h('h2', { text: 'Factory reset' }),
+        h('div', { class: 'list' },
+          h('div', { class: 'k', text: 'Every setting goes back to how a new box starts, and every phone, tablet and guest is unpaired. You pair again with the new PIN on the box\'s display.' }),
+          media,
+          h('button', { class: 'btn small', id: 'resetbtn', text: 'Reset to factory settings', onclick: function () {
+            if (!media.value) return say('Choose what happens to the clips first.', true);
+            var clips = media.value === 'delete' ? 'ALL CLIPS ON THE BOX ARE DELETED.' : 'The clips stay.';
+            if (!window.confirm('Reset this box to factory settings? All settings are lost and every device is unpaired, this one too. ' + clips + ' This cannot be undone.')) return;
+            act('POST', '/api/system/factory-reset', { confirm: 'factory-reset', media: media.value }, function () {
+              careForm = { passwords: false, media: '' };
+              S.device = null;
+              S.msg = '';
+              render();
+            });
+          } }))));
+    }
+    return cards;
   }
 
   // ---- multi-box sync and video wall -----------------------------------
@@ -1677,7 +1783,7 @@
     function describe(e) {
       if (e.action === 'scene') return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · Scene ' + (window.pvjRoom ? window.pvjRoom.sceneName(e.scene) : e.scene);
       var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'preset' ? 'Start script ' + e.preset :
-        ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off' })[e.action] || e.action;
+        ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off', vibes: 'Start Vibes' })[e.action] || e.action;
       return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · ' + what;
     }
     function draw(d) {
@@ -1708,7 +1814,7 @@
       }));
       var action = h('select', { class: 'text-input', id: 'schedaction', 'aria-label': 'What to do' },
         [['play', 'Play a clip'], ['preset', 'Run a legacy start script'], ['stop', 'Stop the clip'], ['blackout', 'Blackout'], ['show', 'Show screen'],
-          ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off']].map(function (a) {
+          ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off'], ['vibes', 'Start Vibes (shaders)']].map(function (a) {
           return h('option', { value: a[0], text: a[1], selected: a[0] === schedForm.action });
         }));
       var scene = window.pvjRoom ? window.pvjRoom.scheduleField(roomCtx(), action, schedForm, function () { draw(d); }) : null;

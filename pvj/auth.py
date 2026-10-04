@@ -86,7 +86,7 @@ class Auth:
 
     def rotate_pin(self):
         """New PIN. A paired owner uses this to get past a lockout someone else provoked."""
-        with self.settings.lock, self._pair_lock:
+        with self._pair_lock, self.settings.lock:        # the order pair() takes them in
             self._fails.clear()
             self._global_fails = []
             self._locked_until.clear()

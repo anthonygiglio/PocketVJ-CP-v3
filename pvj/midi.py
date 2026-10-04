@@ -12,7 +12,8 @@ Limits:
 * Off until switched on. Only paths of the form /dev/snd/midiC<n>D<n> are ever opened (never an arbitrary file),
   and only if they are character devices.
 * Receive only; nothing is written to a device.
-* Only play (pads), stop, pause, fade, blackout, reset, opacity, size, position, speed and volume are reachable.
+* Only play (pads), stop, pause, fade, blackout, reset, opacity, size, position, speed, volume and the shader
+  rotation (Vibes on or off, next shader, dwell time) are reachable.
 * No more than 50 commands a second reach the player, whatever the controllers send.
 * The web service needs the `audio` group and read access to ALSA devices (the systemd unit has both).
 """
@@ -46,7 +47,11 @@ ACTIONS = {
     "opacity": ("level", 0, 100), "size": ("level", 1, 200), "position": ("level", -100, 100),
     "speed": ("level", 0.25, 2.0), "volume": ("level", 0, 100),
     "blackout_hold": ("level", None, None),      # on while the control is up at 64 or more, off below
+    # The shader rotation (the Shaders and Vibes module): a press switches it on or off, another goes to the next
+    # shader, and a knob or fader chooses how long each shader stays from VIBES_DWELLS.
+    "vibes": ("trigger", None, None), "vibes_next": ("trigger", None, None), "vibes_dwell": ("level", None, None),
 }
+VIBES_DWELLS = (15, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1200, 1800, 3600)      # seconds, bottom to top
 KINDS = ("note", "cc", "program")
 
 
@@ -190,6 +195,7 @@ class MidiMapper:
         self.pending = {}       # same key -> newest level not yet applied
         self._pressed = {}      # same key -> was it "down" last time (so a held or repeated value fires once)
         self.last_message = None
+        self.vibes_on = lambda: False       # is the shader rotation running (for the on/off toggle); the hub sets it
 
     def matching(self, source, kind, channel, number):
         """Entries for this control. If the user has mapped it, only their entries apply: a learned mapping replaces
@@ -212,6 +218,10 @@ class MidiMapper:
             return [("/api/fadeout", {"seconds": 2})]
         if a == "blackout":
             return [("/api/blackout", {"on": None})]           # None: toggle, decided by the caller from the live state
+        if a == "vibes":
+            return [("/api/vibes", {"on": None})]              # a toggle too
+        if a == "vibes_next":
+            return [("/api/vibes", {"next": True})]
         return []
 
     @staticmethod
@@ -219,6 +229,8 @@ class MidiMapper:
         a = e["action"]
         if a == "blackout_hold":
             return [("/api/blackout", {"on": value >= 64})]
+        if a == "vibes_dwell":
+            return [("/api/vibes", {"dwell": VIBES_DWELLS[min(len(VIBES_DWELLS) - 1, value * len(VIBES_DWELLS) // 128)]})]
         _, lo, hi = ACTIONS[a]
         return [("/api/control", {"action": a, "value": round(lo + (hi - lo) * value / 127.0, 2)})]
 
@@ -258,6 +270,8 @@ class MidiMapper:
         for path, body in self.plan(source, msg):
             if path == "/api/blackout" and body.get("on") is None:
                 body = {"on": not self.mix.get("blackout", False)}
+            if path == "/api/vibes" and "on" in body and body["on"] is None:
+                body = {"on": not self.vibes_on()}
             done += int(bool(self.do(path, body)))
         return done
 
@@ -361,6 +375,7 @@ class MidiHub:
         self.captured = None
         self._quiet = None
         self._quiet_until = 0.0
+        self._vibes_off_said = False
 
     # --- calls into the player ------------------------------------------
     def _note(self, text):
@@ -373,6 +388,13 @@ class MidiHub:
         if not self.calls.allow("all"):
             self._note("too many commands a second; some were dropped")
             return False
+        if path == "/api/vibes":                           # only with the Shaders and Vibes module on; said once
+            if not self.api.registry.enabled("shaders"):
+                if not self._vibes_off_said:
+                    self._vibes_off_said = True
+                    self.log("midi: a Vibes control was used, but the Shaders and Vibes module is off; nothing was done")
+                return False
+            self._vibes_off_said = False
         status, payload = self.api.handle("POST", path, body, MIDI_DEVICE, "midi")
         if status != 200:
             self._note("%s -> %s %s" % (path, status, payload.get("error", "")))
@@ -399,6 +421,8 @@ class MidiHub:
         for path, body in calls:
             if path == "/api/blackout" and body.get("on") is None:
                 body = {"on": not self.api.mix.get("blackout", False)}
+            if path == "/api/vibes" and "on" in body and body["on"] is None:
+                body = {"on": not self.api.vibes.running}
             self._do(path, body)
 
     def on_message(self, source, msg):

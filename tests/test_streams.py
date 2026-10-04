@@ -1,10 +1,38 @@
 # SPDX-FileCopyrightText: 2026 NXLX.Systems and contributors
 # SPDX-License-Identifier: Apache-2.0
+import json
 import unittest
 
 from pvj import streams
 from pvj.settings import Settings
 from tests.test_server import ServerBase
+
+
+SRT = "srt://192.168.1.61:9000?mode=caller&latency=120"
+SRT_ID = "#!::r=live/cam 1,m=request,u=bob-s4"
+# (the address, the same without its secrets, the secrets in it); tests/test_boxcare.py uses the list too
+ADDRESSES = (
+    ("rtsp://user-s1:pw-s2@192.168.1.60:554/live?x=1", "rtsp://192.168.1.60:554/live?x=1", ("user-s1", "pw-s2")),
+    ("rtsp://user-s1@cam.local/live", "rtsp://cam.local/live", ("user-s1",)),
+    ("rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b", "rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b", ()),
+    ("rtsp://cam.local/live?token=Tok-s5&res=hd&To%6ben=Tok-s6", "rtsp://cam.local/live?res=hd", ("Tok-s5", "Tok-s6")),
+    (SRT, SRT, ()),
+    (SRT + "&passphrase=Secret-1234567", SRT, ("Secret-1234567",)),
+    ("srt://192.168.1.61:9000?passphrase=Secret-1234567&" + SRT.split("?")[1], SRT, ("Secret-1234567",)),
+    ("srt://192.168.1.61:9000?PassPhrase=Secret-1234567", "srt://192.168.1.61:9000", ("Secret-1234567",)),
+    ("srt://192.168.1.61:9000?pbkeylen=16&passphrase=Secret-1234567", "srt://192.168.1.61:9000?pbkeylen=16", ("Secret-1234567",)),
+    ("srt://192.168.1.61:9000?", "srt://192.168.1.61:9000?", ()),
+    ("srt://[fe80::1]:9000?passphrase=Secret-1234567", "srt://[fe80::1]:9000", ("Secret-1234567",)),
+    ("srt://user-s1:pw-s2@192.168.1.61:9000?mode=caller", "srt://192.168.1.61:9000?mode=caller", ("user-s1", "pw-s2")),
+    ("srt://192.168.1.61:9000?mode=caller&streamid=" + SRT_ID + "&latency=120", SRT, (SRT_ID,)),
+    (SRT + "&pwd=Pwd-s7&wsSecret=Ws-s8&pass%70hrase=Enc-s9&new_option=New-s10", SRT, ("Pwd-s7", "Ws-s8", "Enc-s9", "New-s10")),
+    ("srt://192.168.1.61:9000?passphrase=Sec%72et-s11", "srt://192.168.1.61:9000", ("Sec%72et-s11", "Secret-s11")),
+    ("rtmp://user-s1:pw-s2@192.168.1.62/live/key-s3", "rtmp://192.168.1.62/live", ("user-s1", "pw-s2", "key-s3")),
+    ("rtmp://192.168.1.62/live/key-s3", "rtmp://192.168.1.62/live", ("key-s3",)),
+    ("rtmps://192.168.1.62:443/app/inst/key-s3?auth=Auth-s12&sign=Sign-s13&x", "rtmps://192.168.1.62:443/app/inst",
+     ("key-s3", "Auth-s12", "Sign-s13")),
+    ("RTMP://192.168.1.62/live/key-s3/", "RTMP://192.168.1.62/live", ("key-s3",)),
+)
 
 
 class StreamUrlTest(unittest.TestCase):
@@ -28,6 +56,31 @@ class StreamUrlTest(unittest.TestCase):
         self.assertEqual(streams.redact("rtsp://cam/stream"), "rtsp://cam/stream")
         self.assertEqual(streams.redact("/media/usb/a.mp4"), "/media/usb/a.mp4")
         self.assertEqual(streams.redact(None), None)
+        self.assertEqual(streams.redact("srt://u:p@h:9000?latency=1"), "srt://***@h:9000?latency=1")
+        self.assertEqual(streams.redact("rtsp://h:8554?res=hd&password=Secret-1234567&x=a@b/c"),
+                         "rtsp://h:8554?res=hd&password=***&x=a@b/c")
+        self.assertEqual(streams.redact("rtsp://h:8554?x=a@b"), "rtsp://h:8554?x=a@b")        # an "@" after the host is no login
+
+    def test_what_is_shown_and_what_is_exported_agree_on_every_address(self):
+        for url, bare, secrets in ADDRESSES:
+            shown = streams.redact(url)
+            self.assertEqual(streams.strip_login(url), bare)
+            if not url.lower().startswith("rtmp"):          # what ends an RTMP path counts as the key, each time
+                self.assertEqual(streams.strip_login(bare), bare)
+            self.assertEqual(shown != url, bool(secrets), url)
+            self.assertEqual(shown != url, bare != url, url)
+            self.assertEqual(sorted(streams.stream_secrets(url)), sorted(secrets))
+            for secret in secrets:
+                self.assertNotIn(secret, shown)
+                self.assertNotIn(secret, bare)
+        self.assertEqual(streams.strip_login(None), "")
+        self.assertEqual(streams.strip_login("not an address"), "")
+        self.assertEqual(streams.redact("rtmp://192.168.1.62/live/key-s3?auth=Auth-s12&x"), "rtmp://192.168.1.62/live/***?auth=***&***")
+        self.assertEqual(streams.redact("srt://h:9000?mode=caller&streamid=" + SRT_ID), "srt://h:9000?mode=caller&streamid=***")
+        for name in ("mode", "latency", "pbkeylen"):
+            self.assertIn(name, streams.SRT_PLAIN)
+        for name in ("passphrase", "streamid", "password", "pwd", "key", "token"):
+            self.assertNotIn(name, streams.SRT_PLAIN)
 
     def test_names(self):
         self.assertEqual(streams.clean_name("  Stage cam "), "Stage cam")
@@ -103,6 +156,23 @@ class StreamApiTest(ServerBase):
         self.player.status = lambda: {"running": True, "path": "rtsp://admin:pw@10.0.0.5/live"}
         p = self.call("GET", "/api/status", token=self.invite("view"))[1]["player"]
         self.assertEqual((p["path"], p["stream"]), ("rtsp://***@10.0.0.5/live", "Cam"))
+
+    def test_no_secret_of_any_address_reaches_a_view_device(self):
+        """A guest sees the list of streams and the player status: neither holds a login or a passphrase."""
+        self.enable()
+        view = self.invite("view")
+        for url, _bare, secrets in ADDRESSES:
+            self.settings.data["streams"] = [{"id": "abcd1234", "name": "Cam", "url": url}]
+            self.player.status = lambda: {"running": True, "path": url}
+            listed = self.call("GET", "/api/streams", token=view)[1]
+            status = self.call("GET", "/api/status", token=view)[1]
+            self.assertEqual(status["player"]["stream"], "Cam")
+            self.assertEqual(listed["streams"][0]["has_login"], bool(secrets), url)
+            for secret in secrets:
+                self.assertNotIn(secret, json.dumps(listed), url)
+                self.assertNotIn(secret, json.dumps(status), url)
+        self.settings.data["streams"] = [{"id": "abcd1234", "name": "Truck", "url": "srt://192.168.1.61:9000?passphrase=Secret-1234567"}]
+        self.assertTrue(self.call("GET", "/api/streams", token=view)[1]["streams"][0]["has_login"])     # a passphrase alone counts
 
     def test_roles(self):
         self.enable()
