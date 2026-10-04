@@ -11,8 +11,9 @@ import time
 import unittest
 from unittest import mock
 
-from pvj import boxcare, settings as settings_mod
+from pvj import boxcare, settings as settings_mod, streams as streams_mod
 from pvj.api import ApiError
+from tests.test_streams import ADDRESSES
 from tests.test_support import CFG, LAN, TUNNEL, SupportBase
 
 PROJECTOR_PASSWORD = "Pj-Sentinel-77"
@@ -108,23 +109,10 @@ class StrictJsonTest(unittest.TestCase):
 
 class StreamAddressTest(unittest.TestCase):
     def test_only_the_secrets_are_cut_and_every_other_byte_stays(self):
-        srt = "srt://192.168.1.61:9000?mode=caller&streamid=#!::r=live/cam 1,m=request&latency=120"
-        for url, want in (
-                ("rtsp://user:pw@192.168.1.60:554/live?x=1", "rtsp://192.168.1.60:554/live?x=1"),
-                ("rtsp://user@cam.local/live", "rtsp://cam.local/live"),
-                ("rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b", "rtsp://192.168.1.60/a%20b/c?q=%41&r=a+b"),
-                (srt, srt),
-                (srt + "&passphrase=Secret-1234567", srt),
-                ("srt://192.168.1.61:9000?passphrase=Secret-1234567&" + srt.split("?")[1], srt),
-                ("srt://192.168.1.61:9000?PassPhrase=Secret-1234567", "srt://192.168.1.61:9000"),
-                ("srt://192.168.1.61:9000?pbkeylen=16&passphrase=x", "srt://192.168.1.61:9000?pbkeylen=16"),
-                ("srt://192.168.1.61:9000?", "srt://192.168.1.61:9000?"),
-                ("srt://[fe80::1]:9000?passphrase=x", "srt://[fe80::1]:9000"),
-                ("rtmp://u:p@192.168.1.62/live/key", "rtmp://192.168.1.62/live/key")):
+        for url, want, _secrets in ADDRESSES:
             self.assertEqual(boxcare.strip_login(url), want)
             self.assertEqual(boxcare.strip_login(want), want)
-        self.assertEqual(boxcare.strip_login(None), "")
-        self.assertEqual(boxcare.strip_login("not an address"), "")
+        self.assertIs(boxcare.strip_login, streams_mod.strip_login)       # one rule, for the panel and for the files
 
     def test_the_secret_pieces_are_found_even_behind_a_hash(self):
         url = "srt://me:pw-1@192.168.1.61:9000?streamid=#!::r=live&passphrase=Phrase-9"

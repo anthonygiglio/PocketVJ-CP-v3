@@ -36,7 +36,6 @@ import socket
 import subprocess
 import threading
 import time
-from urllib.parse import urlsplit
 
 from . import dmx as dmx_mod, midi as midi_mod, osc as osc_mod, projector as projector_mod, streams as streams_mod
 from . import mapper as mapper_mod, scheduler as scheduler_mod, sync as sync_mod, themes as themes_mod
@@ -56,7 +55,7 @@ KEEP_IMPORT_BACKUPS = 3
 LOG_UNITS = ("pvj-web.service", "pvj-player.service", "pvj-sysd.service", "pvj-netd.service", "pvj-supportd.service")
 LOG_LINES, LOG_LINE_MAX = 300, 400
 CONFIRM_IMPORT, CONFIRM_RESET = "import", "factory-reset"
-SECRET_QUERY = ("passphrase", "password", "pass", "token", "key", "secret")
+SECRET_QUERY = streams_mod.SECRET_QUERY
 _ID = re.compile(r"[0-9a-f]{8}")
 _SECRET_KEY = re.compile(r"pass|secret|token|salt|hash|credential|(^|_)(pin|key|code|login)(_|$)", re.I)
 _LOG_PIN = re.compile(r"(?i)\b(pin|code)\b([ :=]+)(?=[A-Za-z-]*[0-9])[A-Za-z0-9-]{4,}")
@@ -132,56 +131,8 @@ def _depth(value):
     return deepest
 
 
-# ---- stream addresses --------------------------------------------------------------------------------------------
-def _stream_parts(url):
-    """(scheme, login or "", host and port, path, [query pairs as written]) by cutting the text, not by parsing and
-    rebuilding it: an SRT streamid may hold "#" and "," and must come out byte for byte as it went in."""
-    if not isinstance(url, str) or "://" not in url:
-        return None
-    scheme, rest = url.split("://", 1)
-    cut = re.search(r"[/?#]", rest)
-    authority, tail = (rest[:cut.start()], rest[cut.start():]) if cut else (rest, "")
-    login, _, host = authority.rpartition("@")
-    path, mark, query = tail.partition("?")
-    return scheme, login, host, path, (query.split("&") if mark else None)
-
-
-def _secret_pair(pair):
-    return pair.split("=", 1)[0].lower() in SECRET_QUERY
-
-
-def strip_login(url):
-    """A stream address without its secrets: no user name and password, no passphrase (or the like) in the query.
-    Everything else stays exactly as it was written."""
-    parts = _stream_parts(url)
-    if parts is None:
-        return ""
-    scheme, _login, host, path, query = parts
-    if query is None:
-        return scheme + "://" + host + path
-    kept = [p for p in query if not _secret_pair(p)]
-    if len(kept) == len(query):                      # nothing secret in it: the query stays as written, even an empty one
-        return scheme + "://" + host + path + "?" + "&".join(query)
-    return scheme + "://" + host + path + ("?" + "&".join(kept) if kept else "")
-
-
-def stream_secrets(url):
-    """The secret pieces of a stream address (user name, password, passphrase), to scrub from any text."""
-    parts = _stream_parts(url)
-    if parts is None:
-        return []
-    out = [x for x in parts[1].split(":", 1) if x]
-    out += [p.split("=", 1)[1] for p in parts[4] or [] if _secret_pair(p) and "=" in p]
-    return out
-
-
-def stream_where(url):
-    """Only where a stream comes from (scheme, host, port), for diagnostics: a path can be a stream key."""
-    try:
-        parts = urlsplit(url)
-        return "%s://%s%s" % (parts.scheme, parts.hostname or "?", ":%d" % parts.port if parts.port else "")
-    except (ValueError, AttributeError):
-        return "?"
+# ---- stream addresses (what is secret in one is decided in streams.py, for the panel and for the files alike) ------
+strip_login, stream_secrets, stream_where = streams_mod.strip_login, streams_mod.stream_secrets, streams_mod.stream_where
 
 
 # ---- the section checks (each: the section from the file -> a clean section; raises on anything wrong) -----------

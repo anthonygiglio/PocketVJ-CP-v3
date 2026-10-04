@@ -792,7 +792,7 @@ class Api:
     def get_streams(self, body, device, client):
         self._need_streams()
         return {"streams": [{"id": s["id"], "name": s["name"], "url": streams_mod.redact(s["url"]),
-                             "has_login": s["url"] != streams_mod.redact(s["url"])}
+                             "has_login": streams_mod.redact(s["url"]) != s["url"]}
                             for s in self.settings.data["streams"]],
                 "schemes": list(streams_mod.SCHEMES)}
 
