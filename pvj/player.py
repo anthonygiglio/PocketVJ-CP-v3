@@ -139,7 +139,7 @@ class Ipc:
 class Player:
     # Defaults for a Player made without __init__ (some tests do); __init__ gives every player its own lock.
     _lock = threading.RLock()
-    _mapping_shaders, _mapping_mode, _source, _source_pid, source_epoch = [], False, None, None, 0
+    _mapping_shaders, _mapping_mode, _source, _source_pid, _carrier, source_epoch = [], False, None, None, None, 0
 
     def __init__(self, mpv_bin="mpv", extra_args=None, rundir=None):
         self.mpv_bin = mpv_bin
@@ -156,6 +156,7 @@ class Player:
         self._mapping_mode = False
         self._source = None         # the generator shader file, only while its carrier picture is playing
         self._source_pid = None     # the mpv it was given to; a restarted mpv has lost it
+        self._carrier = None        # the blank picture the source is drawn over, while it plays
         self.source_epoch = 0       # goes up each time what is playing changes hands; a shader rotation checks it
 
     # --- lifecycle -------------------------------------------------------
@@ -390,8 +391,10 @@ class Player:
         an idle player does not report the last clip's looping (the panel's Loop button read "on" with nothing
         playing, seen on the Pi after the test pattern); every play sets them again."""
         with self._lock:
-            self.ipc.request("stop")
-            self._end_source()
+            try:
+                self.ipc.request("stop")
+            finally:
+                self._end_source()      # also when the player is down: the screen has changed hands either way
             self.ipc.request("set_property", "loop-file", "no")
             self.ipc.request("set_property", "loop-playlist", "no")
 
@@ -439,8 +442,22 @@ class Player:
             self._mapping_mode = bool(on)
             self._apply_fbo()
 
+    def _check_source(self):
+        """Forget a shader source that was given to an mpv that has since been restarted: the carrier is gone, so the
+        source must go too, and the screen has changed hands."""
+        if self._source is None and self._carrier is None:
+            return
+        try:
+            same = self.ipc.request("get_property", "pid") == self._source_pid
+        except PlayerError:
+            same = False
+        if not same:
+            self._source = self._carrier = None
+            self.source_epoch += 1
+
     def _apply_fbo(self):
         """8-bit GPU buffers while a mapping or a shader source adds a pass, mpv's own choice otherwise."""
+        self._check_source()
         self.ipc.request("set_property", "fbo-format", "rgba8" if (self._mapping_mode or self._source) else "auto")
 
     def set_shaders(self, paths):
@@ -451,25 +468,51 @@ class Player:
             self._push_shaders()
 
     def _push_shaders(self):
-        if self._source is not None:
-            try:
-                same = self.ipc.request("get_property", "pid") == self._source_pid
-            except PlayerError:
-                same = False
-            if not same:                      # mpv was restarted: the carrier is gone, so the source must go too
-                self._source = None
+        self._check_source()
         self.ipc.request("set_property", "glsl-shaders", ([self._source] if self._source else []) + self._mapping_shaders)
 
     def _end_source(self):
         """Something else takes the screen: the shader source comes off (a player that is down has lost it anyway)."""
         self.source_epoch += 1
-        if self._source is not None:
-            self._source = None
+        had, self._source, self._carrier = self._source, None, None
+        if had is not None:
             try:
                 self._push_shaders()
                 self._apply_fbo()
             except PlayerError:
                 pass
+
+    def claim_screen(self):
+        """Something else is about to be played but has not been loaded yet (a clip waiting for its dip to black):
+        from now on a shader rotation no longer owns the screen. The source itself stays until the clip loads."""
+        with self._lock:
+            self.source_epoch += 1
+
+    def source_opacity(self, value, epoch):
+        """Set the opacity (0 to 255) only while `epoch` is still current; the check and the change are one step, so
+        a rotation's own fade can never darken a clip that was started meanwhile. True if it was done."""
+        with self._lock:
+            if epoch != self.source_epoch:
+                return False
+            self.opacity(value)
+            return True
+
+    def opacity_now(self):
+        """The opacity the picture has at this moment, 0 to 100 percent, or None if the player cannot say."""
+        try:
+            b = self.ipc.request("get_property", "brightness")
+        except PlayerError:
+            return None
+        return max(0.0, min(100.0, 100.0 + b)) if isinstance(b, (int, float)) and not isinstance(b, bool) else None
+
+    def clear_source(self, epoch):
+        """Stop the carrier and its shader, only if `epoch` is still current and a carrier is what plays. True if done.
+        The check and the stop are one step: a clip started in between is never stopped."""
+        with self._lock:
+            if epoch != self.source_epoch or self._carrier is None:
+                return False
+            self.clear()
+            return True
 
     @property
     def source_shader(self):
@@ -498,14 +541,19 @@ class Player:
                 except PlayerError:
                     current = None
                 if current != carrier:
-                    self.ipc.request("set_property", "keep-open", "no")
                     self.ipc.request("loadfile", carrier, "replace")
                     self._wait_for_path(carrier)
+                    if self.ipc.request("get_property", "path") != carrier:
+                        raise PlayerError("the player did not start the blank picture the shader is drawn on")
+                    self.ipc.request("set_property", "keep-open", "no")     # only once the carrier is what plays
+                self._carrier = carrier
                 self.ipc.request("set_property", "pause", False)
                 self.ipc.request("set_property", "loop-file", "no")
                 self.ipc.request("set_property", "loop-playlist", "no")
             except PlayerError:
                 self._source = previous if previous != shader else None
+                if self._source is None:
+                    self._carrier = None
                 try:
                     self._push_shaders()
                     self._apply_fbo()

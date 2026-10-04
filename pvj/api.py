@@ -759,6 +759,9 @@ class Api:
         loop = ending == "loop"
         transition = self.settings.data["mix"]
         playing = self._player_call(self.player.status).get("running")
+        claim = getattr(self.player, "claim_screen", None)
+        if claim:            # with a dip the clip loads later; a shader rotation must know now that the screen is taken
+            claim()
         self.fader.cancel()  # a fade still running from an earlier action must not darken the new clip
 
         dip = transition["transition"] == "dip" and not self.mix["blackout"]

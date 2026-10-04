@@ -8,10 +8,18 @@ values between their MIN and MAX (pulled towards the default, which the author c
 is turned by some degrees, and time starts somewhere else, so a round never looks quite like the one before.
 
 It never fights the operator (the same idea as autostart, D18): the player counts an "epoch" that goes up whenever
-anything is played or stopped. Vibes remembers the epoch of its own last shader; when the player's epoch is another
-one, or the player is no longer playing the carrier, something else has the screen and Vibes simply ends. The same
-check is made inside the player, under its lock, at the moment of each change, so a rotation that was just about to
-change can never land on top of a clip someone started.
+anything is played or stopped, and already when a clip is accepted that will load after its own dip. Vibes remembers
+the epoch of its own last shader; when the player's epoch is another one, or the player is no longer playing the
+carrier, something else has the screen and Vibes simply ends. The same check is made inside the player, under its
+lock, at the moment of each change and of each step of a fade, so a rotation that was just about to change can never
+land on top of a clip someone started, nor darken it.
+
+Two rules that came out of the review of the first version:
+* Vibes fades with its own steps, never with the panel's Fader. The Fader keeps a play that waits for its dip as a
+  callback, and any other use of the Fader drops that callback: the operator's clip was accepted and never played.
+* start, stop, skip and the dwell time only set a few fields under a short lock and return. The slow work (the dip,
+  the wait for the GPU to take a shader) runs under a second lock that nothing else waits for, so an OSC cue, a MIDI
+  button, a DMX channel or the schedule is never held up by a change that is in progress.
 """
 
 import random
@@ -19,11 +27,13 @@ import threading
 import time
 
 from .api import ApiError
+from .player import PlayerError
 
 HUE_RANGE = 120.0           # degrees either way that a round may turn the palette
 SPREAD = 0.6                # how far a varied value may go from the default towards MIN or MAX (1 is all the way)
 OFFSET_MAX = 600.0          # seconds: where in its own time a round may start
 TICK = 1.0
+FADE_STEPS_PER_SECOND = 20
 
 
 def vary(inputs, rng):
@@ -42,9 +52,12 @@ class Vibes:
         self._clock, self._sleep = clock, sleep
         self._rng = rng or random.Random(random.SystemRandom().getrandbits(64))
         self._use_thread = thread
-        self._lock = threading.RLock()
+        self._state = threading.Lock()      # the fields below; held for moments only, never across a call to the player
+        self._work = threading.Lock()       # one change at a time; nobody waits for it (tick gives up if it is taken)
         self._wake = threading.Event()
         self._thread = None
+        self._clear = None          # the epoch of a screen that stop() wants cleared as soon as no change is in progress
+        self._dipped = False        # True while our own dip has the picture down (so an early end can put it back)
         self.running = False
         self.epoch = None           # the player's epoch after our last shader (or, before the first, when we started)
         self.started = False        # True once the first shader is on
@@ -66,46 +79,57 @@ class Vibes:
         self.log("pvj-web: vibes: %s" % message)
 
     def _end(self, message):
+        """End the rotation (call with the state lock held, or from the one working thread)."""
         self.running = False
         self.current = None
         self._note(message)
 
-    # -- start and stop --
+    def _finish(self, message):
+        with self._state:
+            if self.running:
+                self._end(message)
+
+    # -- start and stop: quick, they never wait for a change in progress --
     def start(self):
         """Begin the rotation. Returns at once; the first shader goes on at the next tick (within a second), so a cue
         from OSC or the schedule never waits for the GPU to take a shader."""
         if not self.engine.enabled():
             raise ApiError(409, "turn on the Shaders and Vibes module in System first")
-        with self._lock:
-            if not self.engine.vibes_ids():
-                raise ApiError(409, "no shader is switched on for Vibes")
-            self.running, self.started = True, False
-            self.epoch = self.api.player.source_epoch
+        if not self.engine.vibes_ids():
+            raise ApiError(409, "no shader is switched on for Vibes")
+        with self._state:
+            # Started again while it still has the screen (it was running, or a stop is not carried out yet): it keeps
+            # the screen it has, so a later stop still clears it.
+            carry = self.started and (self.running or self._clear is not None)
+            self.running, self.started = True, carry
+            if not carry:
+                self.epoch = self.api.player.source_epoch
             self.order, self.current, self.rounds, self.refused = [], None, 0, set()
             self.due = self._clock()
             self.last = None
+            self._clear = None
         self._kick()
         return self.status()
 
     def stop(self):
-        """End the rotation and, if it still has the screen, stop the picture (like the Stop button)."""
-        with self._lock:
-            had_screen = self.running and self.started and self._ours()
+        """End the rotation and, if it still has the screen, stop the picture (like the Stop button). Returns at once:
+        if a change is in progress, the screen is cleared when that change notices."""
+        with self._state:
             if self.running:
+                if self.started:
+                    self._clear = self.epoch
                 self._end("stopped")
-            if had_screen:
-                self.engine.off()
+        self._settle()
+        self._wake.set()
         return self.status()
 
     def yield_screen(self):
         """The operator is about to show one shader by hand: the rotation ends, the screen is left alone."""
-        with self._lock:
-            if self.running:
-                self._end("ended: a shader was chosen by hand")
+        self._finish("ended: a shader was chosen by hand")
 
     def skip(self):
         """Go to the next shader now."""
-        with self._lock:
+        with self._state:
             if not self.running:
                 raise ApiError(409, "Vibes is not running")
             self.due = self._clock()
@@ -121,20 +145,36 @@ class Vibes:
             raise ApiError(400, "each shader stays %d to %d seconds" % (shaders_mod.DWELL_MIN, shaders_mod.DWELL_MAX))
         if not self.engine.enabled():
             raise ApiError(409, "turn on the Shaders and Vibes module in System first")
-        with self._lock:
-            cfg = self.engine.config()
-            if cfg["dwell"] != int(seconds):
-                cfg["dwell"] = int(seconds)
-                self.engine._save(cfg)
+        cfg = self.engine.config()
+        if cfg["dwell"] != int(seconds):
+            cfg["dwell"] = int(seconds)
+            self.engine._save(cfg)
+        with self._state:
             if self.running and self.started:
                 self.due = self.shown_at + cfg["dwell"]
         self._kick()
         return dict(self.status(), dwell=int(seconds))
 
+    def _settle(self):
+        """Clear the screen a stop asked for, unless a change is in progress (which then does it when it is done)."""
+        if self._clear is None or not self._work.acquire(blocking=False):
+            return
+        try:
+            self._do_clear()
+        finally:
+            self._work.release()
+
+    def _do_clear(self):
+        with self._state:
+            epoch, self._clear = self._clear, None
+        if epoch is not None:
+            self.engine.off(epoch)
+            self._undip()
+
     def _kick(self):
         if not self._use_thread or not self.running:
             return
-        with self._lock:
+        with self._state:
             if self._thread is None:
                 self._thread = threading.Thread(target=self._loop, name="vibes", daemon=True)
                 self._thread.start()
@@ -142,25 +182,76 @@ class Vibes:
 
     def _loop(self):
         while True:
-            with self._lock:
+            with self._state:
                 if not self.running:
                     self._thread = None
-                    return
+                    break
             try:
                 self.tick()
-            except Exception as e:          # never let one bad round end the thread silently
-                with self._lock:
-                    if self.running:
-                        self._end("error: %s" % e)
+            except Exception as e:          # never let one bad round end the thread silently, or leave the screen dark
+                self._finish("error: %s" % e)
+                self._undip()
             self._wake.wait(TICK)
             self._wake.clear()
+        self._settle()
 
     # -- the rotation --
+    def _path(self):
+        try:
+            return self.api.player.status().get("path")
+        except Exception:
+            return None
+
     def _ours(self):
-        """True while the screen is still ours: nothing else was played or stopped since our last shader."""
+        """True while the screen is still ours: nothing else was played, accepted or stopped since our last shader,
+        and (once a shader is on) the player still plays the carrier."""
         if self.api.player.source_epoch != self.epoch:
             return False
-        return not self.started or self.engine.on_screen() is not None
+        return not self.started or self.engine.is_carrier(self._path())
+
+    def _undip(self):
+        """After an end in the middle of our own dip to black: put the picture's opacity back, but only on a screen
+        that nobody else is fading (an idle player, or one still showing our carrier). A clip that took over sets its
+        own opacity."""
+        dipped, self._dipped = self._dipped, False
+        if not dipped or self.api.mix["blackout"]:
+            return
+        path = self._path()
+        if path is None or self.engine.is_carrier(path):
+            self.api._apply_opacity(self.api.mix["opacity"])
+
+    def _level(self):
+        """The opacity on the screen now (0 to 100): the mix value, unless the player says otherwise (a Fade out)."""
+        now = getattr(self.api.player, "opacity_now", None)
+        level = None
+        if now:
+            try:
+                level = now()
+            except Exception:
+                level = None
+        return self.api.mix["opacity"] if level is None else level
+
+    def _fade(self, start, up, seconds):
+        """Our own fade, in steps: down from `start` to black, or up from black to the mix opacity. Every step is set
+        through the player only while the epoch is still ours. False when the screen was lost or Vibes was stopped."""
+        steps = max(1, int(seconds * FADE_STEPS_PER_SECOND))
+        if not up:
+            self._dipped = True
+        for i in range(1, steps + 1):
+            self._sleep(seconds / steps)
+            if not self.running:
+                return False
+            if self.api.mix["blackout"]:
+                return True                         # the operator blacked out meanwhile: leave the screen dark
+            level = self.api.mix["opacity"] * i / steps if up else start * (steps - i) / steps
+            try:
+                if not self.api.player.source_opacity(int(round(min(100, max(0, level)) * 2.55)), self.epoch):
+                    return False
+            except PlayerError:
+                return False
+        if up:
+            self._dipped = False
+        return True
 
     def _next_id(self):
         """The next shader of the shuffled order; a new shuffle when it runs out (never the same one twice in a row
@@ -177,43 +268,59 @@ class Vibes:
         return self.order.pop(0)
 
     def tick(self):
-        """Call about once a second. Returns True if a shader was put on."""
-        with self._lock:
-            if not self.running:
-                return False
-            if not self.engine.enabled():
-                self._end("ended: the module was switched off")
-                return False
-            if not self._ours():
-                self._end("ended: something else was played or stopped")
-                return False
-            if self._clock() < self.due:
-                return False
-            return self._change()
+        """Call about once a second. Returns True if a shader was put on. If a change is already in progress (another
+        thread is in here), it returns at once."""
+        if not self._work.acquire(blocking=False):
+            return False
+        try:
+            return self._tick()
+        finally:
+            self._work.release()
+            self._settle()                          # a stop that came while we worked
+
+    def _tick(self):
+        if not self.running:
+            return False
+        if not self.engine.enabled():
+            self._finish("ended: the module was switched off")
+            if self.started:
+                self.engine.off(self.epoch)         # the shader does not stay on a screen whose module is off
+            return False
+        if not self._ours():
+            self._finish("ended: something else was played or stopped")
+            return False
+        if self._clock() < self.due:
+            return False
+        return self._change()
+
+    def _lost(self):
+        """The screen went to someone else, or Vibes was stopped, in the middle of a change."""
+        self._finish("ended: something else was played or stopped")
+        if self._clear is not None:
+            self._do_clear()                        # stopped in the middle: clear first, then the opacity goes back
+        self._undip()
+        return False
 
     def _change(self):
         api = self.api
         half = api.settings.data["mix"]["duration"] / 2.0
-        try:
-            busy = self.started or bool(api.player.status().get("path"))
-        except Exception:
-            busy = self.started
-        dip = busy and not api.mix["blackout"]
-        if dip:                                     # down to black with the panel's own fade, then wait for it
-            api.fader.ramp(api.mix["opacity"], 0, half)
-            self._sleep(half)
-            if not self._ours():
-                self._end("ended: something else was played or stopped")
-                return False
+        level = self._level()
+        busy = self.started or bool(self._path())
+        # A screen that is already dark (Blackout, or the operator's Fade out) stays dark: no dip, and no fade up
+        # that would flash the picture back.
+        dark = api.mix["blackout"] or level <= 0.5
+        dip = busy and not dark
+        if dip and (not self._fade(level, False, half) or not self._ours()):
+            return self._lost()
         cfg = self.engine.config()
         shown = False
         while not shown:
             sid = self._next_id()
             if sid is None:
-                self._end("ended: the player refused every shader" if self.refused else "ended: no shader is switched on for Vibes")
+                self._finish("ended: the player refused every shader" if self.refused else "ended: no shader is switched on for Vibes")
                 if self.started:
                     self.engine.off(self.epoch)
-                self._undip(dip)
+                self._undip()
                 return False
             values, hue, offset = {}, 0.0, 0.0
             if cfg["vary"]:
@@ -225,40 +332,41 @@ class Vibes:
                 result = self.engine.show(sid, values, hue, offset, epoch=self.epoch, cut=False)
             except ApiError as e:
                 if e.status == 503:                 # the player is down: nothing to rotate on
-                    self._end("ended: %s" % e.message)
-                    self._undip(dip)
+                    self._finish("ended: %s" % e.message)
+                    self._undip()
                     return False
                 self.refused.add(sid)               # a file that no longer translates: leave it out
                 self._note("%s left out: %s" % (sid, e.message))
                 continue
             if result is None:
-                self._end("ended: something else was played or stopped")
+                return self._lost()
+            with self._state:
+                stopped = not self.running          # stop() or a shader chosen by hand, while the GPU took this one
+                if not stopped:
+                    self.epoch, self.started = result["epoch"], True
+            if stopped:
+                self.engine.off(result["epoch"])    # ours, put on after the stop: take it off again (a no-op if the
+                self._undip()                       # screen has gone to a shader chosen by hand)
                 return False
-            self.epoch = result["epoch"]
-            self.started = True
             if not result["ok"]:
                 self.refused.add(sid)
                 self._note("%s left out: the player refused it (%s)" % (sid, result["error"]))
                 continue
             shown = True
+        with self._state:
             self.current = sid
-        self.rounds += 1
-        self.shown_at = self._clock()
-        self.due = self.shown_at + cfg["dwell"]
-        if not api.mix["blackout"]:
-            if dip:
-                api._apply_opacity(0)
-                api.fader.ramp(0, api.mix["opacity"], half)
-            else:
-                api.fader.cancel()
-                api._apply_opacity(api.mix["opacity"])
+            self.rounds += 1
+            self.shown_at = self._clock()
+            self.due = self.shown_at + cfg["dwell"]
+        if dip:
+            if not self._fade(0, True, half):
+                self._undip()
+        elif not dark:
+            try:
+                api.player.source_opacity(int(round(api.mix["opacity"] * 2.55)), self.epoch)
+            except PlayerError:
+                pass
         return True
-
-    def _undip(self, dip):
-        """The rotation ended in the middle of its own dip to black: put the picture's opacity back."""
-        if dip and not self.api.mix["blackout"]:
-            self.api.fader.cancel()
-            self.api._apply_opacity(self.api.mix["opacity"])
 
     # -- requests --
     def api_vibes(self, body, device, client):
