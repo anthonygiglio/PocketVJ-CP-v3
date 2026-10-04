@@ -33,13 +33,13 @@ Next, in order:
 1. **PJLink Phase 1: built (PR #61, D37), not tested on a real projector.** Identify on add, input selection with labels and the 90 second retry, separate picture and sound mute, lamp hours and warnings in Health, background status; the fake projector is written from the standard; independent review done, all findings fixed with tests. Next for it: the first test with a real Epson (what it answers in standby, how long it is unavailable after power-on, separate mutes, lamp hours), and record what it does in `pvj/PROJECTORS.md`.
 2. **PJLink Phase 2:** class 2 volume steps, freeze, input names, signal resolution, "Find projectors" search, status notices.
 3. **Groups, scenes and the Room screen** for staff (presenter and guest codes), with projector actions on the schedule, OSC, MIDI and DMX.
-4. **ISF shader playback** (the owner's preferred format), then live coding with a last-good fallback, then **projectM** as an optional module on boards with OpenGL ES 3 (measure on the Pi 4 first).
+4. **ISF shader playback is built** (D38, `pvj/SHADERS.md`: generator shaders, ten bundled, and Vibes, the endless rotation), but **not seen on any display and its speed is unmeasured on every board**: first put it on the test Pi, watch each bundled shader, and measure dropped frames at 720 and 1080 lines (A, B, A, B, A). Still open: live coding with a last-good fallback, then **projectM** as an optional module on boards with OpenGL ES 3 (measure on the Pi 4 first).
 5. **Painting-wall masks** on the second projector (likely the Pi 3B as a second synced box).
 6. **Network notes** for the private NXLX network (a dedicated router, fixed addresses, projectors without internet, staff Wi-Fi or a wall tablet).
 7. **Video matrix driver** (serial, TCP, HTTP, OSC command templates) once the owner picks a model; audio routing is undecided.
 8. The earlier parity list, now after the above: display mode (owner at the monitor); mapper workflow; wall improvements; schedule with dates; follow-on actions; Wi-Fi hotspot.
 
-Small follow-ups: a factory reset cannot remove the root-only update backups in `/var/lib/pvj/backups` (they hold the old devices and passwords, and `pvj-update rollback` after a reset brings them back); it needs a pvj-sysd action. Box care (PR #62, D38) has not been run on the Pi: export and import, the diagnostics file (does it say the log is not readable), a factory reset with the PIN screen returning. Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
+Small follow-ups: a factory reset cannot remove the root-only update backups in `/var/lib/pvj/backups` (they hold the old devices and passwords, and `pvj-update rollback` after a reset brings them back); it needs a pvj-sysd action. Box care (PR #62, D39) has not been run on the Pi: export and import, the diagnostics file (does it say the log is not readable), a factory reset with the PIN screen returning. Check after the Pi's next restart that `journalctl --list-boots` shows more than one boot (the persistent log, D35, was installed but not yet seen across a restart).
 
 Owner's open items: a layout board at https://claude.ai/artifact/Bc24QHaMhyeS3eZfFyamLJ (press Save, then ask Claude to read it back) and editable mock-ups (SVG, layered PSD, PNG) in `docs/mockups/current/` (not in git; CI artifact `ui-mockups`). The design playground (D34, `tools/panel-playground`) has a preview at https://claude.ai/artifact/DYUr95vVi1jJyGquxhqZTu. A Pi 3B for two-box sync tests is waiting for a spare SD card (never touch its current card).
 
@@ -58,13 +58,14 @@ Merged to `master`: the security hotfix, the platform layer, the installer and s
 | PIN and the box's address drawn on the screen | `pvj/pinscreen.py` | on |
 | Health card (power, temperature, helpers, addresses) | `pvj/health.py` | on |
 | Updates card: signed bundles from USB or upload, rollback (D33) | `pvj/README.md` | on (needs a signing key) |
-| Settings export and import, diagnostics file, factory reset (D38; not run on hardware) | `pvj/boxcare.py`, `docs/MANUAL.md` | on |
+| Settings export and import, diagnostics file, factory reset (D39; not run on hardware) | `pvj/boxcare.py`, `docs/MANUAL.md` | on |
 | Remote support over WireGuard, on request only | `docs/REMOTE-SUPPORT.md` | off |
 | Old OSC command names | `pvj/OSC.md` | with OSC |
 | Autostart (file, all, slideshow, pad, USB, preset) | `pvj/AUTOSTART.md` | off |
 | Weekly schedule | `pvj/SCHEDULE.md` | off (beta) |
 | Projectors (PJLink class 1: power, input with labels, picture and sound mute, live status, lamp hours, warnings; no real projector tested) | `pvj/PROJECTORS.md` | off (beta) |
 | Projection mapper (quads, triangles, grids) | `pvj/MAPPER.md` | off (beta) |
+| Shaders and Vibes: ISF generator shaders, ten bundled, an endless rotation from one tap, the API, autostart, the schedule, OSC, MIDI and DMX | `pvj/SHADERS.md` | off (beta) |
 | Multi-box sync and video wall | `pvj/SYNC.md` | off (beta) |
 | Streams and live input (SRT, RTSP, RTMP, USB capture) | `pvj/STREAMS.md` | off (beta) |
 | DMX (Art-Net, sACN), MIDI controllers | `pvj/DMX.md`, `pvj/MIDI.md` | off (beta) |
@@ -80,6 +81,7 @@ One test Raspberry Pi 4 (Model B Rev 1.5, Debian 13 trixie, wired Ethernet, a 25
 **Not verified on hardware (do not claim it works):**
 - Sync and the wall on two real boxes (waiting for the Pi 3B's spare card); a real support server (VPS); swapping USB sticks while running; copy from USB on the box.
 - MIDI Learn with the real controllers; the PIN on screen on a fresh box; streams with a real source; HEVC, 4K, 1080p60; 24 fps judder; the second HDMI port; a real projector.
+- Shaders and Vibes: never seen on a display, no speed measured on any board, run only on a software GPU in CI; its MIDI and DMX controls only against fakes.
 - The read-only root (`pvj-rootfs`), the Network module (test with a keyboard and monitor on the box, never over SSH on the only link), TouchOSC.
 - Pi 3, Pi 5 and x86.
 

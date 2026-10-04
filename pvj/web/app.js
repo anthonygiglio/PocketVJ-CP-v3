@@ -321,6 +321,7 @@
             var on = !(S.status && S.status.player && S.status.player.test_pattern);
             act('POST', '/api/testpattern', { on: on }, poll);
           } }))),
+      window.pvjShaders ? window.pvjShaders.liveRow(shaderCtx()) : null,
       previewBlock(),
       h('div', { class: 'banks' }, S.banks.map(function (b, i) {
         return h('button', { class: 'btn' + (i === S.bank ? ' on' : ''), text: b.name.replace('Bank ', 'Bank '), 'aria-pressed': i === S.bank ? 'true' : 'false',
@@ -378,6 +379,8 @@
     bar.addEventListener('pointerup', function () { setTimeout(function () { seeking = false; }, 1500); });
     return bar;
   }
+  // Shaders and Vibes lives in shaders.js; it borrows these helpers.
+  function shaderCtx() { return { h: h, api: api, act: act, can: can, say: say, poll: poll, moduleOn: moduleOn, state: S }; }
   function patchLive() {
     var st = S.status || {}, pl = st.player || {}, sys = st.system || {};
     var np = document.getElementById('np');
@@ -395,6 +398,7 @@
     if (pl.test_pattern) np.textContent = 'Test pattern (colour bars)';
     if (pl.test_tone) np.textContent = 'Test tone (' + pl.test_tone + ')';
     if (pl.capture) np.textContent = 'Live input' + (pl.capture.device ? ' (' + pl.capture.device + ', ' + pl.capture.mode + ')' : '');
+    if (window.pvjShaders) window.pvjShaders.patch(shaderCtx(), pl, np);
     var temp = typeof sys.temp_c === 'number' ? Math.round(sys.temp_c) + '°C' : '';
     document.getElementById('pill').textContent = [sys.board, temp, pl.running ? 'OK' : 'No player'].filter(Boolean).join(' · ');
     var f = document.getElementById('freeze'); if (f) f.textContent = pl.paused ? 'Resume' : 'Freeze';
@@ -481,6 +485,7 @@
             onclick: function () { act('POST', '/api/control', { action: 'flip_v', value: !m.flip_v }, function () { poll(); setTimeout(render, 200); }); } }))),
       overlayCard(),
       mapperCard(),
+      window.pvjShaders ? window.pvjShaders.card(shaderCtx()) : null,
       h('div', { class: 'card' },
         h('div', { class: 'k', text: 'Rotate' }),
         choice([0, 90, 180, 270].map(function (d) { return { label: d + '°', value: d }; }), m.rotate === undefined ? 0 : m.rotate,
@@ -1090,7 +1095,7 @@
       body.textContent = '';
       body.appendChild(h('div', { class: 'k', id: 'dmxline', text: d.error ? 'Problem: ' + d.error :
         (d.listening ? 'Listening on UDP ' + d.port + ' (' + d.received + ' frames for this universe)' : 'Off') }));
-      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + 7) + ': ' + d.channels.join(' ') }));
+      if (d.channels) body.appendChild(h('div', { class: 'k mono', id: 'dmxlevels', text: 'Channels ' + d.start + '-' + (d.start + d.channels.length - 1) + ': ' + d.channels.join(' ') }));
       var proto = h('select', { class: 'text-input', id: 'dmxproto', 'aria-label': 'Protocol' },
         [['artnet', 'Art-Net'], ['sacn', 'sACN (E1.31)']].map(function (p) { return h('option', { value: p[0], text: p[1], selected: p[0] === d.protocol }); }));
       var uni = h('input', { class: 'text-input mono', id: 'dmxuni', type: 'number', 'aria-label': 'Universe', value: dmxForm.universe === null ? d.universe : dmxForm.universe });
@@ -1110,7 +1115,7 @@
       body.appendChild(h('button', { class: 'btn' + (d.enabled ? ' on' : ''), id: 'dmxtoggle', text: d.enabled ? 'DMX is on. Turn off' : 'Turn DMX on',
         onclick: function () { var f = fields(); f.enabled = !d.enabled; send(f); } }));
       body.appendChild(proto); body.appendChild(h('label', { class: 'k', for: 'dmxuni', text: 'Universe' })); body.appendChild(uni);
-      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels)' })); body.appendChild(start); body.appendChild(allow);
+      body.appendChild(h('label', { class: 'k', for: 'dmxstart', text: 'Start channel (uses 8 channels; a ninth, if sent, is Vibes)' })); body.appendChild(start); body.appendChild(allow);
       body.appendChild(h('button', { class: 'btn small', id: 'dmxsave', text: 'Save', onclick: function () { send(fields()); } }));
       body.appendChild(h('div', { class: 'k', text: 'Off until you turn it on. Only private networks may send. The first frame only sets a starting point, and the box holds its last state if the signal stops.' }));
     }
@@ -1123,7 +1128,8 @@
   }
   var MIDI_ACTIONS = [['pad', 'Play a pad'], ['stop', 'Stop'], ['pause', 'Pause / resume'], ['blackout', 'Blackout on / off'], ['fadeout', 'Fade out'],
     ['reset', 'Reset mix'], ['opacity', 'Opacity (fader)'], ['size', 'Size (fader)'], ['position', 'Position X (fader)'], ['speed', 'Speed (fader)'],
-    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)']];
+    ['volume', 'Volume (fader)'], ['blackout_hold', 'Blackout while held up (fader)'],
+    ['vibes', 'Vibes on / off'], ['vibes_next', 'Vibes: next shader'], ['vibes_dwell', 'Vibes: time each shader stays (fader)']];
   var midiForm = { action: 'opacity', bank: 0, index: 0 };  // survives redraws
   var midiTimer = null;
   function midiCard() {
@@ -1251,7 +1257,8 @@
     var body = h('div', { class: 'list', id: 'autobody' });
     var card = h('div', { class: 'card', id: 'autocard' }, h('h2', { text: 'Autostart' }), body);
     var MODES = [['off', 'Off'], ['file', 'Play one clip'], ['all', 'Play every clip'], ['slideshow', 'Slideshow of the pictures'],
-      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script']];
+      ['pad', 'Play a pad'], ['usb', 'Play the USB stick (and any stick plugged in later)'], ['preset', 'Legacy start script'],
+      ['vibes', 'Vibes: shaders, endlessly (needs the Shaders and Vibes module)']];
     function padName(p) {
       var b = (S.banks || [])[p[0]], pad = b && b.pads && b.pads[p[1]];
       return 'Bank ' + (p[0] + 1) + ', pad ' + (p[1] + 1) + (pad && (pad.label || pad.file) ? ': ' + (pad.label || pad.file) : '');
@@ -1775,7 +1782,7 @@
     }
     function describe(e) {
       var what = e.action === 'play' ? 'Play ' + e.file : e.action === 'preset' ? 'Start script ' + e.preset :
-        ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off' })[e.action] || e.action;
+        ({ stop: 'Stop', blackout: 'Blackout', show: 'Show screen', projector_on: 'Projectors on', projector_off: 'Projectors off', vibes: 'Start Vibes' })[e.action] || e.action;
       return e.time + ' · ' + e.days.map(function (d) { return DAYS[d]; }).join(' ') + ' · ' + what;
     }
     function draw(d) {
@@ -1806,7 +1813,7 @@
       }));
       var action = h('select', { class: 'text-input', id: 'schedaction', 'aria-label': 'What to do' },
         [['play', 'Play a clip'], ['preset', 'Run a legacy start script'], ['stop', 'Stop the clip'], ['blackout', 'Blackout'], ['show', 'Show screen'],
-          ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off']].map(function (a) {
+          ['projector_on', 'Projectors on'], ['projector_off', 'Projectors off'], ['vibes', 'Start Vibes (shaders)']].map(function (a) {
           return h('option', { value: a[0], text: a[1], selected: a[0] === schedForm.action });
         }));
       var file = h('select', { class: 'text-input', id: 'schedfile', 'aria-label': 'Clip to play', hidden: schedForm.action !== 'play' },

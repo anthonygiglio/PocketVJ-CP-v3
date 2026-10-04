@@ -13,7 +13,8 @@ Deliberate limits, as for OSC:
   fires from it, so a console that happens to be sitting at zero cannot black out the screen.
 * If the signal stops, the box holds its last state.
 * Level channels are applied at most 20 times a second each; the next frame carries the change on.
-* Only play, stop, pause, fade, blackout, opacity, size, position, speed and volume are reachable.
+* Only play, stop, pause, fade, blackout, opacity, size, position, speed, volume and the shader rotation (Vibes
+  start, stop and next, on an optional ninth channel) are reachable.
 """
 
 import socket
@@ -27,6 +28,7 @@ ARTNET_PORT = 6454
 SACN_PORT = 5568
 PROTOCOLS = ("artnet", "sacn")
 CHANNELS = 8
+VIBES_CHANNEL = 8        # index of the optional ninth channel; a console that sends only eight is not affected
 DMX_DEVICE = {"id": "dmx", "name": "DMX", "role": "live"}
 MIN_INTERVAL = 0.05
 PAD_STEP = 6            # each pad owns six values on the pad channel: 6-11 is pad 1, 12-17 pad 2, ...
@@ -84,6 +86,14 @@ def function_of(v):
     return None
 
 
+def vibes_of(v):
+    """The zone of the Vibes channel: 0 to 49 and 200 to 255 do nothing."""
+    for lo, name in ((200, None), (150, "next"), (100, "start"), (50, "stop")):
+        if v >= lo:
+            return name
+    return None
+
+
 def _scale(v, lo, hi):
     return lo + (hi - lo) * v / 255.0
 
@@ -95,14 +105,14 @@ class DmxMapper:
         self.do, self.start, self._clock = do, start, clock
         self.applied = None      # last values acted on
         self.last_frame = 0.0
-        self.last_time = [0.0] * CHANNELS
+        self.last_time = [0.0] * (CHANNELS + 1)
         self.seen = None         # the eight raw values of the latest frame, for the panel
 
     def frame(self, dmx):
         i = self.start - 1
         if len(dmx) < i + CHANNELS:
             return 0
-        values = list(dmx[i:i + CHANNELS])
+        values = list(dmx[i:i + CHANNELS + 1])            # the ninth is the Vibes channel, if the universe has it
         self.seen = values
         now = self._clock()
         if self.applied is not None and now - self.last_frame > STALE_SECONDS:
@@ -111,6 +121,8 @@ class DmxMapper:
         if self.applied is None:
             self.applied = list(values)  # baseline: no action
             return 0
+        if len(values) != len(self.applied):                # the ninth channel came or went: its first value is a baseline
+            self.applied = self.applied[:len(values)] + values[len(self.applied):]
         done = 0
         for ch, v in enumerate(values):
             if v == self.applied[ch]:
@@ -156,6 +168,11 @@ class DmxMapper:
             if zone == "resume":
                 return control("pause", False)
             return self.do("/api/fadeout", {"seconds": 2})
+        if ch == VIBES_CHANNEL:
+            zone = vibes_of(v)
+            if zone is None or zone == vibes_of(old):       # only when the channel moves into a new zone
+                return False
+            return self.do("/api/vibes", {"next": True} if zone == "next" else {"on": zone == "start"})
         return False
 
 
@@ -171,6 +188,7 @@ class DmxServer:
         self._sock = None
         self._thread = None
         self._quiet_until = 0.0
+        self._vibes_off_said = False
         self._clock = clock
         self.stats = {"received": 0, "matched": 0, "dropped": 0, "handled": 0}
         self.port = ARTNET_PORT if cfg["protocol"] == "artnet" else SACN_PORT
@@ -185,6 +203,13 @@ class DmxServer:
         if not self.calls.allow("all"):
             self._note("too many commands a second; some were dropped")
             return False
+        if path == "/api/vibes":                           # only with the Shaders and Vibes module on; said once
+            if not self.api.registry.enabled("shaders"):
+                if not self._vibes_off_said:
+                    self._vibes_off_said = True
+                    self.log("dmx: the Vibes channel was used, but the Shaders and Vibes module is off; nothing was done")
+                return False
+            self._vibes_off_said = False
         status, payload = self.api.handle("POST", path, body, DMX_DEVICE, "dmx")
         if status != 200:
             self._note("%s -> %s %s" % (path, status, payload.get("error", "")))

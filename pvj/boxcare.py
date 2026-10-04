@@ -44,7 +44,7 @@ from urllib.parse import unquote
 
 from . import dmx as dmx_mod, midi as midi_mod, osc as osc_mod, projector as projector_mod, streams as streams_mod
 from . import mapper as mapper_mod, scheduler as scheduler_mod, sync as sync_mod, themes as themes_mod
-from . import autostart as autostart_mod
+from . import autostart as autostart_mod, shaders as shaders_mod
 from .api import ApiError, MEDIA_EXTENSIONS, valid_name
 from .settings import SettingsError, default_control, default_settings, migrate
 
@@ -382,11 +382,37 @@ def check_sync(v, care):
     return sync_mod.validate(_obj(v), sync_mod.blank())
 
 
+def check_shaders(v, care):
+    """The Shaders and Vibes settings, by the rules its own API applies (shaders.py): how long a shader stays, whether
+    it varies, the height it is drawn at, and the shaders left out of the rotation (names only; the uploaded shader
+    files themselves are not part of a settings file). The section is in the settings only once something was changed."""
+    _obj(v)
+    out = shaders_mod.default_config()
+    if "dwell" in v:
+        d = v["dwell"]
+        if isinstance(d, bool) or not isinstance(d, (int, float)) or d != d or not shaders_mod.DWELL_MIN <= d <= shaders_mod.DWELL_MAX:
+            raise ValueError("each shader stays %d to %d seconds" % (shaders_mod.DWELL_MIN, shaders_mod.DWELL_MAX))
+        out["dwell"] = int(d)
+    if "vary" in v:
+        out["vary"] = _flag(v["vary"], "vary")
+    if "height" in v:
+        if type(v["height"]) is not int or v["height"] not in shaders_mod.HEIGHTS:
+            raise ValueError("height must be one of %s" % ", ".join(str(h) for h in shaders_mod.HEIGHTS))
+        out["height"] = v["height"]
+    if "disabled" in v:
+        names = v["disabled"]
+        if (not isinstance(names, list) or len(names) > shaders_mod.MAX_UPLOADS + 64 or len(set(map(str, names))) != len(names)
+                or not all(isinstance(n, str) and shaders_mod.FILE.fullmatch(n) for n in names)):
+            raise ValueError("disabled must be a list of shader file names, each once")
+        out["disabled"] = list(names)
+    return out
+
+
 # Every section that is exported and imported, in the order they are checked.
 SECTIONS = (("pads", check_pads), ("modules", check_modules), ("theme", check_theme), ("mix", check_mix), ("osc", check_osc),
             ("schedule", check_schedule), ("streams", check_streams), ("control", check_control),
             ("autostart", check_autostart), ("audio", check_audio), ("overlay", check_overlay),
-            ("projectors", check_projectors), ("mapper", check_mapper), ("sync", check_sync))
+            ("projectors", check_projectors), ("mapper", check_mapper), ("sync", check_sync), ("shaders", check_shaders))
 CHECK_ERRORS = (ValueError, KeyError, TypeError, AttributeError, osc_mod.OscError, streams_mod.StreamError,
                 scheduler_mod.ScheduleError, dmx_mod.DmxError, midi_mod.MidiError, autostart_mod.AutostartError,
                 projector_mod.ProjectorError, themes_mod.ThemeError)
@@ -869,6 +895,10 @@ class BoxCare:
             problems, deleted = [], 0
             # Playback stops and the picture comes back from black either way: the PIN is only drawn on an idle
             # player, and nobody would see it behind a looping clip or a blackout.
+            try:
+                api.vibes.stop()                          # the shader rotation would put the next shader over the PIN
+            except Exception:
+                pass
             for call, body in ((api.blackout, {"on": False}), (api.control, {"action": "reset"}), (api.control, {"action": "stop"})):
                 try:
                     call(body, device, client)

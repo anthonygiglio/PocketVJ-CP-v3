@@ -22,6 +22,11 @@ A mapping belongs to one controller (by its ALSA card id, such as `nanoKONTROL2`
 | Stop, Pause / resume, Blackout on / off, Fade out, Reset mix | trigger | As in the panel |
 | Opacity, Size, Position X, Speed, Volume | level | Follows the control, 0 to 127 spread over the range (opacity 0 to 100 percent, size 1 to 200, position -100 to 100, speed 0.25x to 2x, volume 0 to 100) |
 | Blackout while held up | level | Black at 64 or more, shown below |
+| Vibes on / off | trigger | Starts the endless shader rotation, or stops it if it is running (see [SHADERS.md](SHADERS.md)) |
+| Vibes: next shader | trigger | Goes to the next shader now (only while Vibes is running) |
+| Vibes: time each shader stays | level | A knob or fader picks one of 15 steps from bottom to top: 15, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1200, 1800, 3600 seconds. It is saved, and the shader on screen follows the new time |
+
+The three Vibes actions are assigned with Learn like any other; they are not in the built-in map. They need the **Shaders and Vibes** module to be on: while it is off they do nothing, and the log says so once.
 
 A trigger fires once per press (a note-on, or a CC that goes from below 64 to 64 or more), not on release or repeat, and a button cannot fire again within a quarter of a second, so contact bounce cannot repeat it. Right after Learn captures a control, that control is ignored for about half a second so a fader you are still moving does not run its old mapping. A fader sweep is thinned to 20 changes a second and the last position always lands.
 
@@ -32,7 +37,7 @@ On unless you turn it off (System > MIDI controllers > Built-in map). It exists 
 ## Safety
 
 - Only paths of the form `/dev/snd/midiC<n>D<n>` are ever opened, and only if they are character devices (no links).
-- Only the actions in the table are reachable: nothing shuts down, reboots or changes settings.
+- Only the actions in the table are reachable: nothing shuts down, reboots or changes settings (the one setting a controller can change is the Vibes dwell time, between 15 seconds and an hour).
 - At most 50 commands a second reach the player, whatever the controllers send, and a pad or button can fire at most four times a second (a single "play" is many round trips to the player, so the second limit is the one that matters for pads).
 - The web service reads the device through systemd: it needs the `audio` group and read access to ALSA devices, and the unit has both (`DeviceAllow=char-alsa r`).
 
@@ -44,4 +49,4 @@ On unless you turn it off (System > MIDI controllers > Built-in map). It exists 
 
 ## Verified, and not
 
-Verified on a real Raspberry Pi 4 (2026-09-30): the module reads a controller through the systemd sandbox and handled 112 messages in a few seconds from a Launchpad Mini. Three controllers (Korg nanoKONTROL2, Akai MIDI Mix, Novation Launchpad Mini) enumerate. **Learn, the multi-controller hub and the new map have only run against pipes standing in for controllers and the browser test, not yet against the real hardware.**
+Verified on a real Raspberry Pi 4 (2026-09-30): the module reads a controller through the systemd sandbox and handled 112 messages in a few seconds from a Launchpad Mini. Three controllers (Korg nanoKONTROL2, Akai MIDI Mix, Novation Launchpad Mini) enumerate. **Learn, the multi-controller hub and the new map have only run against pipes standing in for controllers and the browser test, not yet against the real hardware.** The Vibes actions have run only in unit tests with a fake player and a fake clock: no real controller has sent them.

@@ -310,6 +310,36 @@ class ImportTest(Base):
         file["settings"]["projectors"][0]["labels"] = {"31": "Matrix"}
         self.assertEqual(self.send(file)[0], 400)
 
+    def test_shaders_and_vibes_settings_and_what_uses_vibes_go_round(self):
+        """The Vibes settings, and the DMX, MIDI, autostart and schedule entries that drive Vibes, import as exported."""
+        from pvj import scheduler
+        self.assertNotIn("shaders", self.export()["settings"])                    # nothing changed yet: nothing to export
+        self.assertIn("is not in the file", " ".join(self.send(self.export())[1]["notes"]))
+        d = self.settings.data
+        d["shaders"] = {"dwell": 45, "vary": False, "height": 540, "disabled": ["Plasma.fs", "My own 2.fs"]}
+        d["autostart"] = dict(d["autostart"], mode="vibes")
+        d["schedule"] = scheduler.validate({"enabled": True, "entries": [{"time": "20:00", "days": [0, 6], "action": "vibes"}]})
+        d["control"]["dmx"] = dict(d["control"]["dmx"], enabled=True)
+        d["control"]["midi"]["map"] = [
+            {"id": "eeee0001", "source": "*", "kind": "note", "channel": 0, "number": 40, "action": "vibes"},
+            {"id": "eeee0002", "source": "*", "kind": "note", "channel": 0, "number": 41, "action": "vibes_next"},
+            {"id": "eeee0003", "source": "*", "kind": "cc", "channel": 0, "number": 7, "action": "vibes_dwell"}]
+        want = copy.deepcopy({k: d[k] for k in ("shaders", "autostart", "schedule", "control")})
+        file = self.export()
+        self.assertEqual({k: file["settings"][k] for k in want}, want)
+        for k in want:
+            d[k] = copy.deepcopy(settings_mod.default_settings().get(k, {}))
+        d.pop("shaders")
+        st, out = self.send(file)
+        self.assertEqual((st, out["problems"]), (200, []), out)
+        self.assertIn("shaders", out["imported"])
+        self.assertEqual({k: self.settings.data[k] for k in want}, want)
+        self.assertEqual(self.api.shaders.config(), want["shaders"])              # the module reads back every value
+        file["settings"]["shaders"] = {"dwell": 90.0}                             # the keys a file leaves out are the defaults
+        self.assertEqual(self.send(file)[0], 200)
+        self.assertEqual(self.api.shaders.config(), dict(self.api.shaders.config(), dwell=90, vary=True, height=720, disabled=[]))
+        self.assertIsInstance(self.settings.data["shaders"]["dwell"], int)
+
     def test_a_newer_file_is_refused_plainly_and_nothing_changes(self):
         file = self.export()
         file["settings"]["schema"] = settings_mod.SCHEMA + 1
@@ -370,7 +400,7 @@ class ImportTest(Base):
         def to_later(data):               # like a real one: not written to run twice, and it sets up a new section
             for p in data.get("projectors", []):
                 p.setdefault("input", "hdmi1")
-            data["shaders"] = {"on": False}
+            data["lasers"] = {"on": False}
             if "devices" in data:
                 data["devices"] = []
         self.settings._migrations = dict(settings_mod.MIGRATIONS)
@@ -380,24 +410,24 @@ class ImportTest(Base):
         self.assertEqual(file["settings"]["schema"], now)
         self.assertEqual(sorted(file["settings"]["projectors"][0]), ["host", "id", "name", "password", "port"])
         self.settings.data["schema"] = later
-        self.settings.data["shaders"] = {"on": True}
+        self.settings.data["lasers"] = {"on": True}
         for p in self.settings.data["projectors"]:
             p["input"] = "hdmi2"
         devices = copy.deepcopy(self.settings.data["devices"])
-        defaults = dict(settings_mod.default_settings(), shaders={"on": False})
+        defaults = dict(settings_mod.default_settings(), lasers={"on": False})
         with mock.patch.object(boxcare, "default_settings", lambda: copy.deepcopy(defaults)):
             st, out = self.send(file)
             self.assertEqual(st, 200, out)
             d = self.settings.data
-            self.assertEqual((d["schema"], d["shaders"], d["devices"]), (later, {"on": True}, devices))   # the box's own: untouched
+            self.assertEqual((d["schema"], d["lasers"], d["devices"]), (later, {"on": True}, devices))   # the box's own: untouched
             self.assertEqual([p["input"] for p in d["projectors"]], ["hdmi1", "hdmi1"])
             self.assertEqual(d["projectors"][0]["password"], PROJECTOR_PASSWORD)
             file["settings"]["schema"] = later
-            file["settings"]["shaders"] = {"on": False}
+            file["settings"]["lasers"] = {"on": False}
             st, out = self.send(file)
             self.assertEqual(st, 200, out)
-            self.assertIn("shaders is not imported by this version; left as it is", out["notes"])
-            self.assertEqual((self.settings.data["shaders"], self.settings.data["devices"]), ({"on": True}, devices))
+            self.assertIn("lasers is not imported by this version; left as it is", out["notes"])
+            self.assertEqual((self.settings.data["lasers"], self.settings.data["devices"]), ({"on": True}, devices))
             file["settings"]["schema"] = later + 1
             self.assertEqual(self.send(file)[0], 409)
 
@@ -415,6 +445,7 @@ class ImportTest(Base):
         in NEVER: otherwise it would silently be missing from every export."""
         known = {name for name, _ in boxcare.SECTIONS} | set(boxcare.NEVER) | {"schema"}
         self.assertEqual(sorted(set(settings_mod.default_settings()) - known), [])
+        self.assertIn("shaders", known)             # not in the defaults: it appears in the settings once something was changed
         self.assertLessEqual(boxcare.KNOWN_SCHEMA, settings_mod.SCHEMA)
 
     def test_access_data_in_a_file_is_refused(self):
@@ -486,6 +517,15 @@ class ImportTest(Base):
             ("mapper", {"on": True, "screen": [1920, 1080], "surfaces": [dict(quad("cccc0001"), vertices=[[0, 0], [10, 10], [0, 10], [10, 0]])], "sets": {}}),
             ("mapper", {"on": False, "screen": [0, 0], "surfaces": [], "sets": {}}),
             ("mapper", {"on": False, "screen": None, "surfaces": [], "sets": {"bad/name": {"screen": [1, 1], "surfaces": []}}}),
+            ("shaders", {"dwell": 5}),
+            ("shaders", {"dwell": True}),
+            ("shaders", {"vary": "yes"}),
+            ("shaders", {"height": 700}),
+            ("shaders", {"height": 720.0}),
+            ("shaders", {"disabled": ["../etc/passwd"]}),
+            ("shaders", {"disabled": ["a.fs", "a.fs"]}),
+            ("shaders", {"disabled": "a.fs"}),
+            ("shaders", []),
             ("sync", {"role": "boss"}),
             ("sync", {"wall": {"cols": 2, "rows": 2, "col": 5, "row": 0}}),
         ]
@@ -833,12 +873,12 @@ class DiagnosticsTest(Base):
         self.settings.data["control"]["midi"]["api_token"] = "Tok-Sentinel-1"
         self.settings.data["sync"]["password"] = "Sync-Sentinel-2"
         self.settings.data["osc"]["shared_key"] = "Osc-Sentinel-3"
-        self.settings.data["shaders"] = {"licence": "Shader-Sentinel-4"}       # a section this version does not know
+        self.settings.data["lasers"] = {"licence": "Shader-Sentinel-4"}        # a section this version does not know
         file = self.get()
         text = json.dumps(file)
         for secret in ("Tok-Sentinel-1", "Sync-Sentinel-2", "Osc-Sentinel-3", "Shader-Sentinel-4"):
             self.assertNotIn(secret, text)
-        self.assertEqual(file["settings"]["not_shown"], ["shaders", "auth (the PIN)"])
+        self.assertEqual(file["settings"]["not_shown"], ["lasers", "auth (the PIN)"])
 
     def test_who_may_read_it(self):
         self.care._run = FakeJournal()
@@ -1100,7 +1140,13 @@ class FactoryResetTest(Base):
         self.assertEqual(self.h("POST", "/api/blackout", {"on": True}, self.full_dev)[0], 200)
         screen = PinScreen(self.api, self.auth, log=lambda *_: None)
         self.assertFalse(screen.auto_wanted())
+        stopped, real_stop = [], self.api.vibes.stop
+        self.api.vibes.stop = lambda: stopped.append(1) or real_stop()
+        self.settings.data["shaders"] = {"dwell": 45, "vary": False, "height": 540, "disabled": ["Plasma.fs"]}
         self.assertEqual(self.reset(confirm="factory-reset", media="keep")[0], 200)
+        self.assertEqual(stopped, [1])                                # the shader rotation is ended too
+        self.assertNotIn("shaders", self.settings.data)               # and its settings are the defaults again
+        self.assertEqual(self.api.shaders.config()["dwell"], 180)
         self.assertTrue(screen.auto_wanted())
         self.assertIn(("clear",), self.player.calls)
         self.assertFalse(self.api.mix["blackout"])
