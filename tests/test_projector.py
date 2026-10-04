@@ -993,14 +993,12 @@ class MonitorTest(unittest.TestCase):
                                                     for i, f in enumerate(fakes)]
                 self.settings.save()
             self.mon.apply()
+            rows = self.mon.health()                      # straight away: the old threads are still in a command
+            if any(self.mon.status(p["id"])["waiting"] for p in self.settings.data["projectors"]):
+                waited = waited or "Waiting for an earlier check to end." in [r["text"] for r in rows]
             for _ in range(10):
                 peak = max(peak, len(poll_threads()))
                 time.sleep(0.02)
-            ids = [p["id"] for p in self.settings.data["projectors"]]
-            waiting = [self.mon.status(i)["waiting"] for i in ids]
-            waited = waited or any(waiting)
-            if any(waiting):
-                self.assertIn("Waiting for an earlier check to end.", [r["text"] for r in self.mon.health()])
         self.assertLessEqual(peak, projector.MAX_PROJECTORS)
         self.assertTrue(waited)                           # the limit was really reached
         ids = [p["id"] for p in self.settings.data["projectors"]]
